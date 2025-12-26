@@ -93,8 +93,8 @@ async def find_similar_query(
                     1 - (query_embedding <=> CAST(:embedding AS vector)) as similarity
                 FROM rag_query_cache
                 WHERE org_id = :org_id
-                  AND (CAST(:folder_filter AS text) IS NULL OR folder_filter = :folder_filter)
-                  AND (CAST(:file_filter AS text) IS NULL OR file_filter = :file_filter)
+                  AND folder_filter IS NOT DISTINCT FROM :folder_filter
+                  AND file_filter IS NOT DISTINCT FROM :file_filter
                   AND 1 - (query_embedding <=> CAST(:embedding AS vector)) > :threshold
                 ORDER BY similarity DESC
                 LIMIT 1
