@@ -24,7 +24,10 @@ from langchain_core.messages import HumanMessage, AIMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 from .config import SheetsAgentConfig
+from .gcs_loader import validate_file_path as gcs_validate_file_path
 from src.utils.timer_utils import elapsed_ms
+from src.utils.gcs_utils import is_gcs_path
+from src.agents.core.audit_queue import enqueue_audit_event
 
 # Base agent and shared utilities
 from src.agents.core.base_agent import BaseAgent
@@ -35,9 +38,7 @@ _audit_executor: Optional[ThreadPoolExecutor] = None
 from .tools import (
     FilePreviewTool,
     CrossFileQueryTool,
-    SingleFileQueryTool,
     SmartAnalysisTool,
-    DataAnalysisTool
 )
 from .schemas import (
     ChatRequest,
@@ -112,30 +113,20 @@ class FileCache:
 # NOTE: SessionManager class has been moved to src/agents/core/session_manager.py
 
 
-SYSTEM_PROMPT = """You are an expert Excel and data analysis assistant. You help users analyze spreadsheet data through natural language queries.
+SYSTEM_PROMPT = """You are an expert Excel and data analysis assistant.
 
-Your capabilities include:
-1. Loading and previewing Excel (.xlsx, .xls) and CSV files from local filesystem
-2. Executing complex queries across multiple files using SQL via DuckDB
-3. Performing statistical analysis, correlation analysis, and data quality checks
-4. Identifying trends, patterns, and outliers in data
-5. Providing business insights and recommendations based on data
+CRITICAL RULES:
+1. For single file queries: Call smart_analysis ONCE, then answer directly from its output. Do NOT call any other tools.
+2. For multi-file queries (2+ files): Use cross_file_query for SQL-based analysis across files.
+3. ONE tool call is sufficient for most queries. Never call the same tool twice.
 
-Guidelines:
-- For single file analysis, ALWAYS use the smart_analysis tool first - it efficiently combines preview and analysis in one call
-- Use appropriate tools for different types of analysis
-- Provide clear, business-friendly explanations of findings
-- When working with multiple files, look for relationships and linkages
-- Focus on actionable insights and recommendations
-- Handle errors gracefully and suggest alternatives
+The smart_analysis tool provides complete file preview + query analysis in a single call.
+After receiving tool output, synthesize the findings and provide a clear, business-friendly answer.
 
-Tool Selection Priority:
-1. For single file queries: Use smart_analysis (most efficient)
-2. For multi-file queries: Use cross_file_query
-3. For detailed data analysis: Use data_analysis
-4. Only use file_preview + single_file_query if smart_analysis doesn't meet your needs
-
-Use the available tools to analyze data and provide comprehensive answers to user questions."""
+Do NOT:
+- Call multiple tools for the same file
+- Call file_preview separately (smart_analysis includes preview)
+- Make redundant queries on data you already have"""
 
 
 class SheetsAgent(BaseAgent):
@@ -200,17 +191,27 @@ class SheetsAgent(BaseAgent):
         return llm
 
     def _init_tools(self) -> List:
-        """Initialize agent tools."""
-        tools = [
+        """Initialize agent tools with focused tool sets for efficiency.
+
+        Single-file queries use only SmartAnalysisTool (prevents redundant tool calls).
+        Multi-file queries use CrossFileQueryTool + FilePreviewTool.
+        """
+        # Primary tool for single-file analysis (with caching)
+        self.single_file_tools = [
             SmartAnalysisTool(config=self.config, file_cache=self.file_cache),
-            FilePreviewTool(config=self.config),
-            SingleFileQueryTool(config=self.config),
-            CrossFileQueryTool(config=self.config),
-            DataAnalysisTool(config=self.config)
         ]
 
-        logger.info(f"Initialized {len(tools)} tools")
-        return tools
+        # Tools for multi-file analysis (with caching)
+        self.multi_file_tools = [
+            CrossFileQueryTool(config=self.config, file_cache=self.file_cache),
+            FilePreviewTool(config=self.config, file_cache=self.file_cache),
+        ]
+
+        # All tools (for health checks and reference)
+        all_tools = self.single_file_tools + self.multi_file_tools
+
+        logger.info(f"Initialized {len(all_tools)} tools (single-file: {len(self.single_file_tools)}, multi-file: {len(self.multi_file_tools)})")
+        return all_tools
 
     def _build_middleware(self) -> List:
         """Build LangChain middleware list from config."""
@@ -250,17 +251,22 @@ class SheetsAgent(BaseAgent):
             logger.warning(f"Failed to build middleware: {e}")
             return []
 
-    def _create_agent(self):
-        """Create the agent using LangChain 1.2.0 with built-in middleware and checkpointer."""
+    def _create_agent(self, tools: List = None):
+        """Create the agent using LangChain 1.2.0 with built-in middleware and checkpointer.
+
+        Args:
+            tools: Optional list of tools. If None, uses default single-file tools.
+        """
+        tools_to_use = tools if tools is not None else self.single_file_tools
         agent = create_agent(
             model=self.llm,
-            tools=self.tools,
+            tools=tools_to_use,
             system_prompt=SYSTEM_PROMPT,
             middleware=self.middleware_list if self.middleware_list else None,
             checkpointer=self.checkpointer  # Enable automatic conversation memory
         )
 
-        logger.info(f"Created agent with LangChain 1.2.0 ({len(self.middleware_list)} middleware, checkpointer=MemorySaver)")
+        logger.info(f"Created agent with {len(tools_to_use)} tools ({len(self.middleware_list)} middleware)")
         return agent
 
     # _init_audit_logging() is inherited from BaseAgent
@@ -331,10 +337,21 @@ class SheetsAgent(BaseAgent):
             # Prepare context for the agent
             context = self._prepare_context(request, validation_results, long_term_context)
 
+            # Dynamic tool selection based on file count
+            # Single file: Use only SmartAnalysisTool (prevents LLM from making redundant calls)
+            # Multiple files: Use CrossFileQueryTool + FilePreviewTool
+            if len(request.file_paths) == 1:
+                agent_to_use = self.agent  # Default single-file agent
+                logger.info(f"Using single-file agent (SmartAnalysisTool only)")
+            else:
+                # Create multi-file agent on demand
+                agent_to_use = self._create_agent(self.multi_file_tools)
+                logger.info(f"Using multi-file agent ({len(self.multi_file_tools)} tools)")
+
             # Execute agent with timeout enforcement
             try:
                 async with asyncio.timeout(self.config.timeout_seconds):
-                    agent_result = await self._execute_agent(context, request.query, chat_history, request)
+                    agent_result = await self._execute_agent(context, request.query, chat_history, request, agent_to_use)
             except asyncio.TimeoutError:
                 processing_time = elapsed_ms(start_time)
                 logger.error(f"Agent execution timed out after {self.config.timeout_seconds}s")
@@ -418,7 +435,7 @@ class SheetsAgent(BaseAgent):
             )
 
     def _validate_files(self, file_paths: List[str]) -> Dict[str, Any]:
-        """Validate that files exist and are accessible."""
+        """Validate that files exist and are accessible (supports both local and GCS paths)."""
         validation_results = {
             "valid_files": [],
             "invalid_files": [],
@@ -427,17 +444,23 @@ class SheetsAgent(BaseAgent):
 
         for file_path in file_paths:
             try:
-                if os.path.exists(file_path):
-                    file_size = os.path.getsize(file_path)
-                    validation_results["valid_files"].append({
-                        "path": file_path,
-                        "size_mb": file_size / (1024 * 1024)
-                    })
-                    validation_results["total_size_mb"] += file_size / (1024 * 1024)
+                # Use GCS-aware validation
+                is_valid, error = gcs_validate_file_path(file_path)
+
+                if is_valid:
+                    file_info = {"path": file_path}
+
+                    # Get file size for local files only (skip for GCS)
+                    if not is_gcs_path(file_path) and os.path.exists(file_path):
+                        file_size = os.path.getsize(file_path)
+                        file_info["size_mb"] = file_size / (1024 * 1024)
+                        validation_results["total_size_mb"] += file_size / (1024 * 1024)
+
+                    validation_results["valid_files"].append(file_info)
                 else:
                     validation_results["invalid_files"].append({
                         "path": file_path,
-                        "error": "File not found"
+                        "error": error or "Validation failed"
                     })
             except Exception as e:
                 validation_results["invalid_files"].append({
@@ -489,9 +512,16 @@ class SheetsAgent(BaseAgent):
         return "\n".join(context_parts)
 
     async def _execute_agent(
-        self, context: str, query: str, chat_history: List = None, request: Any = None
+        self, context: str, query: str, chat_history: List = None, request: Any = None, agent: Any = None
     ) -> Dict[str, Any]:
         """Execute the agent with the given context and query.
+
+        Args:
+            context: Prepared context string
+            query: User query
+            chat_history: Previous messages
+            request: Original request object
+            agent: Optional agent to use (for dynamic tool selection)
 
         Note: Retry logic is now handled by ModelRetryMiddleware (LangChain built-in).
         Token tracking is handled via thread-local usage context.
@@ -525,7 +555,7 @@ class SheetsAgent(BaseAgent):
             if ctx_manager:
                 ctx_manager.__enter__()
 
-            return await self._execute_agent_inner(context, query, chat_history)
+            return await self._execute_agent_inner(context, query, session_id or "default", chat_history, agent)
 
         finally:
             # Exit usage context
@@ -533,9 +563,13 @@ class SheetsAgent(BaseAgent):
                 ctx_manager.__exit__(None, None, None)
 
     async def _execute_agent_inner(
-        self, context: str, query: str, chat_history: List = None
+        self, context: str, query: str, session_id: str, chat_history: List = None, agent: Any = None
     ) -> Dict[str, Any]:
-        """Inner agent execution (called within usage context)."""
+        """Inner agent execution (called within usage context).
+
+        Args:
+            agent: Optional agent to use. If None, uses self.agent (default single-file agent).
+        """
         try:
             message = HumanMessage(content=f"{context}\n\nPlease analyze the data and answer: {query}")
 
@@ -543,9 +577,14 @@ class SheetsAgent(BaseAgent):
             messages = list(chat_history) if chat_history else []
             messages.append(message)
 
-            logger.debug("Executing LangGraph agent")
+            # Use provided agent or default
+            agent_to_use = agent if agent is not None else self.agent
+
+            logger.debug(f"Executing LangGraph agent with thread_id: {session_id}")
             result = await asyncio.to_thread(
-                self.agent.invoke, {"messages": messages}
+                agent_to_use.invoke,
+                {"messages": messages},
+                {"configurable": {"thread_id": session_id}}
             )
             logger.debug(f"Agent result type: {type(result)}")
 
@@ -608,21 +647,21 @@ class SheetsAgent(BaseAgent):
         return file_path.split('.')[-1].lower()
 
     def _log_audit_event(self, request: ChatRequest, result: Dict, processing_time: float):
-        """Log query to audit database."""
+        """Log query to audit database using async-safe audit queue."""
         try:
-            if self.audit_logger:
-                self.audit_logger(
-                    event_type="sheets_agent_query",
-                    details={
-                        "session_id": request.session_id,
-                        "query": request.query,
-                        "file_paths": request.file_paths,
-                        "processing_time_ms": processing_time,
-                        "success": True
-                    }
-                )
+            enqueue_audit_event(
+                event_type="sheets_agent_query",
+                details={
+                    "session_id": request.session_id,
+                    "query": request.query,
+                    "file_paths": request.file_paths,
+                    "processing_time_ms": processing_time,
+                    "success": True
+                },
+                organization_id=request.organization_id
+            )
         except Exception as e:
-            logger.warning(f"Failed to log audit event: {e}")
+            logger.warning(f"Failed to enqueue audit event: {e}")
 
     def get_health_status(self) -> Dict[str, Any]:
         """Get health status of the agent and its components."""

@@ -15,6 +15,7 @@ import logging
 from langchain_core.tools import BaseTool
 
 from src.utils.timer_utils import elapsed_ms
+from .gcs_loader import load_dataframe, validate_file_path, get_file_extension, get_excel_sheet_names
 
 if TYPE_CHECKING:
     from .config import SheetsAgentConfig
@@ -118,50 +119,63 @@ class FilePreviewTool(BaseTool):
 
     name: str = "load_file_preview"
     description: str = """Load and preview Excel/CSV file structure and metadata.
-    Input should be a local file path (e.g., '/path/to/file.xlsx').
+    Input should be a file path (local path or GCS URI like 'gs://bucket/path/file.xlsx').
     Returns file structure, column names, data types, and sample data."""
 
     _config: Any = None
+    _file_cache: Any = None
 
-    def __init__(self, config: "SheetsAgentConfig"):
+    def __init__(self, config: "SheetsAgentConfig", file_cache: Optional[Any] = None):
         super().__init__()
         self._config = config
+        self._file_cache = file_cache
 
     def _run(self, file_path: str) -> str:
         """Load and analyze file structure."""
         try:
             logger.info(f"Loading file preview for: {file_path}")
 
-            # Validate file exists
-            if not os.path.exists(file_path):
-                return f"Error: File not found: {file_path}"
+            # Validate file path (supports both local and GCS)
+            is_valid, error = validate_file_path(file_path)
+            if not is_valid:
+                return f"Error: {error}"
 
-            # Determine file type and load
-            file_ext = Path(file_path).suffix.lower()
+            # Determine file type
+            file_ext = get_file_extension(file_path)
 
-            if file_ext == '.csv':
-                df = pd.read_csv(file_path, nrows=100)
-                sheet_names = None
-            elif file_ext == '.tsv':
-                df = pd.read_csv(file_path, sep='\t', nrows=100)
-                sheet_names = None
-            elif file_ext in ['.xlsx', '.xls']:
-                excel_file = pd.ExcelFile(file_path)
-                sheet_names = excel_file.sheet_names
-                df = pd.read_excel(file_path, sheet_name=sheet_names[0], nrows=100)
+            # Get sheet names for Excel files
+            sheet_names = None
+            if file_ext in ['.xlsx', '.xls']:
+                try:
+                    sheet_names = get_excel_sheet_names(file_path)
+                except Exception as e:
+                    logger.warning(f"Could not get sheet names: {e}")
+
+            # Try cache first
+            df = None
+            if self._file_cache:
+                cached_df = self._file_cache.get(file_path)
+                if cached_df is not None:
+                    logger.info(f"Using cached data for preview: {file_path}")
+                    df = cached_df.head(100)  # Preview from cache
+
+            # Load if not cached
+            if df is None:
+                df, metadata = load_dataframe(file_path, nrows=100)
             else:
-                return f"Error: Unsupported file type: {file_ext}"
+                metadata = {"source": "cache"}
 
             # Generate file preview information
             preview_info = {
                 "file_path": file_path,
                 "file_type": file_ext,
+                "source": metadata.get("source", "unknown"),
                 "sheet_names": sheet_names,
                 "shape": {"rows": len(df), "columns": len(df.columns)},
                 "columns": [{"name": col, "type": str(df[col].dtype)} for col in df.columns],
                 "sample_data": df.head(5).to_dict('records'),
                 "null_counts": df.isnull().sum().to_dict(),
-                "memory_usage": int(df.memory_usage(deep=True).sum())
+                "memory_usage": metadata.get("memory_usage_bytes", int(df.memory_usage(deep=True).sum()))
             }
 
             return json.dumps(preview_info, indent=2, default=str)
@@ -180,16 +194,34 @@ class CrossFileQueryTool(BaseTool):
 
     name: str = "execute_cross_file_query"
     description: str = """Execute SQL queries across multiple Excel/CSV files using DuckDB.
-    Input should be a JSON object with 'file_paths' (list of local paths) and 'query' (SQL query).
+    Input should be a JSON object with 'file_paths' (list of local paths or GCS URIs) and 'query' (SQL query).
     Files are automatically loaded as tables named 'file_0', 'file_1', etc.
-    Use this ONLY for multiple files (2+). For single files, use query_single_file instead.
+    Use this for multi-file analysis (2+ files).
     Returns query results as JSON."""
 
     _config: Any = None
+    _file_cache: Any = None
 
-    def __init__(self, config: "SheetsAgentConfig"):
+    def __init__(self, config: "SheetsAgentConfig", file_cache: Optional[Any] = None):
         super().__init__()
         self._config = config
+        self._file_cache = file_cache
+
+    def _load_file_cached(self, file_path: str) -> tuple:
+        """Load file with cache support."""
+        if self._file_cache:
+            cached_df = self._file_cache.get(file_path)
+            if cached_df is not None:
+                logger.info(f"Using cached data for: {file_path}")
+                return cached_df, {"source": "cache"}
+
+        df, metadata = load_dataframe(file_path)
+
+        # Cache the loaded DataFrame
+        if self._file_cache:
+            self._file_cache.put(file_path, df)
+
+        return df, metadata
 
     def _run(self, input_json: str) -> str:
         """Execute cross-file query."""
@@ -224,28 +256,22 @@ class CrossFileQueryTool(BaseTool):
 
                 for i, file_path in enumerate(file_paths):
                     try:
-                        if not os.path.exists(file_path):
-                            logger.warning(f"File not found: {file_path}")
+                        # Validate file path (supports both local and GCS)
+                        is_valid, error = validate_file_path(file_path)
+                        if not is_valid:
+                            logger.warning(f"Invalid file path: {file_path} - {error}")
                             continue
 
-                        # Determine table name and load data
+                        # Determine table name and load data using cached loader
                         table_name = f"file_{i}"
-                        file_ext = Path(file_path).suffix.lower()
-
-                        if file_ext == '.csv':
-                            df = pd.read_csv(file_path)
-                        elif file_ext == '.tsv':
-                            df = pd.read_csv(file_path, sep='\t')
-                        elif file_ext in ['.xlsx', '.xls']:
-                            df = pd.read_excel(file_path)
-                        else:
-                            continue
+                        df, metadata = self._load_file_cached(file_path)
 
                         # Register DataFrame with DuckDB
                         conn.register(table_name, df)
                         table_names.append({
                             "table_name": table_name,
                             "file_path": file_path,
+                            "source": metadata.get("source", "unknown"),
                             "shape": list(df.shape),
                             "columns": list(df.columns)
                         })
@@ -300,22 +326,15 @@ class CrossFileQueryTool(BaseTool):
         try:
             logger.info(f"Processing single file with pandas: {file_path}")
 
-            if not os.path.exists(file_path):
-                return f"Error: File not found: {file_path}"
+            # Validate file path (supports both local and GCS)
+            is_valid, error = validate_file_path(file_path)
+            if not is_valid:
+                return f"Error: {error}"
 
-            # Load file into DataFrame
-            file_ext = Path(file_path).suffix.lower()
+            # Load file into DataFrame using cached loader
+            df, metadata = self._load_file_cached(file_path)
 
-            if file_ext == '.csv':
-                df = pd.read_csv(file_path)
-            elif file_ext == '.tsv':
-                df = pd.read_csv(file_path, sep='\t')
-            elif file_ext in ['.xlsx', '.xls']:
-                df = pd.read_excel(file_path)
-            else:
-                return f"Error: Unsupported file type: {file_ext}"
-
-            logger.info(f"Loaded single file with shape: {df.shape}")
+            logger.info(f"Loaded single file from {metadata.get('source', 'unknown')} with shape: {df.shape}")
 
             # Use connection pool for DuckDB
             conn = pool.get_connection()
@@ -334,6 +353,7 @@ class CrossFileQueryTool(BaseTool):
                 "tables_loaded": [{
                     "table_name": "file_0",
                     "file_path": file_path,
+                    "source": metadata.get("source", "unknown"),
                     "shape": list(df.shape),
                     "columns": list(df.columns)
                 }],
@@ -357,129 +377,12 @@ class CrossFileQueryTool(BaseTool):
         return await asyncio.to_thread(self._run, input_json)
 
 
-class SingleFileQueryTool(BaseTool):
-    """Tool for querying a single Excel/CSV file using pandas."""
-
-    name: str = "query_single_file"
-    description: str = """Query a single Excel/CSV file using natural language description.
-    Input should be a JSON object with 'file_path' (local path) and 'query_description' (what you want to find/calculate).
-    Use this for single file analysis - more efficient than cross-file queries.
-    Examples: calculate totals, find specific rows, aggregate by columns, etc."""
-
-    _config: Any = None
-
-    def __init__(self, config: "SheetsAgentConfig"):
-        super().__init__()
-        self._config = config
-
-    def _run(self, input_json: str) -> str:
-        """Execute single file query using pandas."""
-        try:
-            # Parse input
-            input_data = json.loads(input_json)
-            file_path = input_data.get('file_path', '')
-            query_description = input_data.get('query_description', '')
-
-            if not file_path or not query_description:
-                return "Error: Both 'file_path' and 'query_description' are required"
-
-            logger.info(f"Executing single file query on: {file_path}")
-
-            if not os.path.exists(file_path):
-                return f"Error: File not found: {file_path}"
-
-            # Load file into DataFrame
-            file_ext = Path(file_path).suffix.lower()
-
-            if file_ext == '.csv':
-                df = pd.read_csv(file_path)
-            elif file_ext == '.tsv':
-                df = pd.read_csv(file_path, sep='\t')
-            elif file_ext in ['.xlsx', '.xls']:
-                df = pd.read_excel(file_path)
-            else:
-                return f"Error: Unsupported file type: {file_ext}"
-
-            logger.info(f"Loaded file with shape: {df.shape}")
-
-            # Perform analysis based on query description
-            result = self._analyze_dataframe(df, query_description, file_path)
-
-            return json.dumps({
-                "success": True,
-                "file_path": file_path,
-                "query": query_description,
-                "shape": {"rows": len(df), "columns": len(df.columns)},
-                "columns": list(df.columns),
-                "result": result
-            }, indent=2, default=str)
-
-        except json.JSONDecodeError:
-            return "Error: Input must be valid JSON with 'file_path' and 'query_description' fields"
-        except Exception as e:
-            logger.error(f"Error executing single file query: {e}")
-            return f"Error executing query: {str(e)}"
-
-    def _analyze_dataframe(self, df: pd.DataFrame, query_description: str, file_path: str) -> dict:
-        """Analyze DataFrame based on query description."""
-        result = {
-            "analysis": f"Analysis of {file_path}",
-            "summary_stats": {},
-            "sample_data": [],
-            "insights": []
-        }
-
-        try:
-            # Basic summary statistics for numeric columns
-            numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
-            if numeric_cols:
-                result["summary_stats"] = df[numeric_cols].describe().to_dict()
-
-            # Sample data (first 5 rows)
-            result["sample_data"] = df.head(5).to_dict('records')
-
-            # Query-specific analysis
-            query_lower = query_description.lower()
-
-            if 'total' in query_lower or 'sum' in query_lower:
-                if numeric_cols:
-                    totals = df[numeric_cols].sum().to_dict()
-                    result["totals"] = totals
-                    result["insights"].append(f"Calculated totals for numeric columns: {list(totals.keys())}")
-
-            if 'revenue' in query_lower:
-                revenue_cols = [col for col in df.columns if 'revenue' in col.lower() or 'sales' in col.lower()]
-                if revenue_cols:
-                    revenue_data = df[revenue_cols].sum().to_dict()
-                    result["revenue_analysis"] = revenue_data
-                    result["insights"].append(f"Found revenue columns: {revenue_cols}")
-
-            if 'q1' in query_lower or 'quarter' in query_lower:
-                q1_cols = [col for col in df.columns if 'q1' in col.lower() or 'quarter' in col.lower()]
-                if q1_cols:
-                    q1_data = df[q1_cols].sum().to_dict()
-                    result["quarterly_analysis"] = q1_data
-                    result["insights"].append(f"Found Q1/quarterly columns: {q1_cols}")
-
-            if not result["insights"]:
-                result["insights"].append("Performed basic data analysis. Use more specific queries for detailed insights.")
-
-        except Exception as e:
-            result["error"] = f"Analysis error: {str(e)}"
-
-        return result
-
-    async def _arun(self, input_json: str) -> str:
-        """Async version of _run using thread pool for blocking I/O."""
-        return await asyncio.to_thread(self._run, input_json)
-
-
 class SmartAnalysisTool(BaseTool):
     """Smart tool that combines file preview and analysis in one efficient call."""
 
     name: str = "smart_analysis"
     description: str = """Analyze Excel/CSV files efficiently with preview and query in one call.
-    Input should be a JSON object with 'file_path' (local path) and 'query' (what you want to find).
+    Input should be a JSON object with 'file_path' (local path or GCS URI) and 'query' (what you want to find).
     This tool loads the file once and provides both preview and analysis results.
     Use this as the primary tool for single file analysis - much faster than separate preview + query calls."""
 
@@ -492,7 +395,7 @@ class SmartAnalysisTool(BaseTool):
         self._file_cache = file_cache
 
     def _load_file(self, file_path: str) -> pd.DataFrame:
-        """Load file using cache if available."""
+        """Load file using cache if available. Supports both local and GCS paths."""
         # Try cache first
         if self._file_cache:
             cached_df = self._file_cache.get(file_path)
@@ -500,25 +403,19 @@ class SmartAnalysisTool(BaseTool):
                 logger.info(f"Using cached data for {file_path}")
                 return cached_df
 
-        if not os.path.exists(file_path):
-            raise FileNotFoundError(f"File not found: {file_path}")
+        # Validate file path (supports both local and GCS)
+        is_valid, error = validate_file_path(file_path)
+        if not is_valid:
+            raise ValueError(error)
 
-        file_ext = Path(file_path).suffix.lower()
-
-        if file_ext == '.csv':
-            df = pd.read_csv(file_path)
-        elif file_ext == '.tsv':
-            df = pd.read_csv(file_path, sep='\t')
-        elif file_ext in ['.xlsx', '.xls']:
-            df = pd.read_excel(file_path)
-        else:
-            raise ValueError(f"Unsupported file type: {file_ext}")
+        # Load file using GCS-aware loader
+        df, metadata = load_dataframe(file_path)
 
         # Cache the loaded DataFrame
         if self._file_cache:
             self._file_cache.put(file_path, df)
 
-        logger.info(f"Loaded and cached {file_path} with shape: {df.shape}")
+        logger.info(f"Loaded and cached {file_path} from {metadata.get('source', 'unknown')} with shape: {df.shape}")
         return df
 
     def _run(self, input_json: str) -> str:
@@ -660,206 +557,6 @@ class SmartAnalysisTool(BaseTool):
             result["insights"].append("Encountered error during analysis")
 
         return result
-
-    async def _arun(self, input_json: str) -> str:
-        """Async version of _run using thread pool for blocking I/O."""
-        return await asyncio.to_thread(self._run, input_json)
-
-
-class DataAnalysisTool(BaseTool):
-    """Tool for performing statistical analysis and data insights."""
-
-    name: str = "analyze_data_patterns"
-    description: str = """Analyze data patterns and generate insights from loaded files.
-    Input should be a JSON object with 'file_paths' and 'analysis_type'
-    (options: 'summary', 'correlation', 'trends', 'outliers', 'quality').
-    Returns analytical insights as JSON."""
-
-    _config: Any = None
-
-    def __init__(self, config: "SheetsAgentConfig"):
-        super().__init__()
-        self._config = config
-
-    def _run(self, input_json: str) -> str:
-        """Perform data analysis."""
-        try:
-            # Parse input
-            input_data = json.loads(input_json)
-            file_paths = input_data.get('file_paths', [])
-            analysis_type = input_data.get('analysis_type', 'summary')
-
-            if not file_paths:
-                return "Error: 'file_paths' is required"
-
-            logger.info(f"Performing {analysis_type} analysis on {len(file_paths)} files")
-
-            results = []
-
-            for file_path in file_paths:
-                if not os.path.exists(file_path):
-                    results.append({"file_path": file_path, "error": "File not found"})
-                    continue
-
-                file_ext = Path(file_path).suffix.lower()
-
-                try:
-                    if file_ext == '.csv':
-                        df = pd.read_csv(file_path)
-                    elif file_ext == '.tsv':
-                        df = pd.read_csv(file_path, sep='\t')
-                    elif file_ext in ['.xlsx', '.xls']:
-                        df = pd.read_excel(file_path)
-                    else:
-                        results.append({"file_path": file_path, "error": f"Unsupported file type: {file_ext}"})
-                        continue
-
-                    # Perform analysis based on type
-                    if analysis_type == 'summary':
-                        analysis_result = self._generate_summary(df, file_path)
-                    elif analysis_type == 'correlation':
-                        analysis_result = self._generate_correlation(df, file_path)
-                    elif analysis_type == 'trends':
-                        analysis_result = self._generate_trends(df, file_path)
-                    elif analysis_type == 'outliers':
-                        analysis_result = self._generate_outliers(df, file_path)
-                    elif analysis_type == 'quality':
-                        analysis_result = self._generate_quality_report(df, file_path)
-                    else:
-                        analysis_result = {"error": f"Unknown analysis type: {analysis_type}"}
-
-                    results.append(analysis_result)
-
-                except Exception as e:
-                    results.append({"file_path": file_path, "error": str(e)})
-
-            return json.dumps({
-                "analysis_type": analysis_type,
-                "files_analyzed": len(results),
-                "results": results
-            }, indent=2, default=str)
-
-        except json.JSONDecodeError:
-            return "Error: Input must be valid JSON"
-        except Exception as e:
-            logger.error(f"Error in data analysis: {e}")
-            return f"Error performing analysis: {str(e)}"
-
-    def _generate_summary(self, df: pd.DataFrame, file_path: str) -> Dict:
-        """Generate summary statistics."""
-        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
-
-        return {
-            "file_path": file_path,
-            "shape": list(df.shape),
-            "columns": list(df.columns),
-            "numeric_columns": numeric_cols,
-            "summary_stats": df.describe().to_dict() if numeric_cols else {},
-            "null_counts": df.isnull().sum().to_dict(),
-            "data_types": {col: str(dtype) for col, dtype in df.dtypes.items()}
-        }
-
-    def _generate_correlation(self, df: pd.DataFrame, file_path: str) -> Dict:
-        """Generate correlation analysis."""
-        numeric_df = df.select_dtypes(include=['number'])
-
-        if numeric_df.empty:
-            return {
-                "file_path": file_path,
-                "error": "No numeric columns found for correlation analysis"
-            }
-
-        correlation_matrix = numeric_df.corr()
-
-        return {
-            "file_path": file_path,
-            "correlation_matrix": correlation_matrix.to_dict(),
-            "high_correlations": self._find_high_correlations(correlation_matrix)
-        }
-
-    def _generate_trends(self, df: pd.DataFrame, file_path: str) -> Dict:
-        """Generate trend analysis."""
-        date_cols = df.select_dtypes(include=['datetime64']).columns.tolist()
-        numeric_cols = df.select_dtypes(include=['number']).columns.tolist()
-
-        return {
-            "file_path": file_path,
-            "date_columns": date_cols,
-            "numeric_columns": numeric_cols,
-            "trends": "Trend analysis requires time-series data with date columns" if not date_cols else "Date columns detected"
-        }
-
-    def _generate_outliers(self, df: pd.DataFrame, file_path: str) -> Dict:
-        """Generate outlier analysis."""
-        numeric_df = df.select_dtypes(include=['number'])
-
-        if numeric_df.empty:
-            return {
-                "file_path": file_path,
-                "error": "No numeric columns found for outlier analysis"
-            }
-
-        outliers = {}
-        for col in numeric_df.columns:
-            Q1 = numeric_df[col].quantile(0.25)
-            Q3 = numeric_df[col].quantile(0.75)
-            IQR = Q3 - Q1
-            lower_bound = Q1 - 1.5 * IQR
-            upper_bound = Q3 + 1.5 * IQR
-
-            outlier_count = ((numeric_df[col] < lower_bound) | (numeric_df[col] > upper_bound)).sum()
-            outliers[col] = {
-                "count": int(outlier_count),
-                "percentage": float(outlier_count / len(numeric_df) * 100),
-                "bounds": {"lower": float(lower_bound), "upper": float(upper_bound)}
-            }
-
-        return {
-            "file_path": file_path,
-            "outliers_by_column": outliers
-        }
-
-    def _generate_quality_report(self, df: pd.DataFrame, file_path: str) -> Dict:
-        """Generate data quality report."""
-        total_rows = len(df)
-
-        quality_metrics = {
-            "file_path": file_path,
-            "total_rows": total_rows,
-            "total_columns": len(df.columns),
-            "completeness": {},
-            "duplicates": {
-                "duplicate_rows": int(df.duplicated().sum()),
-                "duplicate_percentage": float(df.duplicated().sum() / total_rows * 100) if total_rows > 0 else 0
-            },
-            "data_types": {col: str(dtype) for col, dtype in df.dtypes.items()}
-        }
-
-        # Calculate completeness for each column
-        for col in df.columns:
-            null_count = df[col].isnull().sum()
-            quality_metrics["completeness"][col] = {
-                "null_count": int(null_count),
-                "completeness_percentage": float((total_rows - null_count) / total_rows * 100) if total_rows > 0 else 0
-            }
-
-        return quality_metrics
-
-    def _find_high_correlations(self, corr_matrix: pd.DataFrame, threshold: float = 0.7) -> List[Dict]:
-        """Find highly correlated pairs."""
-        high_corr = []
-
-        for i in range(len(corr_matrix.columns)):
-            for j in range(i + 1, len(corr_matrix.columns)):
-                correlation = corr_matrix.iloc[i, j]
-                if abs(correlation) >= threshold:
-                    high_corr.append({
-                        "column_1": corr_matrix.columns[i],
-                        "column_2": corr_matrix.columns[j],
-                        "correlation": float(correlation)
-                    })
-
-        return high_corr
 
     async def _arun(self, input_json: str) -> str:
         """Async version of _run using thread pool for blocking I/O."""

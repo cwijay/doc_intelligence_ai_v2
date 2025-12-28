@@ -6,16 +6,19 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import uuid
 
+from src.utils.gcs_utils import is_gcs_path
+
 
 class ChatRequest(BaseModel):
     """Request schema for sheets chat endpoint.
 
     Multi-tenancy: organization_id is used for tenant isolation.
+    Supports both local file paths and GCS URIs (gs://bucket/path).
     """
 
     file_paths: List[str] = Field(
         ...,
-        description="List of local file paths to analyze",
+        description="List of file paths to analyze (local paths or GCS URIs like 'gs://bucket/path/file.xlsx')",
         min_length=1,
         max_length=10
     )
@@ -50,17 +53,28 @@ class ChatRequest(BaseModel):
     @field_validator('file_paths')
     @classmethod
     def validate_paths(cls, paths: List[str]) -> List[str]:
-        """Validate file paths to prevent path traversal attacks."""
+        """Validate file paths - supports both local paths and GCS URIs."""
         allowed_base = os.environ.get('ALLOWED_FILE_BASE', '/Users')
+
         for path in paths:
-            # Resolve to absolute path
-            real_path = os.path.realpath(path)
-            # Check path stays within allowed directory
-            if not real_path.startswith(allowed_base):
-                raise ValueError(f"Path outside allowed directory: {path}")
-            # Check for path traversal attempts
-            if '..' in path:
-                raise ValueError(f"Path traversal detected: {path}")
+            if is_gcs_path(path):
+                # GCS path validation - check format
+                if len(path) < 10:  # Minimum: gs://a/b
+                    raise ValueError(f"Invalid GCS path format: {path}")
+                # Extract bucket and blob to validate
+                path_without_prefix = path[5:]  # Remove 'gs://'
+                parts = path_without_prefix.split('/', 1)
+                if not parts[0]:  # No bucket name
+                    raise ValueError(f"Invalid GCS path - missing bucket: {path}")
+                if len(parts) < 2 or not parts[1]:  # No blob path
+                    raise ValueError(f"Invalid GCS path - missing file path: {path}")
+            else:
+                # Local path validation - prevent path traversal
+                real_path = os.path.realpath(path)
+                if not real_path.startswith(allowed_base):
+                    raise ValueError(f"Path outside allowed directory: {path}")
+                if '..' in path:
+                    raise ValueError(f"Path traversal detected: {path}")
         return paths
 
     @field_validator('query')
