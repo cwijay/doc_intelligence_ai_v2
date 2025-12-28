@@ -207,7 +207,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Agent shutdown error: {e}")
 
-    # 2. Shutdown usage queue (wait for pending events to be written)
+    # 2. Shutdown executor pools (wait for pending tasks)
+    try:
+        from src.core.executors import shutdown_executors
+        shutdown_executors(wait=True)
+        logger.info("Executor pools shutdown complete")
+    except Exception as e:
+        logger.warning(f"Executor pool shutdown error: {e}")
+
+    # 3. Shutdown usage queue (wait for pending events to be written)
     try:
         from src.core.usage import get_usage_queue
         get_usage_queue().shutdown(wait=True, timeout=10.0)
@@ -215,7 +223,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Usage queue shutdown error: {e}")
 
-    # 3. Shutdown audit queue (wait for pending events to be written)
+    # 4. Shutdown audit queue (wait for pending events to be written)
     try:
         from src.agents.core.audit_queue import get_audit_queue
         get_audit_queue().shutdown(wait=True, timeout=10.0)
@@ -223,7 +231,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Audit queue shutdown error: {e}")
 
-    # 4. Close database connections after queues are done
+    # 5. Close database connections after queues are done
     try:
         from src.db.connection import db
         await db.close_all()

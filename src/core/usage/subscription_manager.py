@@ -5,13 +5,19 @@ Single responsibility: Managing organization subscriptions and tiers.
 """
 
 import logging
+import time
 import uuid
 from datetime import datetime, timedelta
-from typing import Optional, Dict
+from typing import Optional, Dict, Tuple, Any
 
 from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
+
+# Tier cache: maps tier_id -> (tier_data, cached_at_timestamp)
+# Tiers rarely change, so 1-hour TTL is appropriate
+_tier_cache: Dict[str, Tuple[Dict[str, Any], float]] = {}
+TIER_CACHE_TTL_SECONDS = 3600  # 1 hour
 
 
 class SubscriptionManager:
@@ -289,12 +295,21 @@ class SubscriptionManager:
         """
         Get tier configuration by ID or name.
 
+        Uses TTL-based cache since tiers rarely change.
+
         Args:
             tier_id: Tier UUID or name
 
         Returns:
             Tier data dict or None
         """
+        # Check cache first
+        if tier_id in _tier_cache:
+            cached_data, cached_at = _tier_cache[tier_id]
+            if time.time() - cached_at < TIER_CACHE_TTL_SECONDS:
+                logger.debug(f"Tier cache hit for {tier_id}")
+                return cached_data
+
         try:
             from src.db.connection import db
 
@@ -316,7 +331,7 @@ class SubscriptionManager:
                 if not row:
                     return None
 
-                return {
+                tier_data = {
                     "id": str(row.id),
                     "tier": row.tier,
                     "display_name": row.display_name,
@@ -329,6 +344,12 @@ class SubscriptionManager:
                     "features": row.features or {},
                     "is_active": row.is_active,
                 }
+
+                # Cache the result
+                _tier_cache[tier_id] = (tier_data, time.time())
+                logger.debug(f"Cached tier {tier_id}")
+
+                return tier_data
 
         except Exception as e:
             logger.error(f"Failed to get tier {tier_id}: {e}")

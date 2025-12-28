@@ -1,11 +1,14 @@
 """Core Document Agent implementation using LangChain 1.2.0."""
 
 import asyncio
+import functools
 import time
 import uuid
 import hashlib
 import logging
 from typing import Dict, List, Any, Optional
+
+from src.core.executors import get_executors
 
 from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
@@ -590,10 +593,14 @@ class DocumentAgent(BaseAgent):
                 # Add current message
                 messages_to_send.append(message)
 
-                result = await asyncio.to_thread(
-                    self.agent.invoke,
-                    {"messages": messages_to_send},
-                    config
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(
+                    get_executors().agent_executor,
+                    functools.partial(
+                        self.agent.invoke,
+                        {"messages": messages_to_send},
+                        config
+                    )
                 )
             # Create dynamic agent with filtered tools if tool selection is enabled
             elif self.config.enable_tool_selection and relevant_tools != self.tools:
@@ -606,18 +613,26 @@ class DocumentAgent(BaseAgent):
                     checkpointer=self.checkpointer  # Use same checkpointer for filtered agents
                 )
                 logger.debug(f"Executing agent with {len(relevant_tools)} filtered tools")
-                result = await asyncio.to_thread(
-                    dynamic_agent.invoke,
-                    {"messages": [message]},  # Only current message - checkpointer handles history
-                    config
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(
+                    get_executors().agent_executor,
+                    functools.partial(
+                        dynamic_agent.invoke,
+                        {"messages": [message]},  # Only current message - checkpointer handles history
+                        config
+                    )
                 )
             else:
                 # Use default agent with all tools
                 logger.debug("Executing agent with all tools")
-                result = await asyncio.to_thread(
-                    self.agent.invoke,
-                    {"messages": [message]},  # Only current message - checkpointer handles history
-                    config
+                loop = asyncio.get_running_loop()
+                result = await loop.run_in_executor(
+                    get_executors().agent_executor,
+                    functools.partial(
+                        self.agent.invoke,
+                        {"messages": [message]},  # Only current message - checkpointer handles history
+                        config
+                    )
                 )
 
             # LangGraph agent returns dict with 'messages' key

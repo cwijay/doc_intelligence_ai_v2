@@ -20,13 +20,20 @@ import time
 import glob
 import datetime
 import logging
-from concurrent.futures import as_completed
+from concurrent.futures import as_completed, ThreadPoolExecutor
+from typing import Dict, Tuple, Any, Optional, List
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from src.utils.gcs_utils import is_gcs_path, parse_gcs_uri
+
+# Store cache: maps display_name -> (store_object, cached_at_timestamp)
+# Stores rarely change, so 5-minute TTL is appropriate
+_store_cache: Dict[str, Tuple[Any, float]] = {}
+_store_list_cache: Tuple[Optional[List[Any]], float] = (None, 0.0)
+STORE_CACHE_TTL_SECONDS = 300  # 5 minutes
 
 # Get logger (config should be set by entry point)
 logger = logging.getLogger(__name__)
@@ -114,10 +121,17 @@ def create_file_search_store(display_name: str):
     Returns:
         FileSearchStore object
     """
+    global _store_cache, _store_list_cache
+
     file_search_store = client.file_search_stores.create(
         config={"display_name": display_name}
     )
     logger.info(f"Created store: {file_search_store.name}")
+
+    # Update cache with new store
+    _store_cache[display_name] = (file_search_store, time.time())
+    # Invalidate list cache
+    _store_list_cache = (None, 0.0)
 
     _log_event(
         "store_created",
@@ -134,15 +148,33 @@ def find_store_by_name(display_name: str):
     """
     Find a store by display name.
 
+    Uses TTL-based cache to avoid repeated API calls.
+
     Args:
         display_name: Display name to search for
 
     Returns:
         FileSearchStore object or None if not found
     """
+    global _store_cache
+
+    # Check cache first
+    if display_name in _store_cache:
+        cached_store, cached_at = _store_cache[display_name]
+        if time.time() - cached_at < STORE_CACHE_TTL_SECONDS:
+            logger.debug(f"Store cache hit for {display_name}")
+            return cached_store
+
+    # Fetch from API and update cache
     for store in client.file_search_stores.list():
+        # Cache all stores we see
+        _store_cache[store.display_name] = (store, time.time())
         if store.display_name == display_name:
+            logger.debug(f"Found and cached store {display_name}")
             return store
+
+    # Store not found - cache the miss with None
+    _store_cache[display_name] = (None, time.time())
     return None
 
 
@@ -605,8 +637,14 @@ def delete_store(store_name: str):
     Args:
         store_name: Full name of the store (e.g., 'fileSearchStores/xxx')
     """
+    global _store_cache, _store_list_cache
+
     client.file_search_stores.delete(name=store_name, config={"force": True})
     logger.info(f"Deleted store: {store_name}")
+
+    # Invalidate caches - clear all since we don't know the display name
+    _store_cache.clear()
+    _store_list_cache = (None, 0.0)
 
     _log_event(
         "store_deleted",
@@ -618,18 +656,34 @@ def list_all_stores():
     """
     List all file search stores.
 
+    Uses TTL-based cache to avoid repeated API calls.
+
     Returns:
         List of store objects
     """
+    global _store_cache, _store_list_cache
+
+    # Check list cache first
+    cached_stores, cached_at = _store_list_cache
+    if cached_stores is not None and time.time() - cached_at < STORE_CACHE_TTL_SECONDS:
+        logger.debug("Store list cache hit")
+        return cached_stores
+
     stores = []
     logger.info("All File Search Stores:")
     logger.info("-" * 50)
 
     for store in client.file_search_stores.list():
         stores.append(store)
+        # Update individual store cache
+        _store_cache[store.display_name] = (store, time.time())
         logger.info(f"  Name: {store.name}")
         logger.info(f"  Display Name: {store.display_name}")
         logger.info(f"  Active Documents: {store.active_documents_count}")
         logger.info("-" * 50)
+
+    # Cache the list
+    _store_list_cache = (stores, time.time())
+    logger.debug(f"Cached {len(stores)} stores")
 
     return stores

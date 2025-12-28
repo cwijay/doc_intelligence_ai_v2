@@ -1,6 +1,7 @@
 """Core Sheets Agent implementation using LangChain 1.2.0."""
 
 import asyncio
+import functools
 import time
 import uuid
 import hashlib
@@ -11,6 +12,8 @@ from typing import Dict, List, Any, Optional
 import pandas as pd
 
 from concurrent.futures import ThreadPoolExecutor
+
+from src.core.executors import get_executors
 
 from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
@@ -146,7 +149,7 @@ class SheetsAgent(BaseAgent):
             config: Agent configuration
         """
         # File cache is sheets-specific (not in BaseAgent)
-        self.file_cache = FileCache(max_size=50)
+        self.file_cache = FileCache(max_size=config.file_cache_size)
 
         # Initialize base agent (session manager, rate limiter, memory, audit)
         super().__init__(config)
@@ -477,13 +480,19 @@ class SheetsAgent(BaseAgent):
         query_lower = request.query.lower()
         analysis_hints = []
 
-        if any(term in query_lower for term in ['revenue', 'sales', 'profit', 'total', 'sum', 'amount']):
-            analysis_hints.append("This appears to be a revenue/financial analysis query")
+        # Use configurable terms for financial analysis detection
+        financial_terms = self.config.financial_terms
+        if any(term in query_lower for term in financial_terms):
+            analysis_hints.append("This appears to be a financial analysis query")
 
-        if any(term in query_lower for term in ['q1', 'q2', 'q3', 'q4', 'quarter', 'fy25', 'fy24', 'fiscal']):
+        # Use configurable terms for temporal analysis detection
+        fy = self.config.current_fiscal_year
+        temporal_patterns = list(self.config.quarterly_terms) + [f'fy{fy}', f'fy{int(fy)-1}', 'fiscal']
+        if any(term in query_lower for term in temporal_patterns):
             analysis_hints.append("This involves quarterly or fiscal year analysis")
 
-        if any(term in query_lower for term in ['trend', 'over time', 'monthly', 'yearly', 'growth']):
+        # Use configurable terms for trend analysis detection
+        if any(term in query_lower for term in self.config.temporal_terms):
             analysis_hints.append("This requires trend analysis over time periods")
 
         context_parts = [
@@ -581,10 +590,14 @@ class SheetsAgent(BaseAgent):
             agent_to_use = agent if agent is not None else self.agent
 
             logger.debug(f"Executing LangGraph agent with thread_id: {session_id}")
-            result = await asyncio.to_thread(
-                agent_to_use.invoke,
-                {"messages": messages},
-                {"configurable": {"thread_id": session_id}}
+            loop = asyncio.get_running_loop()
+            result = await loop.run_in_executor(
+                get_executors().agent_executor,
+                functools.partial(
+                    agent_to_use.invoke,
+                    {"messages": messages},
+                    {"configurable": {"thread_id": session_id}}
+                )
             )
             logger.debug(f"Agent result type: {type(result)}")
 

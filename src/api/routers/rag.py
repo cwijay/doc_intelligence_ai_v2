@@ -6,6 +6,7 @@ Documents are organized into folders with metadata filtering.
 PostgreSQL persistence via rag_repository.
 """
 
+import asyncio
 import logging
 import os
 from datetime import datetime
@@ -13,6 +14,8 @@ from pathlib import Path as PathLib
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Query
+
+from src.core.executors import get_executors
 
 from ..dependencies import get_org_id
 from ..schemas.errors import STORE_ERROR_RESPONSES, FOLDER_ERROR_RESPONSES
@@ -310,15 +313,17 @@ async def upload_to_store(
         from src.rag.gemini_file_store import upload_file
         from google import genai
 
-        # Get the Gemini store object
+        # Get the Gemini store object (use executor to avoid blocking event loop)
         gemini_store_id = store_info.get("gemini_store_id")
         gemini_store = None
         if gemini_store_id:
             client = genai.Client()
-            for store in client.file_search_stores.list():
-                if store.name == gemini_store_id:
-                    gemini_store = store
-                    break
+            loop = asyncio.get_running_loop()
+            stores = await loop.run_in_executor(
+                get_executors().io_executor,
+                lambda: list(client.file_search_stores.list())
+            )
+            gemini_store = next((s for s in stores if s.name == gemini_store_id), None)
 
         uploaded_files = []
         errors = []
@@ -456,15 +461,17 @@ async def list_store_files(
         from src.rag.gemini_file_store import list_documents
         from google import genai
 
-        # Get the Gemini store object
+        # Get the Gemini store object (use executor to avoid blocking event loop)
         gemini_store_id = store_info.get("gemini_store_id")
         gemini_store = None
         if gemini_store_id:
             client = genai.Client()
-            for store in client.file_search_stores.list():
-                if store.name == gemini_store_id:
-                    gemini_store = store
-                    break
+            loop = asyncio.get_running_loop()
+            stores = await loop.run_in_executor(
+                get_executors().io_executor,
+                lambda: list(client.file_search_stores.list())
+            )
+            gemini_store = next((s for s in stores if s.name == gemini_store_id), None)
 
         files = []
         if gemini_store:

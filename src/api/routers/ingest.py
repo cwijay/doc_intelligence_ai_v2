@@ -16,6 +16,7 @@ from typing import List
 
 from fastapi import APIRouter, Depends, File, HTTPException, UploadFile, Query
 
+from src.core.executors import get_executors
 from ..dependencies import get_upload_directory, get_parsed_directory, get_max_upload_size, get_org_id
 from ..schemas.errors import FILE_ERROR_RESPONSES
 from src.utils.timer_utils import elapsed_ms
@@ -507,38 +508,56 @@ async def list_files(
             if not os.path.exists(org_upload_dir):
                 os.makedirs(org_upload_dir, exist_ok=True)
 
-            for item in Path(org_upload_dir).iterdir():
-                if item.is_file():
-                    if extension and not item.suffix.lower() == extension.lower():
-                        continue
+            # Move filesystem operations to executor to avoid blocking event loop
+            loop = asyncio.get_running_loop()
 
-                    stat = item.stat()
-                    file_path = str(item)
+            def _get_file_items():
+                """Get file items with stats in executor thread."""
+                items = []
+                for item in Path(org_upload_dir).iterdir():
+                    if item.is_file():
+                        if extension and not item.suffix.lower() == extension.lower():
+                            continue
+                        items.append((item, item.stat()))
+                return items
 
-                    # Look up status from database
-                    status = "uploaded"
-                    parsed_path = None
-                    parsed_at = None
-                    try:
-                        doc_info = await get_document_by_path(file_path, org_id)
-                        if doc_info:
-                            status = doc_info.get("status", "uploaded")
-                            parsed_path = doc_info.get("parsed_path")
-                            parsed_at = doc_info.get("parsed_at")
-                    except Exception as e:
-                        logger.debug(f"Could not get document status for {file_path}: {e}")
+            file_items = await loop.run_in_executor(
+                get_executors().io_executor,
+                _get_file_items
+            )
 
-                    files.append(FileInfo(
-                        name=item.name,
-                        path=file_path,
-                        size_bytes=stat.st_size,
-                        extension=item.suffix,
-                        modified_at=datetime.fromtimestamp(stat.st_mtime),
-                        is_parsed=(status == "parsed"),
-                        status=status,
-                        parsed_path=parsed_path,
-                        parsed_at=parsed_at,
-                    ))
+            # Parallelize DB lookups with asyncio.gather()
+            async def _get_doc_status(file_path: str):
+                """Get document status from database."""
+                try:
+                    doc_info = await get_document_by_path(file_path, org_id)
+                    if doc_info:
+                        return {
+                            "status": doc_info.get("status", "uploaded"),
+                            "parsed_path": doc_info.get("parsed_path"),
+                            "parsed_at": doc_info.get("parsed_at"),
+                        }
+                except Exception as e:
+                    logger.debug(f"Could not get document status for {file_path}: {e}")
+                return {"status": "uploaded", "parsed_path": None, "parsed_at": None}
+
+            # Run all DB lookups concurrently
+            file_paths = [str(item) for item, _ in file_items]
+            doc_statuses = await asyncio.gather(*[_get_doc_status(fp) for fp in file_paths])
+
+            # Build file info list
+            for (item, stat), doc_status in zip(file_items, doc_statuses):
+                files.append(FileInfo(
+                    name=item.name,
+                    path=str(item),
+                    size_bytes=stat.st_size,
+                    extension=item.suffix,
+                    modified_at=datetime.fromtimestamp(stat.st_mtime),
+                    is_parsed=(doc_status["status"] == "parsed"),
+                    status=doc_status["status"],
+                    parsed_path=doc_status["parsed_path"],
+                    parsed_at=doc_status["parsed_at"],
+                ))
 
             # Sort by modified time (newest first)
             files.sort(key=lambda x: x.modified_at, reverse=True)
@@ -625,15 +644,17 @@ async def save_and_index(
         from google import genai
         from datetime import datetime as dt
 
-        # Get the Gemini store object
+        # Get the Gemini store object (use executor to avoid blocking event loop)
         gemini_store_id = store_info.get("gemini_store_id")
         gemini_store = None
         if gemini_store_id:
             client = genai.Client()
-            for store in client.file_search_stores.list():
-                if store.name == gemini_store_id:
-                    gemini_store = store
-                    break
+            loop = asyncio.get_running_loop()
+            stores = await loop.run_in_executor(
+                get_executors().io_executor,
+                lambda: list(client.file_search_stores.list())
+            )
+            gemini_store = next((s for s in stores if s.name == gemini_store_id), None)
 
         if gemini_store:
             # saved_path already contains full GCS URI from storage.save()

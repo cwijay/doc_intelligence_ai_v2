@@ -110,6 +110,58 @@ class SheetsAgentConfig(BaseAgentConfig):
         description="Maximum tool calls per run"
     )
 
+    # Analysis Keywords (configurable to work with any dataset)
+    financial_terms: List[str] = Field(
+        default=['revenue', 'sales', 'income', 'profit', 'earnings', 'cost', 'expense', 'total', 'sum', 'amount'],
+        description="Terms to identify financial/numeric columns"
+    )
+
+    quarterly_terms: List[str] = Field(
+        default=['q1', 'q2', 'q3', 'q4', 'quarter'],
+        description="Terms to identify quarterly columns"
+    )
+
+    temporal_terms: List[str] = Field(
+        default=['trend', 'over time', 'monthly', 'yearly', 'growth', 'historical'],
+        description="Terms indicating trend analysis"
+    )
+
+    display_keywords: List[str] = Field(
+        default=['list', 'show', 'display', 'all items', 'all rows', 'view', 'get', 'line items'],
+        description="Keywords for data display queries"
+    )
+
+    current_fiscal_year: str = Field(
+        default_factory=lambda: os.getenv("CURRENT_FISCAL_YEAR", "25"),
+        description="Current fiscal year (e.g., '25' for FY25)"
+    )
+
+    currency_symbol: str = Field(
+        default_factory=lambda: os.getenv("CURRENCY_SYMBOL", "$"),
+        description="Currency symbol for formatting"
+    )
+
+    # Preview/Sample sizes (centralized)
+    preview_rows: int = Field(
+        default=5,
+        description="Rows to show in file previews"
+    )
+
+    sample_rows: int = Field(
+        default=3,
+        description="Rows to show in analysis samples"
+    )
+
+    max_display_rows: int = Field(
+        default=100,
+        description="Max rows for full data display"
+    )
+
+    file_cache_size: int = Field(
+        default=50,
+        description="Number of files to cache in memory"
+    )
+
     class Config:
         env_prefix = "SHEETS_AGENT_"
         case_sensitive = False

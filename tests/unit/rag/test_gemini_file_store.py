@@ -11,6 +11,11 @@ def mock_gemini_client_global():
     Mock the Gemini client globally to prevent real API calls.
     This ensures tests don't create real Gemini stores.
     """
+    # Clear module-level caches before each test
+    import src.rag.gemini_file_store as gemini_module
+    gemini_module._store_cache.clear()
+    gemini_module._store_list_cache = (None, 0.0)
+
     with patch("src.rag.gemini_file_store.client") as mock_client:
         # Default mock behavior
         mock_client.file_search_stores.list.return_value = []
@@ -19,6 +24,10 @@ def mock_gemini_client_global():
             display_name="test_store"
         )
         yield mock_client
+
+    # Clear caches after test as well
+    gemini_module._store_cache.clear()
+    gemini_module._store_list_cache = (None, 0.0)
 
 
 class TestGenerateStoreDisplayName:

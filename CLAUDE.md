@@ -113,6 +113,11 @@ SHORT_TERM_MEMORY_MAX_MESSAGES=20
 LOG_LEVEL=INFO
 DEBUG=false
 CLEANUP_INTERVAL_SECONDS=300
+
+# Optional - Executor Pool Sizes
+AGENT_EXECUTOR_POOL_SIZE=10   # Thread pool for LLM agent invocations
+IO_EXECUTOR_POOL_SIZE=20      # Thread pool for GCS/file I/O operations
+QUERY_EXECUTOR_POOL_SIZE=10   # Thread pool for DuckDB/SQL queries
 ```
 
 **GCS Authentication**: Uses Application Default Credentials (ADC). Run `gcloud auth application-default login` for local development.

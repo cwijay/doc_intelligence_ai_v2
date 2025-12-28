@@ -5,6 +5,7 @@ import tempfile
 import time
 import json
 import asyncio
+import functools
 import threading
 from typing import Dict, List, Any, Optional, TYPE_CHECKING
 from pathlib import Path
@@ -13,6 +14,8 @@ import duckdb
 import logging
 
 from langchain_core.tools import BaseTool
+
+from src.core.executors import get_executors
 
 from src.utils.timer_utils import elapsed_ms
 from .gcs_loader import load_dataframe, validate_file_path, get_file_extension, get_excel_sheet_names
@@ -173,7 +176,7 @@ class FilePreviewTool(BaseTool):
                 "sheet_names": sheet_names,
                 "shape": {"rows": len(df), "columns": len(df.columns)},
                 "columns": [{"name": col, "type": str(df[col].dtype)} for col in df.columns],
-                "sample_data": df.head(5).to_dict('records'),
+                "sample_data": df.head(self._config.preview_rows).to_dict('records'),
                 "null_counts": df.isnull().sum().to_dict(),
                 "memory_usage": metadata.get("memory_usage_bytes", int(df.memory_usage(deep=True).sum()))
             }
@@ -185,8 +188,12 @@ class FilePreviewTool(BaseTool):
             return f"Error loading file preview: {str(e)}"
 
     async def _arun(self, file_path: str) -> str:
-        """Async version of _run using thread pool for blocking I/O."""
-        return await asyncio.to_thread(self._run, file_path)
+        """Async version of _run using dedicated query executor pool."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            get_executors().query_executor,
+            functools.partial(self._run, file_path)
+        )
 
 
 class CrossFileQueryTool(BaseTool):
@@ -373,8 +380,12 @@ class CrossFileQueryTool(BaseTool):
                 pool.return_connection(conn)
 
     async def _arun(self, input_json: str) -> str:
-        """Async version of _run using thread pool for blocking I/O."""
-        return await asyncio.to_thread(self._run, input_json)
+        """Async version of _run using dedicated query executor pool."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            get_executors().query_executor,
+            functools.partial(self._run, input_json)
+        )
 
 
 class SmartAnalysisTool(BaseTool):
@@ -445,7 +456,7 @@ class SmartAnalysisTool(BaseTool):
                     "shape": {"rows": len(df), "columns": len(df.columns)},
                     "columns": list(df.columns),
                     "data_types": {col: str(dtype) for col, dtype in df.dtypes.items()},
-                    "sample_data": df.head(3).to_dict('records'),
+                    "sample_data": df.head(self._config.sample_rows).to_dict('records'),
                     "null_counts": df.isnull().sum().to_dict()
                 },
 
@@ -478,9 +489,75 @@ class SmartAnalysisTool(BaseTool):
         }
 
         try:
-            # Revenue analysis
-            if 'revenue' in query_lower or 'sales' in query_lower:
-                revenue_cols = [col for col in df.columns if any(term in col.lower() for term in ['revenue', 'sales', 'income'])]
+            import re
+
+            # OPTIMIZATION: Pre-compute lowercase column names once (avoids repeated .lower() calls)
+            col_lower_map = {col: col.lower() for col in df.columns}
+
+            # 1. FILTERING QUERIES: Look for specific values to filter by
+            # Extract numbers/IDs from query (e.g., "invoice 65250", "order #123")
+            numbers_in_query = re.findall(r'\b\d+\b', query)
+
+            if numbers_in_query:
+                search_terms = numbers_in_query
+
+                # OPTIMIZATION: Pre-convert DataFrame to string once (instead of per column)
+                # and collect all masks before combining (avoids 1000s of intermediate DataFrames)
+                str_df = df.astype(str)
+                all_masks = []
+
+                for term in search_terms:
+                    for col in str_df.columns:
+                        try:
+                            mask = str_df[col].str.contains(str(term), case=False, na=False)
+                            if mask.any():
+                                all_masks.append(mask)
+                        except Exception:
+                            continue
+
+                # Combine all masks with OR and deduplicate once at the end
+                if all_masks:
+                    combined_mask = all_masks[0]
+                    for mask in all_masks[1:]:
+                        combined_mask = combined_mask | mask
+                    filtered_rows = df[combined_mask].drop_duplicates()
+                else:
+                    filtered_rows = pd.DataFrame()
+
+                if not filtered_rows.empty:
+                    result["data"]["filtered_rows"] = filtered_rows.to_dict('records')
+                    result["data"]["row_count"] = len(filtered_rows)
+                    result["data"]["columns"] = list(filtered_rows.columns)
+                    result["findings"].append(f"Found {len(filtered_rows)} rows matching: {search_terms}")
+                    result["insights"].append(f"Filtered data for values: {search_terms}")
+                    return result  # Return early with filtered data
+
+            # 2. LIST/SHOW QUERIES: Return actual data rows
+            display_keywords = self._config.display_keywords if self._config else ['list', 'show', 'display', 'all items', 'all rows', 'line items']
+            max_display = self._config.max_display_rows if self._config else 100
+            if any(kw in query_lower for kw in display_keywords):
+                # Check if asking for specific columns
+                words = query_lower.replace(',', ' ').split()
+                matching_cols = [col for col in df.columns if any(word in col.lower() for word in words if len(word) > 2)]
+
+                if matching_cols and len(matching_cols) < len(df.columns):
+                    result["data"]["requested_data"] = df[matching_cols].to_dict('records')
+                    result["data"]["columns"] = matching_cols
+                else:
+                    # Return all data (limited to prevent huge responses)
+                    result["data"]["all_rows"] = df.head(max_display).to_dict('records')
+                    result["data"]["total_rows"] = len(df)
+                    result["data"]["columns"] = list(df.columns)
+
+                result["findings"].append(f"Listing {min(max_display, len(df))} of {len(df)} rows")
+                result["insights"].append("Showing actual data rows as requested")
+                return result
+
+            # Revenue/Financial analysis
+            financial_terms = set(self._config.financial_terms) if self._config else {'revenue', 'sales', 'income', 'profit', 'earnings', 'cost', 'expense'}
+            if any(term in query_lower for term in financial_terms):
+                revenue_cols = [col for col, lower in col_lower_map.items()
+                                if any(term in lower for term in financial_terms)]
                 if revenue_cols:
                     revenue_data = {}
                     for col in revenue_cols:
@@ -495,8 +572,10 @@ class SmartAnalysisTool(BaseTool):
                     result["findings"].append(f"Found {len(revenue_cols)} revenue-related columns")
 
             # Quarterly analysis (Q1, Q2, etc.)
-            if any(q in query_lower for q in ['q1', 'q2', 'q3', 'q4', 'quarter']):
-                quarterly_cols = [col for col in df.columns if any(q in col.lower() for q in ['q1', 'q2', 'q3', 'q4', 'quarter'])]
+            quarterly_terms = set(self._config.quarterly_terms) if self._config else {'q1', 'q2', 'q3', 'q4', 'quarter'}
+            if any(q in query_lower for q in quarterly_terms):
+                quarterly_cols = [col for col, lower in col_lower_map.items()
+                                  if any(q in lower for q in quarterly_terms)]
                 if quarterly_cols:
                     quarterly_data = {}
                     for col in quarterly_cols:
@@ -518,33 +597,37 @@ class SmartAnalysisTool(BaseTool):
                     result["data"]["totals"] = totals
                     result["findings"].append(f"Calculated totals for {len(numeric_cols)} numeric columns")
 
-            # FY25 specific
-            if 'fy25' in query_lower or 'fy 25' in query_lower:
-                fy25_cols = [col for col in df.columns if 'fy25' in col.lower() or 'fy 25' in col.lower()]
-                if fy25_cols:
-                    fy25_data = {}
-                    for col in fy25_cols:
+            # Fiscal Year analysis (dynamic based on config)
+            fy = self._config.current_fiscal_year if self._config else "25"
+            fy_patterns = [f'fy{fy}', f'fy {fy}', f'fy20{fy}', f'fiscal{fy}', f'fiscal {fy}']
+            if any(p in query_lower for p in fy_patterns):
+                fy_cols = [col for col, lower in col_lower_map.items()
+                           if any(p in lower for p in fy_patterns)]
+                if fy_cols:
+                    fy_data = {}
+                    for col in fy_cols:
                         if pd.api.types.is_numeric_dtype(df[col]):
-                            fy25_data[col] = float(df[col].sum())
-                    result["data"]["fy25_analysis"] = fy25_data
-                    result["findings"].append(f"Found {len(fy25_cols)} FY25 columns")
+                            fy_data[col] = float(df[col].sum())
+                    result["data"]["fiscal_year_analysis"] = fy_data
+                    result["findings"].append(f"Found {len(fy_cols)} FY{fy} columns")
 
             # Generate insights
             if result["data"]:
                 result["insights"].append("Analysis completed successfully with specific query matching")
 
                 # Smart insights based on findings
+                currency = self._config.currency_symbol if self._config else "$"
                 if "revenue_analysis" in result["data"]:
                     revenue_totals = [v["total"] for v in result["data"]["revenue_analysis"].values()]
                     if revenue_totals:
                         max_revenue = max(revenue_totals)
-                        result["insights"].append(f"Highest revenue stream: ${max_revenue:,.2f}")
+                        result["insights"].append(f"Highest revenue stream: {currency}{max_revenue:,.2f}")
 
                 if "quarterly_analysis" in result["data"]:
                     quarterly_totals = result["data"]["quarterly_analysis"]
                     if quarterly_totals:
                         for col, data in quarterly_totals.items():
-                            result["insights"].append(f"{col}: ${data['total']:,.2f}")
+                            result["insights"].append(f"{col}: {currency}{data['total']:,.2f}")
             else:
                 result["insights"].append("No specific matches found for query, showing general data summary")
                 # Fallback: basic numeric summary
@@ -559,5 +642,9 @@ class SmartAnalysisTool(BaseTool):
         return result
 
     async def _arun(self, input_json: str) -> str:
-        """Async version of _run using thread pool for blocking I/O."""
-        return await asyncio.to_thread(self._run, input_json)
+        """Async version of _run using dedicated query executor pool."""
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            get_executors().query_executor,
+            functools.partial(self._run, input_json)
+        )

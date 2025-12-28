@@ -410,18 +410,20 @@ async def generate_all_content(
                 check_and_read_cached_questions
             )
 
-            # Check all three caches
-            cached_summary = await check_and_read_cached_summary(
-                parsed_file_path=request.parsed_file_path,
-                document_name=request.document_name
-            )
-            cached_faqs = await check_and_read_cached_faqs(
-                parsed_file_path=request.parsed_file_path,
-                document_name=request.document_name
-            )
-            cached_questions = await check_and_read_cached_questions(
-                parsed_file_path=request.parsed_file_path,
-                document_name=request.document_name
+            # Check all three caches concurrently (3x faster than sequential)
+            cached_summary, cached_faqs, cached_questions = await asyncio.gather(
+                check_and_read_cached_summary(
+                    parsed_file_path=request.parsed_file_path,
+                    document_name=request.document_name
+                ),
+                check_and_read_cached_faqs(
+                    parsed_file_path=request.parsed_file_path,
+                    document_name=request.document_name
+                ),
+                check_and_read_cached_questions(
+                    parsed_file_path=request.parsed_file_path,
+                    document_name=request.document_name
+                )
             )
 
             # If ALL content is cached, return from cache

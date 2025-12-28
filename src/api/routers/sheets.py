@@ -3,11 +3,15 @@
 Multi-tenancy: All endpoints are scoped by organization_id from request headers.
 """
 
+import asyncio
+import functools
 import logging
 import time
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
+
+from src.core.executors import get_executors
 
 from ..dependencies import get_sheets_agent, get_org_id
 from ..schemas.common import TokenUsage
@@ -165,15 +169,25 @@ async def preview_file(
                 error=f"File not found: {request.file_path}"
             )
 
-        # Load file based on extension
+        # Load file based on extension (use executor to avoid blocking event loop)
         ext = file_path.suffix.lower()
+        loop = asyncio.get_running_loop()
+        io_executor = get_executors().io_executor
+
         if ext in ['.xlsx', '.xls']:
-            df = pd.read_excel(file_path, sheet_name=request.sheet_name or 0, nrows=request.rows)
+            # Run blocking pandas I/O in executor
+            df = await loop.run_in_executor(
+                io_executor,
+                functools.partial(pd.read_excel, file_path, sheet_name=request.sheet_name or 0, nrows=request.rows)
+            )
             # Get sheet names
-            xl = pd.ExcelFile(file_path)
+            xl = await loop.run_in_executor(io_executor, pd.ExcelFile, file_path)
             sheet_names = xl.sheet_names
         elif ext == '.csv':
-            df = pd.read_csv(file_path, nrows=request.rows)
+            df = await loop.run_in_executor(
+                io_executor,
+                functools.partial(pd.read_csv, file_path, nrows=request.rows)
+            )
             sheet_names = None
         else:
             return SheetsPreviewResponse(
@@ -181,11 +195,14 @@ async def preview_file(
                 error=f"Unsupported file type: {ext}"
             )
 
-        # Get full row count
+        # Get full row count (in executor)
         if ext in ['.xlsx', '.xls']:
-            full_df = pd.read_excel(file_path, sheet_name=request.sheet_name or 0)
+            full_df = await loop.run_in_executor(
+                io_executor,
+                functools.partial(pd.read_excel, file_path, sheet_name=request.sheet_name or 0)
+            )
         else:
-            full_df = pd.read_csv(file_path)
+            full_df = await loop.run_in_executor(io_executor, pd.read_csv, file_path)
 
         file_info = FileMetadata(
             file_path=request.file_path,

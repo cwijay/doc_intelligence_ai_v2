@@ -7,6 +7,8 @@ from functools import partial
 from typing import Optional, List
 
 from google.cloud import storage
+
+from src.core.executors import get_executors
 from google.cloud.exceptions import NotFound, Forbidden
 from google.api_core.exceptions import GoogleAPIError
 
@@ -79,7 +81,7 @@ class GCSStorage(StorageBackend):
         loop = asyncio.get_running_loop()
         try:
             await loop.run_in_executor(
-                None,
+                get_executors().io_executor,
                 partial(blob.upload_from_string, content, content_type=content_type),
             )
         except GoogleAPIError as e:
@@ -113,7 +115,7 @@ class GCSStorage(StorageBackend):
 
         loop = asyncio.get_running_loop()
         try:
-            content = await loop.run_in_executor(None, blob.download_as_text)
+            content = await loop.run_in_executor(get_executors().io_executor, blob.download_as_text)
             return content
         except NotFound:
             logger.debug(f"Blob not found: {blob_name}")
@@ -147,7 +149,7 @@ class GCSStorage(StorageBackend):
 
         loop = asyncio.get_running_loop()
         try:
-            return await loop.run_in_executor(None, blob.exists)
+            return await loop.run_in_executor(get_executors().io_executor, blob.exists)
         except GoogleAPIError as e:
             logger.error(f"GCS error checking existence of {blob_name}: {e}")
             return False
@@ -163,7 +165,7 @@ class GCSStorage(StorageBackend):
         loop = asyncio.get_running_loop()
         try:
             blobs = await loop.run_in_executor(
-                None,
+                get_executors().io_executor,
                 partial(list, self._client.list_blobs(self.bucket_name, prefix=prefix)),
             )
         except GoogleAPIError as e:
@@ -201,7 +203,7 @@ class GCSStorage(StorageBackend):
 
         loop = asyncio.get_running_loop()
         try:
-            content = await loop.run_in_executor(None, blob.download_as_bytes)
+            content = await loop.run_in_executor(get_executors().io_executor, blob.download_as_bytes)
             logger.debug(f"Downloaded {len(content)} bytes from GCS: {path}")
             return content
         except NotFound:
@@ -227,7 +229,7 @@ class GCSStorage(StorageBackend):
 
         loop = asyncio.get_running_loop()
         try:
-            await loop.run_in_executor(None, blob.delete)
+            await loop.run_in_executor(get_executors().io_executor, blob.delete)
             logger.info(f"Deleted from GCS: gs://{self.bucket_name}/{blob_name}")
             return True
         except NotFound:
