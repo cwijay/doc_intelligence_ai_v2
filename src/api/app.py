@@ -19,6 +19,7 @@ from .routers import (
     audit_router,
     sessions_router,
     health_router,
+    usage_router,
 )
 
 logger = logging.getLogger(__name__)
@@ -55,6 +56,10 @@ OPENAPI_TAGS = [
     {
         "name": "Sessions",
         "description": "Session management for stateful interactions with 30-minute timeout",
+    },
+    {
+        "name": "Usage",
+        "description": "Usage tracking, quota status, and subscription management",
     },
 ]
 
@@ -155,6 +160,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Database initialization skipped: {e}")
 
+    # Start audit queue (uses single dedicated thread with persistent event loop)
+    try:
+        from src.agents.core.audit_queue import get_audit_queue
+        get_audit_queue().start()
+        logger.info("Audit queue started")
+    except Exception as e:
+        logger.warning(f"Audit queue initialization failed: {e}")
+
+    # Start usage queue and initialize UsageTrackingService
+    try:
+        from src.core.usage import get_usage_queue, get_usage_service
+        get_usage_service()  # Prime the singleton and verify DB connectivity
+        get_usage_queue().start()
+        logger.info("Usage queue and service initialized")
+    except Exception as e:
+        logger.warning(f"Usage queue initialization failed: {e}")
+
     # Initialize agents at startup (fail-fast if any agent fails)
     from .dependencies import initialize_agents
     await initialize_agents()
@@ -165,7 +187,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
-    # Shutdown - order matters: cleanup task, agents, then database
+    # Shutdown - order matters: cleanup task, agents, audit queue, then database
     logger.info("Shutting down Document Intelligence AI API...")
 
     # 0. Cancel periodic cleanup task
@@ -177,7 +199,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             pass
         logger.info("Periodic cleanup task stopped")
 
-    # 1. Shutdown agents first (they may have pending audit logs to write)
+    # 1. Shutdown agents first (they may enqueue final audit/usage logs)
     try:
         from .dependencies import shutdown_agents
         await shutdown_agents()
@@ -185,7 +207,23 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Agent shutdown error: {e}")
 
-    # 2. Close database connections after agents are done
+    # 2. Shutdown usage queue (wait for pending events to be written)
+    try:
+        from src.core.usage import get_usage_queue
+        get_usage_queue().shutdown(wait=True, timeout=10.0)
+        logger.info("Usage queue shutdown complete")
+    except Exception as e:
+        logger.warning(f"Usage queue shutdown error: {e}")
+
+    # 3. Shutdown audit queue (wait for pending events to be written)
+    try:
+        from src.agents.core.audit_queue import get_audit_queue
+        get_audit_queue().shutdown(wait=True, timeout=10.0)
+        logger.info("Audit queue shutdown complete")
+    except Exception as e:
+        logger.warning(f"Audit queue shutdown error: {e}")
+
+    # 4. Close database connections after queues are done
     try:
         from src.db.connection import db
         await db.close_all()
@@ -338,6 +376,12 @@ def create_app() -> FastAPI:
         sessions_router,
         prefix=f"{api_prefix}/sessions",
         tags=["Sessions"],
+    )
+
+    app.include_router(
+        usage_router,
+        prefix=f"{api_prefix}/usage",
+        tags=["Usage"],
     )
 
     return app

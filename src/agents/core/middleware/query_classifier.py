@@ -225,7 +225,16 @@ Respond with ONLY the category name (RAG_SEARCH, CONTENT_GENERATION, or DOCUMENT
 
         try:
             response = self.llm.invoke(prompt)
-            response_text = response.content.strip().upper()
+            # Handle both string and list content formats (Gemini returns list)
+            content = response.content
+            if isinstance(content, list):
+                # Extract text from content blocks (Gemini format)
+                response_text = "".join(
+                    block.get("text", str(block)) if isinstance(block, dict) else str(block)
+                    for block in content
+                ).strip().upper()
+            else:
+                response_text = content.strip().upper()
 
             if "CONTENT_GENERATION" in response_text or "GENERATION" in response_text:
                 return QueryIntent.CONTENT_GENERATION

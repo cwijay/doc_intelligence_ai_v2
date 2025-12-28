@@ -13,7 +13,7 @@ from ..dependencies import get_sheets_agent, get_org_id
 from ..schemas.common import TokenUsage
 from ..schemas.errors import FILE_ERROR_RESPONSES, BASE_ERROR_RESPONSES
 from src.utils.timer_utils import elapsed_ms
-from ..usage import check_token_limit_before_processing, log_token_usage_async
+from ..usage import check_token_limit_before_processing, check_quota
 from ..schemas.sheets import (
     SheetsAnalyzeRequest,
     SheetsAnalyzeResponse,
@@ -111,25 +111,8 @@ async def analyze_sheets(
                 total_tokens=response.token_usage.total_tokens,
                 estimated_cost_usd=response.token_usage.estimated_cost_usd,
             )
-
-            # Log token usage (non-blocking)
-            log_token_usage_async(
-                org_id=org_id,
-                user_id=request.user_id,
-                feature="sheets_agent",
-                model="gpt-4o-mini",
-                provider="openai",
-                input_tokens=response.token_usage.prompt_tokens,
-                output_tokens=response.token_usage.completion_tokens,
-                input_cost_usd=response.token_usage.estimated_cost_usd * 0.2,
-                output_cost_usd=response.token_usage.estimated_cost_usd * 0.8,
-                extra_data={
-                    "file_paths": request.file_paths,
-                    "session_id": request.session_id,
-                    "query": request.query[:100] if request.query else None,
-                    "files_count": len(request.file_paths) if request.file_paths else 0,
-                },
-            )
+            # Token usage is now tracked via callback handlers in the agent
+            # (see TokenTrackingCallbackHandler with use_context=True)
 
         return SheetsAnalyzeResponse(
             success=response.success,

@@ -13,7 +13,13 @@ from ..dependencies import get_document_agent, get_org_id
 from ..schemas.common import TokenUsage
 from ..schemas.errors import DOCUMENT_ERROR_RESPONSES
 from src.utils.timer_utils import elapsed_ms
-from ..usage import check_token_limit_before_processing, log_token_usage_async
+from ..usage import (
+    check_token_limit_before_processing,
+    check_resource_limit_before_processing,
+    log_resource_usage_async,
+    check_quota,
+    track_resource,
+)
 from ..schemas.documents import (
     DocumentProcessRequest,
     DocumentProcessResponse,
@@ -91,24 +97,8 @@ async def process_document(
 
         processing_time = elapsed_ms(start_time)
 
-        # Log token usage (non-blocking)
-        if response.token_usage:
-            log_token_usage_async(
-                org_id=org_id,
-                user_id=request.user_id,
-                feature="document_agent",
-                model=agent.config.gemini_model,
-                provider="google",
-                input_tokens=response.token_usage.prompt_tokens,
-                output_tokens=response.token_usage.completion_tokens,
-                input_cost_usd=response.token_usage.estimated_cost_usd * 0.2,
-                output_cost_usd=response.token_usage.estimated_cost_usd * 0.8,
-                extra_data={
-                    "document_name": request.document_name,
-                    "session_id": request.session_id,
-                    "query": request.query[:100] if request.query else None,
-                },
-            )
+        # Token usage is now tracked via callback handlers in the agent
+        # (see TokenTrackingCallbackHandler with use_context=True)
 
         return DocumentProcessResponse(
             success=response.success,
@@ -523,8 +513,15 @@ async def chat_with_documents(
     - Org-wide: Leave both filters empty
 
     **Multi-tenancy**: Scoped by X-Organization-ID header.
+
+    **Usage Tracking**: Each search query counts against the monthly file_search_queries limit.
     """
     start_time = time.time()
+
+    # Check file search query limit before processing
+    await check_resource_limit_before_processing(
+        org_id, resource_type="file_search_queries", estimated_usage=1
+    )
 
     try:
         # Use organization_name from request (required field)
@@ -555,6 +552,21 @@ async def chat_with_documents(
                 )
                 for c in response.citations
             ]
+
+        # Log file search query usage (non-blocking)
+        log_resource_usage_async(
+            org_id=org_id,
+            resource_type="file_search_queries",
+            amount=1,
+            user_id=None,
+            extra_data={
+                "query": request.query[:100] if request.query else None,
+                "search_mode": request.search_mode,
+                "folder_filter": request.folder_filter,
+                "file_filter": request.file_filter,
+                "session_id": request.session_id,
+            },
+        )
 
         return RAGChatResponse(
             success=response.success,

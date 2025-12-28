@@ -1,14 +1,10 @@
 """Core Document Agent implementation using LangChain 1.2.0."""
 
 import asyncio
-import threading
 import time
 import uuid
 import hashlib
 import logging
-from collections import defaultdict
-from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional
 
 from langchain.chat_models import init_chat_model
@@ -29,9 +25,9 @@ from .config import DocumentAgentConfig
 from .tools import create_document_tools
 from src.utils.timer_utils import elapsed_ms
 
-# Shared agent infrastructure imports
-from src.agents.core.rate_limiter import RateLimiter
-from src.agents.core.session_manager import SessionManager
+# Base agent and shared utilities
+from src.agents.core.base_agent import BaseAgent
+from src.agents.core.token_utils import calculate_token_usage
 
 # Tool selection imports
 from src.agents.core.middleware import LLMToolSelector, QueryClassifier, QueryIntent
@@ -46,22 +42,7 @@ from .schemas import (
     SessionInfo
 )
 
-# Memory imports (optional - graceful fallback if not available)
-try:
-    from src.agents.core.memory import (
-        MemoryConfig,
-        ShortTermMemory,
-        PostgresLongTermMemory,
-        ConversationSummary
-    )
-    MEMORY_AVAILABLE = True
-except ImportError:
-    MEMORY_AVAILABLE = False
-
 logger = logging.getLogger(__name__)
-
-# Background executor for non-blocking audit logging
-_audit_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="audit")
 
 
 # NOTE: RateLimiter and SessionManager classes have been moved to shared modules:
@@ -120,49 +101,51 @@ def get_system_prompt(tool_names: list) -> str:
     return SYSTEM_PROMPT.format(tools=", ".join(tool_names))
 
 
-class DocumentAgent:
-    """AI-powered document analysis agent using LangGraph."""
+class DocumentAgent(BaseAgent):
+    """AI-powered document analysis agent using LangGraph.
+
+    Inherits from BaseAgent for shared functionality:
+    - Session management
+    - Rate limiting
+    - Memory (short-term and long-term)
+    - Audit logging
+    """
 
     def __init__(self, config: Optional[DocumentAgentConfig] = None):
-        """
-        Initialize Document Agent.
+        """Initialize Document Agent.
 
         Args:
             config: Agent configuration. Uses defaults if not provided.
         """
-        self.config = config or DocumentAgentConfig()
-        self.session_manager = SessionManager(self.config.session_timeout_minutes)
+        # Use default config if not provided
+        config = config or DocumentAgentConfig()
 
-        self.rate_limiter = RateLimiter(
-            max_requests=self.config.rate_limit_requests,
-            window_seconds=self.config.rate_limit_window_seconds
-        )
+        # Initialize base agent (session manager, rate limiter, memory, audit)
+        super().__init__(config)
 
+        # Initialize LLM (document-specific)
         self.llm = self._init_llm()
-        self.tools = create_document_tools(self.config)
+
+        # Initialize tools (document-specific)
+        self.tools = self._init_tools()
 
         # Build tool name lookup for quick access
         self.tools_by_name = {tool.name: tool for tool in self.tools}
 
-        # Initialize tool selection components
+        # Initialize tool selection components (document-specific)
         self.query_classifier = None
         self.tool_selector = None
         if self.config.enable_tool_selection:
             self._init_tool_selection()
 
-        # Build middleware list from config
+        # Build middleware list from config (document-specific)
         self.middleware_list = self._build_middleware()
 
-        # Initialize checkpointer for conversation memory
+        # Initialize checkpointer for conversation memory (document-specific)
         self.checkpointer = MemorySaver()
 
+        # Create agent
         self.agent = self._create_agent()
-        self.audit_logger = self._init_audit_logging()
-
-        # Initialize memory systems
-        self.short_term_memory = None
-        self.long_term_memory = None
-        self._init_memory()
 
         logger.info(f"Document Agent initialized with model: {self.config.gemini_model}")
 
@@ -212,37 +195,26 @@ class DocumentAgent:
             logger.warning(f"Failed to build middleware: {e}")
             return []
 
-    def _init_memory(self):
-        """Initialize short-term and long-term memory systems."""
-        if not MEMORY_AVAILABLE:
-            logger.warning("Memory module not available - memory features disabled")
-            return
+    # _init_memory() is inherited from BaseAgent
 
-        # Initialize short-term memory
-        if self.config.enable_short_term_memory:
-            self.short_term_memory = ShortTermMemory(
-                max_messages=self.config.short_term_max_messages
-            )
-            logger.info(
-                f"Short-term memory enabled (max {self.config.short_term_max_messages} messages)"
-            )
+    def _init_tools(self) -> List:
+        """Initialize agent tools."""
+        return create_document_tools(self.config)
 
-        # Initialize long-term memory (PostgreSQL-backed)
-        if self.config.enable_long_term_memory:
-            try:
-                memory_config = MemoryConfig()
-                self.long_term_memory = PostgresLongTermMemory(memory_config)
-                logger.info("Long-term memory enabled (PostgreSQL)")
-            except Exception as e:
-                logger.warning(f"Failed to initialize long-term memory: {e}")
+    def _get_agent_type(self) -> str:
+        """Get agent type identifier for audit/memory."""
+        return "document"
 
     def _init_llm(self):
-        """Initialize the language model using init_chat_model."""
+        """Initialize the language model using init_chat_model with token tracking callback."""
         if not self.config.google_api_key:
             raise ValueError(
                 "GOOGLE_API_KEY environment variable is required. "
                 "Get your API key from https://aistudio.google.com/app/apikey"
             )
+
+        # Use shared callback creation from BaseAgent
+        callbacks = self._create_token_tracking_callback("document_agent")
 
         llm = init_chat_model(
             model=self.config.gemini_model,
@@ -250,7 +222,8 @@ class DocumentAgent:
             temperature=self.config.temperature,
             api_key=self.config.google_api_key,
             timeout=60,  # Prevent hanging requests
-            max_retries=2
+            max_retries=2,
+            callbacks=callbacks if callbacks else None,
         )
 
         logger.info(f"Initialized LLM: {self.config.gemini_model}")
@@ -377,18 +350,7 @@ class DocumentAgent:
         logger.info(f"Created agent with LangChain 1.2.0 ({len(self.middleware_list)} middleware, checkpointer=MemorySaver)")
         return agent
 
-    def _init_audit_logging(self):
-        """Initialize audit logging (PostgreSQL-backed)."""
-        try:
-            from src.db.repositories.audit_repository import log_event
-            logger.info("Initialized audit logging (PostgreSQL)")
-            return log_event
-        except ImportError as e:
-            logger.warning(f"Audit module not available: {e}")
-            return None
-        except Exception as e:
-            logger.warning(f"Failed to initialize audit logging: {e}")
-            return None
+    # _init_audit_logging() is inherited from BaseAgent
 
     async def process_request(self, request: DocumentRequest) -> DocumentResponse:
         """
@@ -553,7 +515,45 @@ class DocumentAgent:
         """Execute the agent with the given context and request.
 
         Conversation history is handled automatically by the checkpointer via thread_id.
+        Token tracking is handled via thread-local usage context.
         """
+        # Import usage context for token tracking
+        try:
+            from src.core.usage.context import usage_context
+            USAGE_CONTEXT_AVAILABLE = True
+        except ImportError:
+            USAGE_CONTEXT_AVAILABLE = False
+            usage_context = None
+
+        session_id = request.session_id or "default"
+
+        # Set up usage context for token tracking (if available)
+        ctx_manager = None
+        if USAGE_CONTEXT_AVAILABLE and usage_context and request.organization_id:
+            ctx_manager = usage_context(
+                org_id=request.organization_id,
+                feature="document_agent",
+                user_id=request.user_id,
+                session_id=session_id,
+            )
+            logger.debug(f"Token tracking context set for org {request.organization_id}")
+
+        try:
+            # Enter usage context if available
+            if ctx_manager:
+                ctx_manager.__enter__()
+
+            return await self._execute_agent_inner(context, request, session_id)
+
+        finally:
+            # Exit usage context
+            if ctx_manager:
+                ctx_manager.__exit__(None, None, None)
+
+    async def _execute_agent_inner(
+        self, context: str, request: DocumentRequest, session_id: str
+    ) -> Dict[str, Any]:
+        """Inner agent execution (called within usage context)."""
         try:
             input_text = f"{context}\n\nPlease process this document and fulfill the request."
 
@@ -561,7 +561,6 @@ class DocumentAgent:
             message = HumanMessage(content=input_text)
 
             # Config with thread_id for checkpointer to manage conversation history
-            session_id = request.session_id or "default"
             config = {
                 "configurable": {
                     "thread_id": session_id  # Enables automatic conversation continuity
@@ -579,10 +578,21 @@ class DocumentAgent:
             # Handle conversational queries (no tools needed - just LLM)
             if not relevant_tools:
                 logger.info("Conversational query - invoking LLM directly without tools")
-                # For conversational queries, just invoke the LLM directly with history
+
+                # Build messages with conversation history from short-term memory
+                messages_to_send = []
+                if self.short_term_memory and session_id:
+                    history = self.short_term_memory.get_messages(session_id)
+                    if history:
+                        messages_to_send.extend(history)
+                        logger.info(f"Including {len(history)} messages from conversation history")
+
+                # Add current message
+                messages_to_send.append(message)
+
                 result = await asyncio.to_thread(
                     self.agent.invoke,
-                    {"messages": [message]},
+                    {"messages": messages_to_send},
                     config
                 )
             # Create dynamic agent with filtered tools if tool selection is enabled
@@ -643,6 +653,13 @@ class DocumentAgent:
             # Parse result including tool outputs from all messages
             parsed_result = self._parse_agent_result(response_text, all_messages)
             logger.info(f"Agent execution completed, response length: {len(response_text)} chars")
+
+            # Save to short-term memory for conversation continuity
+            if self.short_term_memory and session_id:
+                self.short_term_memory.add_human_message(session_id, request.query)
+                if response_text:
+                    self.short_term_memory.add_ai_message(session_id, response_text)
+                logger.debug(f"Saved conversation to short-term memory for session {session_id}")
 
             return parsed_result
 
@@ -752,65 +769,40 @@ class DocumentAgent:
         return result
 
     def _calculate_token_usage(self, input_text: str, output_text: str) -> TokenUsage:
-        """Calculate token usage (estimation for Gemini)."""
-        prompt_tokens = int(len(input_text.split()) * 1.3)
-        completion_tokens = int(len(output_text.split()) * 1.3)
-        total_tokens = prompt_tokens + completion_tokens
-
-        # Gemini 2.5 Flash pricing: $0.075/1M input, $0.30/1M output
-        estimated_cost = (prompt_tokens * 0.075 + completion_tokens * 0.30) / 1_000_000
-
+        """Calculate token usage using shared utility."""
+        estimate = calculate_token_usage(
+            input_text, output_text, model=self.config.gemini_model
+        )
         return TokenUsage(
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            estimated_cost_usd=round(estimated_cost, 8)
+            prompt_tokens=estimate.prompt_tokens,
+            completion_tokens=estimate.completion_tokens,
+            total_tokens=estimate.total_tokens,
+            estimated_cost_usd=estimate.estimated_cost_usd
         )
 
     def _log_audit_event_async(self, request: DocumentRequest, processing_time: float):
-        """Log query for audit trail in background thread to avoid event loop issues."""
-        def _do_log():
-            loop = None
-            loop_id = None
-            try:
-                if self.audit_logger:
-                    # Run async function in new event loop for this thread
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    loop_id = id(loop)
+        """Log query for audit trail via centralized audit queue."""
+        if not self.audit_logger:
+            return
 
-                    loop.run_until_complete(
-                        self.audit_logger(
-                            event_type="document_agent_query",
-                            file_name=request.document_name,
-                            organization_id=request.organization_id,  # Pass organization_id for multi-tenancy
-                            details={
-                                "session_id": request.session_id,
-                                "document_name": request.document_name,
-                                "parsed_file_path": request.parsed_file_path,
-                                "query": request.query,
-                                "processing_time_ms": processing_time,
-                                "success": True
-                            }
-                        )
-                    )
-            except Exception as e:
-                logger.warning(f"Failed to log audit event: {e}")
-            finally:
-                # Clean up database resources for this thread's event loop
-                if loop_id is not None:
-                    try:
-                        from src.db.connection import db
-                        db.close_sync(loop_id)
-                    except Exception:
-                        pass
-                if loop is not None:
-                    try:
-                        loop.close()
-                    except Exception:
-                        pass
+        try:
+            from src.agents.core.audit_queue import enqueue_audit_event
 
-        _audit_executor.submit(_do_log)
+            enqueue_audit_event(
+                event_type="document_agent_query",
+                file_name=request.document_name,
+                organization_id=request.organization_id,
+                details={
+                    "session_id": request.session_id,
+                    "document_name": request.document_name,
+                    "parsed_file_path": request.parsed_file_path,
+                    "query": request.query,
+                    "processing_time_ms": processing_time,
+                    "success": True
+                }
+            )
+        except Exception as e:
+            logger.warning(f"Failed to enqueue audit event: {e}")
 
     # Convenience methods for direct generation
 
@@ -1006,32 +998,26 @@ class DocumentAgent:
     def get_health_status(self) -> Dict[str, Any]:
         """Get health status of the agent and its components."""
         try:
-            # Skip LLM health check to avoid blocking - just check if configured
-            llm_status = "healthy" if self.llm else "unhealthy"
+            # Get base health status (sessions, rate limiter, memory, audit)
+            base_status = self._get_base_health_status()
 
-            self.session_manager.cleanup_expired_sessions()
-            self.rate_limiter.cleanup()
+            # Check LLM status
+            llm_status = "healthy" if self.llm else "unhealthy"
 
             return {
                 "status": "healthy" if llm_status == "healthy" else "degraded",
                 "components": {
                     "llm": llm_status,
                     "model": self.config.gemini_model,
-                    "audit_logging": "healthy" if self.audit_logger else "disabled",
+                    "audit_logging": base_status["audit_logging"],
                     "short_term_memory": "enabled" if self.short_term_memory else "disabled",
                     "long_term_memory": "enabled" if self.long_term_memory else "disabled"
                 },
-                "sessions": {
-                    "active_count": len(self.session_manager.sessions),
-                    "total_queries": sum(s.query_count for s in self.session_manager.sessions.values())
-                },
-                "rate_limiter": {
-                    "tracked_sessions": len(self.rate_limiter.requests)
-                },
+                "sessions": base_status["sessions"],
+                "rate_limiter": base_status["rate_limiter"],
                 "memory": {
-                    "checkpointer": "MemorySaver (in-memory)",
-                    "short_term_enabled": True,  # Always enabled via checkpointer
-                    "long_term_enabled": self.config.enable_long_term_memory
+                    **base_status["memory"],
+                    "checkpointer": "MemorySaver (in-memory)"
                 },
                 "middleware": {
                     "enabled": len(self.middleware_list) > 0,
@@ -1052,109 +1038,21 @@ class DocumentAgent:
             }
 
     def shutdown(self, wait: bool = True) -> None:
-        """
-        Shutdown agent resources gracefully.
+        """Shutdown agent resources gracefully.
 
-        This should be called before closing database connections to ensure
-        all pending audit logs are written and resources are cleaned up.
+        Note: Audit queue is a shared singleton managed at the app level.
+        This method only cleans up agent-specific resources.
 
         Args:
             wait: If True, wait for pending tasks to complete.
                   If False, cancel pending tasks immediately.
         """
-        global _audit_executor
-
         logger.info(f"Shutting down DocumentAgent (wait={wait})")
 
-        # Shutdown audit executor if exists
-        if _audit_executor:
-            logger.info("Shutting down audit executor")
-            _audit_executor.shutdown(wait=wait, cancel_futures=not wait)
-            logger.info("Audit executor shutdown complete")
-
-        # Clean up expired sessions
-        self.session_manager.cleanup_expired_sessions()
-
-        # Clean up rate limiter
-        self.rate_limiter.cleanup()
+        # Cleanup base agent resources (sessions, rate limiter)
+        self._cleanup_resources()
 
         logger.info("DocumentAgent shutdown complete")
 
-    def end_session(
-        self,
-        session_id: str,
-        user_id: Optional[str] = None,
-        save_summary: bool = True
-    ) -> bool:
-        """
-        End a session and optionally save summary to long-term memory.
-
-        Args:
-            session_id: Session identifier
-            user_id: User ID for long-term memory
-            save_summary: Whether to save conversation summary
-
-        Returns:
-            True if session ended successfully
-        """
-        try:
-            # Get session info
-            session = self.session_manager.sessions.get(session_id)
-
-            if not session:
-                logger.warning(f"Session {session_id} not found")
-                return False
-
-            # Save conversation summary to long-term memory
-            if save_summary and self.long_term_memory and user_id:
-                self._save_conversation_summary(session_id, user_id, session)
-
-            # Clear short-term memory for session
-            if self.short_term_memory:
-                self.short_term_memory.delete_session(session_id)
-
-            # Remove from session manager
-            if session_id in self.session_manager.sessions:
-                del self.session_manager.sessions[session_id]
-
-            logger.info(f"Session {session_id} ended successfully")
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to end session {session_id}: {e}")
-            return False
-
-    def _save_conversation_summary(
-        self,
-        session_id: str,
-        user_id: str,
-        session: SessionInfo
-    ) -> None:
-        """Save conversation summary to long-term memory."""
-        if not self.long_term_memory or not MEMORY_AVAILABLE:
-            return
-
-        try:
-            # Get conversation summary from short-term memory
-            summary_text = ""
-            if self.short_term_memory:
-                summary_text = (
-                    self.short_term_memory.get_conversation_summary(session_id)
-                    or f"Session with {session.query_count} queries"
-                )
-
-            summary = ConversationSummary(
-                session_id=session_id,
-                user_id=user_id,
-                agent_type="document",
-                summary=summary_text,
-                key_topics=[],
-                documents_discussed=session.documents_processed,
-                queries_count=session.query_count
-            )
-
-            self.long_term_memory.save_conversation_summary(summary)
-            logger.info(f"Saved conversation summary for session {session_id}")
-
-        except Exception as e:
-            logger.error(f"Failed to save conversation summary: {e}")
+    # end_session() is inherited from BaseAgent
+    # _save_conversation_summary() is inherited from BaseAgent

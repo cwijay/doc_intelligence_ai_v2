@@ -7,6 +7,7 @@ from .rag import router as rag_router
 from .audit import router as audit_router
 from .sessions import router as sessions_router
 from .health import router as health_router
+from .usage import router as usage_router
 
 __all__ = [
     "documents_router",
@@ -16,4 +17,5 @@ __all__ = [
     "audit_router",
     "sessions_router",
     "health_router",
+    "usage_router",
 ]

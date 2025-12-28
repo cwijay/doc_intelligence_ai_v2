@@ -42,6 +42,11 @@ python scripts/db_setup.py teardown   # Drop all tables
 python scripts/db_setup.py reset      # Teardown + setup
 python scripts/db_setup.py sql        # Print all SQL without executing
 
+# Seed subscription tiers
+python scripts/seed_tiers.py          # Seed Free/Pro/Enterprise tiers
+python scripts/seed_tiers.py --list   # List current tiers
+python scripts/seed_tiers.py --reset  # Delete and re-seed tiers
+
 # Run tests
 pytest tests/                          # Run all tests (unit + integration)
 pytest tests/ --cov=src                # Run with coverage
@@ -202,6 +207,28 @@ Key files:
 - RAG queries → only `rag_search` tool
 - Generation queries → loader + generators + persist
 - Config: `TOOL_SELECTOR_MODEL`, `ENABLE_TOOL_SELECTION`, `TOOL_SELECTOR_MAX_TOOLS`
+
+### Usage & Quota Module (`src/core/usage/`)
+
+Token tracking, quota enforcement, and subscription management:
+
+- `service.py`: `UsageTrackingService` singleton
+  - `log_token_usage()`: Log token consumption per feature
+  - `log_resource_usage()`: Track LlamaParse pages, file search queries, storage
+  - `get_usage_summary()`: Current period usage with breakdowns
+  - `get_subscription()`, `create_subscription()`: Subscription CRUD
+- `quota_checker.py`: `QuotaChecker` with caching for fast limit checks
+- `callback_handler.py`: `TokenTrackingCallbackHandler` for LangChain integration
+- `token_extractors.py`: Extract token counts from OpenAI/Gemini responses
+- `decorators.py`: `@check_quota`, `@track_resource` for endpoint protection
+- `schemas.py`: `TokenUsage`, `QuotaStatus`, `UsageSummary` Pydantic models
+- `models.py`: SQLAlchemy models for `subscription_tiers`, `organization_subscriptions`, `token_usage_records`
+
+**Subscription Tiers** (Free/Pro/Enterprise):
+- Token limits: 50K / 500K / 5M monthly
+- LlamaParse pages: 50 / 500 / 5K monthly
+- File search queries: 100 / 1K / 10K monthly
+- Storage: 1 / 10 / 100 GB
 
 ### Database (`src/db/`)
 
@@ -384,6 +411,13 @@ DEFAULT_SUMMARY_MAX_WORDS = 500
 - `GET /{session_id}` - Get session info
 - `DELETE /{session_id}` - End session and cleanup
 
+### Usage (`/api/v1/usage/`)
+- `GET /summary` - Current period usage summary (tokens, pages, queries, storage)
+- `GET /subscription` - Subscription details and limits
+- `GET /limits` - Quota status with approaching/exceeded warnings
+- `GET /history` - Historical usage data (7d, 30d, 90d periods)
+- `GET /breakdown` - Usage breakdown by feature/model
+
 ## Agent Configuration
 
 Both agents use Pydantic configs with environment variable defaults:
@@ -451,6 +485,8 @@ agent.shutdown(wait=True)
 
 **Scripts:**
 - `scripts/db_setup.py`: Database setup, teardown, reset, status, and SQL export
+- `scripts/seed_tiers.py`: Seed subscription tiers (Free/Pro/Enterprise)
+- `scripts/migrate_orgs_free.py`: Migrate organizations to free tier
 - `scripts/migrate_documents_status.py`: Data migration utility
 
 **Tests:**
@@ -477,3 +513,6 @@ agent.shutdown(wait=True)
 | Middleware Stack | `src/agents/core/middleware/stack.py` | Composable middleware |
 | DB Connection | `src/db/connection.py` | Per-event-loop async sessions |
 | RAG Repository | `src/db/repositories/rag_repository.py` | Store/folder management |
+| Usage Service | `src/core/usage/service.py` | Token/resource tracking |
+| Quota Checker | `src/core/usage/quota_checker.py` | Limit enforcement with caching |
+| Usage Router | `src/api/routers/usage.py` | Usage/subscription endpoints |

@@ -282,3 +282,460 @@ class TestGetOrCreateOrgStore:
 
             assert result == mock_new_store_info
             mock_create.assert_called_once()
+
+
+class TestCreateStoreEndpoint:
+    """Tests for POST /stores endpoint."""
+
+    @pytest.fixture
+    def client(self):
+        """Create a test client."""
+        from src.api.app import create_app
+        app = create_app()
+        return TestClient(app)
+
+    @pytest.fixture
+    def headers(self):
+        """Return headers with required X-Organization-ID."""
+        return {"X-Organization-ID": TEST_ORG_ID}
+
+    def test_create_store_new(self, client, headers):
+        """Test creating a new store when org doesn't have one."""
+        mock_gemini_store = MagicMock()
+        mock_gemini_store.name = "fileSearchStores/new-store"
+
+        new_store_data = {
+            "id": "store-new",
+            "display_name": "test_org_file_search_store",
+            "gemini_store_id": "fileSearchStores/new-store",
+            "created_at": "2024-01-01T00:00:00Z",
+        }
+
+        with patch("src.api.routers.rag.rag_repository.get_store_by_org", new_callable=AsyncMock, return_value=None), \
+             patch("src.rag.gemini_file_store.create_file_search_store", return_value=mock_gemini_store), \
+             patch("src.api.routers.rag.rag_repository.create_store", new_callable=AsyncMock, return_value=new_store_data):
+
+            response = client.post(
+                "/api/v1/rag/stores",
+                headers=headers,
+                json={"display_name": "Test Store"}
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert data["store_id"] == "store-new"
+
+    def test_create_store_already_exists(self, client, headers):
+        """Test that creating a store returns existing store if org already has one."""
+        existing_store = {
+            "id": "store-existing",
+            "display_name": "test_org_file_search_store",
+            "gemini_store_id": "fileSearchStores/existing",
+            "created_at": "2024-01-01T00:00:00Z",
+        }
+
+        with patch("src.api.routers.rag.rag_repository.get_store_by_org", new_callable=AsyncMock, return_value=existing_store):
+
+            response = client.post(
+                "/api/v1/rag/stores",
+                headers=headers,
+                json={"display_name": "Test Store"}
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert data["store_id"] == "store-existing"
+
+
+class TestListStoresEndpoint:
+    """Tests for GET /stores endpoint."""
+
+    @pytest.fixture
+    def client(self):
+        """Create a test client."""
+        from src.api.app import create_app
+        app = create_app()
+        return TestClient(app)
+
+    @pytest.fixture
+    def headers(self):
+        """Return headers with required X-Organization-ID."""
+        return {"X-Organization-ID": TEST_ORG_ID}
+
+    def test_list_stores_success(self, client, headers):
+        """Test listing stores for organization."""
+        stores = [
+            {
+                "id": "store-1",
+                "display_name": "store_one",
+                "created_at": "2024-01-01T00:00:00Z",
+                "active_documents_count": 10,
+            }
+        ]
+
+        with patch("src.api.routers.rag.rag_repository.list_stores", new_callable=AsyncMock, return_value=stores):
+
+            response = client.get("/api/v1/rag/stores", headers=headers)
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert len(data["stores"]) == 1
+            assert data["stores"][0]["store_id"] == "store-1"
+
+    def test_list_stores_empty(self, client, headers):
+        """Test listing stores when org has no stores."""
+        with patch("src.api.routers.rag.rag_repository.list_stores", new_callable=AsyncMock, return_value=[]):
+
+            response = client.get("/api/v1/rag/stores", headers=headers)
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert len(data["stores"]) == 0
+
+
+class TestGetStoreEndpoint:
+    """Tests for GET /stores/{store_id} endpoint."""
+
+    @pytest.fixture
+    def client(self):
+        """Create a test client."""
+        from src.api.app import create_app
+        app = create_app()
+        return TestClient(app)
+
+    @pytest.fixture
+    def headers(self):
+        """Return headers with required X-Organization-ID."""
+        return {"X-Organization-ID": TEST_ORG_ID}
+
+    def test_get_store_success(self, client, headers):
+        """Test getting a store by ID."""
+        store_info = {
+            "id": "store-123",
+            "display_name": "test_store",
+            "organization_id": TEST_ORG_ID,
+            "gemini_store_id": "fileSearchStores/gemini-123",
+            "created_at": "2024-01-01T00:00:00Z",
+            "active_documents_count": 5,
+        }
+
+        with patch("src.api.routers.rag.validate_store_ownership", new_callable=AsyncMock, return_value=store_info):
+
+            response = client.get("/api/v1/rag/stores/store-123", headers=headers)
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            # Response model is CreateStoreResponse which has store_id field
+            assert data["store_id"] == "store-123"
+
+    def test_get_store_not_found(self, client, headers):
+        """Test 404 when store doesn't exist."""
+        from fastapi import HTTPException
+
+        with patch("src.api.routers.rag.validate_store_ownership", new_callable=AsyncMock, side_effect=HTTPException(status_code=404, detail="Store not found")):
+
+            response = client.get("/api/v1/rag/stores/nonexistent", headers=headers)
+
+            assert response.status_code == 404
+
+
+class TestDeleteStoreEndpoint:
+    """Tests for DELETE /stores/{store_id} endpoint."""
+
+    @pytest.fixture
+    def client(self):
+        """Create a test client."""
+        from src.api.app import create_app
+        app = create_app()
+        return TestClient(app)
+
+    @pytest.fixture
+    def headers(self):
+        """Return headers with required X-Organization-ID."""
+        return {"X-Organization-ID": TEST_ORG_ID}
+
+    def test_delete_store_success(self, client, headers):
+        """Test deleting a store."""
+        store_info = {
+            "id": "store-123",
+            "display_name": "test_store",
+            "organization_id": TEST_ORG_ID,
+            "gemini_store_id": "fileSearchStores/gemini-123",
+        }
+
+        with patch("src.api.routers.rag.validate_store_ownership", new_callable=AsyncMock, return_value=store_info), \
+             patch("src.rag.gemini_file_store.delete_store") as mock_delete, \
+             patch("src.api.routers.rag.rag_repository.delete_store", new_callable=AsyncMock, return_value=True):
+
+            response = client.delete("/api/v1/rag/stores/store-123", headers=headers)
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+
+
+class TestListStoreFilesEndpoint:
+    """Tests for GET /stores/{store_id}/files endpoint."""
+
+    @pytest.fixture
+    def client(self):
+        """Create a test client."""
+        from src.api.app import create_app
+        app = create_app()
+        return TestClient(app)
+
+    @pytest.fixture
+    def headers(self):
+        """Return headers with required X-Organization-ID."""
+        return {"X-Organization-ID": TEST_ORG_ID}
+
+    def test_list_store_files_success(self, client, headers):
+        """Test listing files in a store."""
+        store_info = {
+            "id": "store-123",
+            "display_name": "test_store",
+            "organization_id": TEST_ORG_ID,
+            "gemini_store_id": "fileSearchStores/gemini-123",
+        }
+
+        mock_files = [
+            MagicMock(name="file1.md", display_name="file1.md"),
+            MagicMock(name="file2.md", display_name="file2.md"),
+        ]
+
+        with patch("src.api.routers.rag.validate_store_ownership", new_callable=AsyncMock, return_value=store_info), \
+             patch("src.rag.gemini_file_store.list_documents", return_value=mock_files):
+
+            response = client.get("/api/v1/rag/stores/store-123/files", headers=headers)
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert "files" in data
+
+
+class TestCreateFolderEndpoint:
+    """Tests for POST /folders endpoint."""
+
+    @pytest.fixture
+    def client(self):
+        """Create a test client."""
+        from src.api.app import create_app
+        app = create_app()
+        return TestClient(app)
+
+    @pytest.fixture
+    def headers(self):
+        """Return headers with required X-Organization-ID."""
+        return {"X-Organization-ID": TEST_ORG_ID}
+
+    def test_create_folder_success(self, client, headers):
+        """Test creating a new folder."""
+        store_info = {
+            "id": "store-123",
+            "display_name": "test_store",
+        }
+
+        folder_data = {
+            "id": "folder-new",
+            "folder_name": "Invoices",
+            "store_id": "store-123",
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
+            "organization_id": TEST_ORG_ID,
+        }
+
+        with patch("src.api.routers.rag.rag_repository.get_store_by_org", new_callable=AsyncMock, return_value=store_info), \
+             patch("src.api.routers.rag.rag_repository.get_folder_by_name", new_callable=AsyncMock, return_value=None), \
+             patch("src.api.routers.rag.rag_repository.create_folder", new_callable=AsyncMock, return_value=folder_data):
+
+            response = client.post(
+                "/api/v1/rag/folders",
+                headers=headers,
+                json={"folder_name": "Invoices"}
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            # CreateFolderResponse has folder object with folder_id
+            assert data["folder"]["folder_id"] == "folder-new"
+
+    def test_create_folder_duplicate_name(self, client, headers):
+        """Test error when folder name already exists."""
+        store_info = {"id": "store-123"}
+        existing_folder = {"id": "folder-existing", "name": "Invoices"}
+
+        with patch("src.api.routers.rag.rag_repository.get_store_by_org", new_callable=AsyncMock, return_value=store_info), \
+             patch("src.api.routers.rag.rag_repository.get_folder_by_name", new_callable=AsyncMock, return_value=existing_folder):
+
+            response = client.post(
+                "/api/v1/rag/folders",
+                headers=headers,
+                json={"folder_name": "Invoices"}
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is False
+            assert "already exists" in data["error"]
+
+    def test_create_folder_no_store(self, client, headers):
+        """Test error when org has no store."""
+        with patch("src.api.routers.rag.rag_repository.get_store_by_org", new_callable=AsyncMock, return_value=None):
+
+            response = client.post(
+                "/api/v1/rag/folders",
+                headers=headers,
+                json={"folder_name": "Invoices"}
+            )
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is False
+            assert "store" in data["error"].lower()
+
+
+class TestListFoldersEndpoint:
+    """Tests for GET /folders endpoint."""
+
+    @pytest.fixture
+    def client(self):
+        """Create a test client."""
+        from src.api.app import create_app
+        app = create_app()
+        return TestClient(app)
+
+    @pytest.fixture
+    def headers(self):
+        """Return headers with required X-Organization-ID."""
+        return {"X-Organization-ID": TEST_ORG_ID}
+
+    def test_list_folders_success(self, client, headers):
+        """Test listing folders for organization."""
+        folders = [
+            {
+                "id": "folder-1",
+                "folder_name": "Invoices",
+                "store_id": "store-123",
+                "created_at": "2024-01-01T00:00:00Z",
+                "updated_at": "2024-01-01T00:00:00Z",
+                "organization_id": TEST_ORG_ID,
+            },
+            {
+                "id": "folder-2",
+                "folder_name": "Reports",
+                "store_id": "store-123",
+                "created_at": "2024-01-02T00:00:00Z",
+                "updated_at": "2024-01-02T00:00:00Z",
+                "organization_id": TEST_ORG_ID,
+            },
+        ]
+
+        with patch("src.api.routers.rag.rag_repository.list_folders", new_callable=AsyncMock, return_value=folders):
+
+            response = client.get("/api/v1/rag/folders", headers=headers)
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            assert len(data["folders"]) == 2
+
+
+class TestGetFolderEndpoint:
+    """Tests for GET /folders/{folder_id} endpoint."""
+
+    @pytest.fixture
+    def client(self):
+        """Create a test client."""
+        from src.api.app import create_app
+        app = create_app()
+        return TestClient(app)
+
+    @pytest.fixture
+    def headers(self):
+        """Return headers with required X-Organization-ID."""
+        return {"X-Organization-ID": TEST_ORG_ID}
+
+    def test_get_folder_success(self, client, headers):
+        """Test getting a folder by ID."""
+        folder_info = {
+            "id": "folder-123",
+            "folder_name": "Invoices",
+            "organization_id": TEST_ORG_ID,
+            "store_id": "store-123",
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
+        }
+
+        with patch("src.api.routers.rag.validate_folder_ownership", new_callable=AsyncMock, return_value=folder_info):
+
+            response = client.get("/api/v1/rag/folders/folder-123", headers=headers)
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+            # GetFolderResponse has folder object with folder_id
+            assert data["folder"]["folder_id"] == "folder-123"
+
+    def test_get_folder_not_found(self, client, headers):
+        """Test 404 when folder doesn't exist."""
+        from fastapi import HTTPException
+
+        with patch("src.api.routers.rag.validate_folder_ownership", new_callable=AsyncMock, side_effect=HTTPException(status_code=404, detail="Folder not found")):
+
+            response = client.get("/api/v1/rag/folders/nonexistent", headers=headers)
+
+            assert response.status_code == 404
+
+
+class TestDeleteFolderEndpoint:
+    """Tests for DELETE /folders/{folder_id} endpoint."""
+
+    @pytest.fixture
+    def client(self):
+        """Create a test client."""
+        from src.api.app import create_app
+        app = create_app()
+        return TestClient(app)
+
+    @pytest.fixture
+    def headers(self):
+        """Return headers with required X-Organization-ID."""
+        return {"X-Organization-ID": TEST_ORG_ID}
+
+    def test_delete_folder_success(self, client, headers):
+        """Test deleting a folder."""
+        folder_info = {
+            "id": "folder-123",
+            "folder_name": "Invoices",
+            "organization_id": TEST_ORG_ID,
+            "store_id": "store-123",
+            "document_count": 0,
+            "total_size_bytes": 0,
+        }
+
+        with patch("src.api.routers.rag.validate_folder_ownership", new_callable=AsyncMock, return_value=folder_info), \
+             patch("src.api.routers.rag.rag_repository.has_subfolders", new_callable=AsyncMock, return_value=False), \
+             patch("src.api.routers.rag.rag_repository.delete_folder", new_callable=AsyncMock, return_value={"success": True, "document_count": 0}):
+
+            response = client.delete("/api/v1/rag/folders/folder-123", headers=headers)
+
+            assert response.status_code == 200
+            data = response.json()
+            assert data["success"] is True
+
+    def test_delete_folder_not_found(self, client, headers):
+        """Test 404 when folder doesn't exist."""
+        from fastapi import HTTPException
+
+        with patch("src.api.routers.rag.validate_folder_ownership", new_callable=AsyncMock, side_effect=HTTPException(status_code=404, detail="Folder not found")):
+
+            response = client.delete("/api/v1/rag/folders/nonexistent", headers=headers)
+
+            assert response.status_code == 404

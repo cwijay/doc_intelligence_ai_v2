@@ -451,6 +451,7 @@ class DatabaseManager:
         if loop_id is None:
             loop_id = self._get_loop_id()
 
+        # Close connector synchronously
         if loop_id in self._connectors and self._connectors[loop_id]:
             try:
                 self._connectors[loop_id].close()
@@ -458,14 +459,52 @@ class DatabaseManager:
                 logger.debug(f"Error closing connector: {e}")
             del self._connectors[loop_id]
 
+        # Dispose engine pool properly
         if loop_id in self._engines:
-            # Can't dispose async engine synchronously, just remove reference
+            engine = self._engines[loop_id]
             del self._engines[loop_id]
+
+            # Try to dispose the underlying pool synchronously
+            try:
+                pool = engine.pool
+                if pool:
+                    pool.dispose()
+                    logger.debug(f"Disposed connection pool synchronously for loop {loop_id}")
+            except Exception as e:
+                logger.debug(f"Could not dispose pool synchronously: {e}")
 
         if loop_id in self._session_factories:
             del self._session_factories[loop_id]
 
         logger.debug(f"Closed database resources for loop {loop_id}")
+
+    def get_pool_stats(self) -> Dict[str, Any]:
+        """
+        Get connection pool statistics for monitoring.
+
+        Returns:
+            Dictionary with pool stats per event loop.
+        """
+        stats = {
+            "pools_count": len(self._engines),
+            "shutdown_mode": self._shutdown,
+            "pools": {}
+        }
+
+        for loop_id, engine in self._engines.items():
+            try:
+                pool = engine.pool
+                if pool:
+                    stats["pools"][str(loop_id)] = {
+                        "size": pool.size(),
+                        "checked_out": pool.checkedout(),
+                        "overflow": pool.overflow(),
+                        "checked_in": pool.checkedin(),
+                    }
+            except Exception as e:
+                stats["pools"][str(loop_id)] = {"error": str(e)}
+
+        return stats
 
     async def close_all(self):
         """

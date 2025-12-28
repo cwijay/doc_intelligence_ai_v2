@@ -20,7 +20,7 @@ import time
 import glob
 import datetime
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed
 from dotenv import load_dotenv
 from google import genai
 from google.genai import types
@@ -62,43 +62,45 @@ api_retry = retry(
     )
 )
 
-# Background executor for non-blocking audit logging
-_audit_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="audit")
-
-
-def _log_event(event_type: str, file_name: str = None, details: dict = None):
+def _log_event(
+    event_type: str,
+    file_name: str = None,
+    details: dict = None,
+    organization_id: str = None,
+):
     """
-    Log audit event asynchronously (non-blocking).
+    Log audit event asynchronously via centralized audit queue.
 
-    Uses a background thread pool so audit logging doesn't
-    add latency to the main operation.
+    Uses the shared audit queue to prevent connection pool proliferation.
     """
-    def _do_log():
-        try:
-            import asyncio
-            from src.db.repositories.audit_repository import log_event
-            asyncio.run(log_event(event_type, file_name=file_name, details=details))
-        except Exception as e:
-            logger.warning(f"Failed to log audit event: {e}")
+    try:
+        from src.agents.core.audit_queue import enqueue_audit_event
 
-    _audit_executor.submit(_do_log)
+        enqueue_audit_event(
+            event_type=event_type,
+            file_name=file_name,
+            details=details,
+            organization_id=organization_id,
+        )
+    except Exception as e:
+        logger.warning(f"Failed to enqueue audit event: {e}")
 
 
 def shutdown_audit_executor(wait: bool = True):
     """
-    Shutdown the background audit executor.
+    Shutdown the background audit queue.
 
-    Should be called during application shutdown or after integration tests
-    to ensure all pending audit logs are flushed and resources are released.
+    DEPRECATED: Use get_audit_queue().shutdown() instead.
+    Kept for backwards compatibility.
 
     Args:
         wait: If True, wait for pending tasks to complete before returning.
     """
-    global _audit_executor
-    if _audit_executor:
-        logger.info("Shutting down audit executor...")
-        _audit_executor.shutdown(wait=wait)
-        logger.info("Audit executor shutdown complete.")
+    try:
+        from src.agents.core.audit_queue import get_audit_queue
+        get_audit_queue().shutdown(wait=wait)
+    except Exception as e:
+        logger.warning(f"Error shutting down audit queue: {e}")
 
 
 @api_retry

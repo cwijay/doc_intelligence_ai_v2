@@ -112,7 +112,16 @@ Selected Tools:"""
 
         try:
             response = self.llm.invoke(prompt)
-            response_text = response.content.strip()
+            # Handle both string and list content formats (Gemini returns list)
+            content = response.content
+            if isinstance(content, list):
+                # Extract text from content blocks (Gemini format)
+                response_text = "".join(
+                    block.get("text", str(block)) if isinstance(block, dict) else str(block)
+                    for block in content
+                ).strip()
+            else:
+                response_text = content.strip()
 
             # Parse the response to get tool names
             selected_names = []

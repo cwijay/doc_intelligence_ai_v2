@@ -582,6 +582,7 @@ async def create_folder(
             )
 
         folder_info = FolderInfo(
+            id=folder_data["id"],
             folder_id=folder_data["id"],
             folder_name=folder_data["folder_name"],
             description=folder_data.get("description"),
@@ -638,6 +639,7 @@ async def list_folders(
 
         folders = [
             FolderInfo(
+                id=f["id"],
                 folder_id=f["id"],
                 folder_name=f["folder_name"],
                 description=f.get("description"),
@@ -687,6 +689,7 @@ async def get_folder(
         info = await validate_folder_ownership(folder_id, org_id)
 
         folder_info = FolderInfo(
+            id=info["id"],
             folder_id=info["id"],
             folder_name=info["folder_name"],
             description=info.get("description"),

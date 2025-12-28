@@ -5,6 +5,7 @@ from datetime import datetime
 from typing import Dict, Any
 
 from fastapi import APIRouter
+from sqlalchemy import text
 
 from ..schemas.common import HealthStatus
 
@@ -39,11 +40,18 @@ async def health_check():
         if engine:
             async with db.session() as session:
                 if session:
-                    await session.execute("SELECT 1")
-                    components["database"] = {
+                    await session.execute(text("SELECT 1"))
+                    db_info = {
                         "status": "healthy",
                         "message": "Connected"
                     }
+                    # Add pool stats for monitoring connection usage
+                    try:
+                        pool_stats = db.get_pool_stats()
+                        db_info["pool_stats"] = pool_stats
+                    except Exception as pe:
+                        db_info["pool_stats_error"] = str(pe)
+                    components["database"] = db_info
                 else:
                     components["database"] = {
                         "status": "disabled",

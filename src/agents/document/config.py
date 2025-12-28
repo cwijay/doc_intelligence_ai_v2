@@ -1,14 +1,28 @@
-"""Configuration for Document Agent."""
+"""Configuration for Document Agent.
+
+Inherits shared settings from BaseAgentConfig and adds document-specific options.
+"""
 
 import os
 from typing import Optional
-from pydantic import BaseModel, Field, field_validator
+from pydantic import Field, field_validator
+
+from src.agents.core.base_config import BaseAgentConfig
 
 
-class DocumentAgentConfig(BaseModel):
-    """Configuration settings for the Document Agent."""
+class DocumentAgentConfig(BaseAgentConfig):
+    """Configuration settings for the Document Agent.
 
-    # LLM Settings (Gemini-only for cost efficiency)
+    Inherits from BaseAgentConfig:
+    - temperature, timeout_seconds, max_retries
+    - session_timeout_minutes
+    - rate_limit_requests, rate_limit_window_seconds
+    - allowed_file_base
+    - enable_short_term_memory, enable_long_term_memory, short_term_max_messages
+    - debug, log_level
+    """
+
+    # LLM Settings (Gemini - document-specific)
     google_api_key: Optional[str] = Field(
         default_factory=lambda: os.getenv("GOOGLE_API_KEY"),
         description="Google API key for Gemini"
@@ -19,19 +33,13 @@ class DocumentAgentConfig(BaseModel):
         description="Gemini model to use"
     )
 
+    # Override temperature with document-specific default
     temperature: float = Field(
         default_factory=lambda: float(os.getenv("DOCUMENT_AGENT_TEMPERATURE", "0.3")),
         description="Temperature for LLM responses"
     )
 
-    @field_validator('temperature')
-    @classmethod
-    def validate_temperature(cls, v: float) -> float:
-        if not 0.0 <= v <= 2.0:
-            raise ValueError("Temperature must be between 0.0 and 2.0")
-        return v
-
-    # Document Sources
+    # Document Sources (document-specific)
     parsed_directory: str = Field(
         default_factory=lambda: os.getenv("DOCUMENT_AGENT_PARSED_DIR", "parsed"),
         description="Directory containing pre-parsed .md files"
@@ -42,7 +50,7 @@ class DocumentAgentConfig(BaseModel):
         description="Directory containing raw text files (.txt, .md)"
     )
 
-    # Generation Defaults (all configurable via env vars)
+    # Generation Defaults (document-specific)
     default_num_faqs: int = Field(
         default_factory=lambda: int(os.getenv("DOCUMENT_AGENT_NUM_FAQS", "10")),
         description="Default number of FAQs to generate"
@@ -89,30 +97,7 @@ class DocumentAgentConfig(BaseModel):
             raise ValueError("Summary max words must be between 50 and 2000")
         return v
 
-    # Agent Settings
-    max_retries: int = Field(
-        default_factory=lambda: int(os.getenv("DOCUMENT_AGENT_MAX_RETRIES", "3")),
-        description="Maximum number of retries for agent operations"
-    )
-
-    timeout_seconds: int = Field(
-        default_factory=lambda: int(os.getenv("DOCUMENT_AGENT_TIMEOUT", "300")),
-        description="Timeout in seconds for agent operations"
-    )
-
-    @field_validator('timeout_seconds')
-    @classmethod
-    def validate_timeout(cls, v: int) -> int:
-        if not 10 <= v <= 600:
-            raise ValueError("Timeout must be between 10 and 600 seconds")
-        return v
-
-    session_timeout_minutes: int = Field(
-        default_factory=lambda: int(os.getenv("DOCUMENT_AGENT_SESSION_TIMEOUT", "30")),
-        description="Session timeout in minutes"
-    )
-
-    # Persistence
+    # Persistence (document-specific)
     persist_to_database: bool = Field(
         default_factory=lambda: os.getenv("DOCUMENT_AGENT_PERSIST", "true").lower() == "true",
         description="Whether to persist results to database"
@@ -123,51 +108,7 @@ class DocumentAgentConfig(BaseModel):
         description="Directory for JSON output files"
     )
 
-    # Rate Limiting Configuration
-    rate_limit_requests: int = Field(
-        default_factory=lambda: int(os.getenv("DOCUMENT_AGENT_RATE_LIMIT", "10")),
-        description="Maximum requests per rate limit window"
-    )
-
-    rate_limit_window_seconds: int = Field(
-        default_factory=lambda: int(os.getenv("DOCUMENT_AGENT_RATE_WINDOW", "60")),
-        description="Rate limit window in seconds"
-    )
-
-    # Security Configuration
-    allowed_file_base: str = Field(
-        default_factory=lambda: os.getenv("ALLOWED_FILE_BASE", "/Users"),
-        description="Base directory for allowed file access"
-    )
-
-    # Development Configuration
-    debug: bool = Field(
-        default_factory=lambda: os.getenv("DEBUG", "false").lower() == "true",
-        description="Enable debug mode"
-    )
-
-    log_level: str = Field(
-        default_factory=lambda: os.getenv("LOG_LEVEL", "INFO").upper(),
-        description="Logging level"
-    )
-
-    # Memory Configuration
-    enable_short_term_memory: bool = Field(
-        default_factory=lambda: os.getenv("ENABLE_SHORT_TERM_MEMORY", "true").lower() == "true",
-        description="Enable short-term conversation memory"
-    )
-
-    enable_long_term_memory: bool = Field(
-        default_factory=lambda: os.getenv("ENABLE_LONG_TERM_MEMORY", "true").lower() == "true",
-        description="Enable long-term persistent memory"
-    )
-
-    short_term_max_messages: int = Field(
-        default_factory=lambda: int(os.getenv("SHORT_TERM_MEMORY_MAX_MESSAGES", "20")),
-        description="Maximum messages to keep in short-term memory"
-    )
-
-    # Middleware Configuration (LangChain 1.2.0 built-in)
+    # Middleware Configuration (document-specific)
     enable_middleware: bool = Field(
         default_factory=lambda: os.getenv("ENABLE_MIDDLEWARE", "true").lower() == "true",
         description="Enable LangChain middleware stack"
@@ -211,7 +152,7 @@ class DocumentAgentConfig(BaseModel):
             raise ValueError(f"pii_strategy must be one of: {valid}")
         return v.lower()
 
-    # Tool Selection Configuration
+    # Tool Selection Configuration (document-specific)
     enable_tool_selection: bool = Field(
         default_factory=lambda: os.getenv("ENABLE_TOOL_SELECTION", "true").lower() == "true",
         description="Enable intelligent tool pre-selection based on query intent"

@@ -20,6 +20,13 @@ from ..dependencies import get_upload_directory, get_parsed_directory, get_max_u
 from ..schemas.errors import FILE_ERROR_RESPONSES
 from src.utils.timer_utils import elapsed_ms
 from src.utils.gcs_utils import is_gcs_path, extract_gcs_path_parts
+from ..usage import (
+    check_quota,
+    track_resource,
+    check_token_limit_before_processing,
+    check_resource_limit_before_processing,
+    log_resource_usage_async,
+)
 from ..schemas.ingest import (
     ParseRequest,
     ParseResponse,
@@ -64,6 +71,8 @@ async def upload_files(
     **Max file size**: 50MB per file (configurable via MAX_UPLOAD_SIZE_MB environment variable)
 
     **Multi-tenancy**: Files are stored in organization-specific directories.
+
+    **Usage Tracking**: Storage bytes are tracked against the monthly storage limit.
     """
     # Multi-tenancy: Scope upload directory by organization
     org_upload_dir = os.path.join(upload_dir, org_id)
@@ -71,6 +80,7 @@ async def upload_files(
 
     uploaded = []
     failed = []
+    total_uploaded_bytes = 0
 
     for file in files:
         try:
@@ -111,16 +121,19 @@ async def upload_files(
                 logger.warning(f"Failed to register document in database: {e}")
                 # Continue without failing - file was saved successfully
 
+            file_size = len(content)
+            total_uploaded_bytes += file_size
+
             uploaded.append(UploadedFile(
                 filename=safe_filename,
                 original_filename=file.filename,
-                size_bytes=len(content),
+                size_bytes=file_size,
                 path=file_path,
                 content_type=file.content_type,
                 uploaded_at=datetime.utcnow(),
             ))
 
-            logger.info(f"Uploaded file: {safe_filename} ({len(content)} bytes)")
+            logger.info(f"Uploaded file: {safe_filename} ({file_size} bytes)")
 
         except Exception as e:
             logger.error(f"Failed to upload {file.filename}: {e}")
@@ -128,6 +141,18 @@ async def upload_files(
                 "filename": file.filename,
                 "error": str(e)
             })
+
+    # Log storage usage for successfully uploaded files (non-blocking)
+    if total_uploaded_bytes > 0:
+        log_resource_usage_async(
+            org_id=org_id,
+            resource_type="storage_bytes",
+            amount=total_uploaded_bytes,
+            extra_data={
+                "files_uploaded": len(uploaded),
+                "filenames": [f.filename for f in uploaded],
+            },
+        )
 
     return UploadResponse(
         success=len(uploaded) > 0,
@@ -160,8 +185,44 @@ async def parse_document(
     **Storage**: Parsed output can be automatically saved to GCS for later use.
 
     **Multi-tenancy**: Parsed output is stored in organization-specific GCS paths.
+
+    **Quota**: Consumes LlamaParse pages from your subscription.
     """
     start_time = time.time()
+
+    # Check LlamaParse page quota before processing
+    try:
+        if check_quota:
+            from ..usage import check_token_limit_before_processing
+            from src.core.usage import get_quota_checker
+
+            checker = get_quota_checker()
+            quota_result = await checker.check_quota(
+                org_id=org_id,
+                usage_type="llamaparse_pages",
+                estimated_usage=1,  # Estimate 1 page per parse request
+            )
+            if not quota_result.allowed:
+                from fastapi import HTTPException, status
+                raise HTTPException(
+                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
+                    detail={
+                        "error": "quota_exceeded",
+                        "usage_type": "llamaparse_pages",
+                        "current_usage": quota_result.current_usage,
+                        "limit": quota_result.limit,
+                        "message": f"LlamaParse page limit exceeded. Used: {quota_result.current_usage}/{quota_result.limit}",
+                        "upgrade": {
+                            "tier": quota_result.upgrade_tier,
+                            "message": quota_result.upgrade_message,
+                            "url": quota_result.upgrade_url,
+                        } if quota_result.upgrade_tier else None,
+                    }
+                )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning(f"LlamaParse quota check failed, proceeding anyway: {e}")
 
     # Debug: Log incoming request
     logger.info(f"Parse request received: file_path={request.file_path}, folder_name={request.folder_name}, org_id={org_id}")
@@ -326,6 +387,26 @@ async def parse_document(
                 logger.error(f"Failed to save to GCS: {e}")
                 # Continue without failing the whole request
                 output_path = None
+
+        # Track LlamaParse page usage after successful parsing
+        try:
+            if track_resource:
+                from src.core.usage import get_usage_service
+
+                service = get_usage_service()
+                # Estimate page count based on content length (roughly 3000 chars per page)
+                estimated_pages = max(1, len(parsed_content) // 3000)
+                asyncio.create_task(
+                    service.log_resource_usage(
+                        org_id=org_id,
+                        resource_type="llamaparse_pages",
+                        amount=estimated_pages,
+                        file_name=Path(request.file_path).name,
+                        metadata={"file_path": request.file_path, "folder_name": request.folder_name},
+                    )
+                )
+        except Exception as e:
+            logger.warning(f"Failed to log LlamaParse usage: {e}")
 
         return ParseResponse(
             success=True,
@@ -533,10 +614,10 @@ async def save_and_index(
 
         logger.info(f"Content saved to GCS: {saved_path}")
 
-        # Step 2: Get or create Gemini store using existing function from rag router
-        from src.api.routers.rag import _get_or_create_org_store
+        # Step 2: Get or create Gemini store using existing function from rag_helpers
+        from src.api.routers.rag_helpers import get_or_create_org_store
 
-        store_info = await _get_or_create_org_store(org_id, request.org_name)
+        store_info = await get_or_create_org_store(org_id, request.org_name)
         logger.info(f"Using Gemini store: {store_info['id']} ({store_info['display_name']})")
 
         # Step 3: Upload to Gemini store using existing function
