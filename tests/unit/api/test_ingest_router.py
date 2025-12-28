@@ -403,14 +403,10 @@ class TestSaveAndIndexEndpoint:
         mock_gemini_store = MagicMock()
         mock_gemini_store.name = "fileSearchStores/abc"
 
-        # Mock the entire rag module to provide the missing function
-        mock_rag_module = MagicMock()
-        mock_rag_module._get_or_create_org_store = AsyncMock(return_value=mock_store_info)
-
-        # Patch at correct module locations
+        # Patch at correct module locations - imports happen inside save_and_index function
         with patch("src.api.routers.ingest.get_storage", return_value=mock_storage), \
              patch("src.api.routers.ingest.get_storage_config", return_value=mock_storage_config), \
-             patch.dict("sys.modules", {"src.api.routers.rag": mock_rag_module}), \
+             patch("src.api.routers.rag_helpers.get_or_create_org_store", new_callable=AsyncMock, return_value=mock_store_info), \
              patch("google.genai.Client") as mock_genai_client, \
              patch("src.rag.gemini_file_store.upload_file") as mock_upload:
 
@@ -474,14 +470,10 @@ class TestSaveAndIndexEndpoint:
             "gemini_store_id": "fileSearchStores/nonexistent",
         }
 
-        # Mock the entire rag module to provide the missing function
-        mock_rag_module = MagicMock()
-        mock_rag_module._get_or_create_org_store = AsyncMock(return_value=mock_store_info)
-
-        # Patch at correct module locations
+        # Patch at correct module locations - imports happen inside save_and_index function
         with patch("src.api.routers.ingest.get_storage", return_value=mock_storage), \
              patch("src.api.routers.ingest.get_storage_config", return_value=mock_storage_config), \
-             patch.dict("sys.modules", {"src.api.routers.rag": mock_rag_module}), \
+             patch("src.api.routers.rag_helpers.get_or_create_org_store", new_callable=AsyncMock, return_value=mock_store_info), \
              patch("google.genai.Client") as mock_genai_client:
 
             mock_client = MagicMock()
@@ -521,14 +513,10 @@ class TestSaveAndIndexEndpoint:
         mock_gemini_store = MagicMock()
         mock_gemini_store.name = "fileSearchStores/abc"
 
-        # Mock the entire rag module to provide the missing function
-        mock_rag_module = MagicMock()
-        mock_rag_module._get_or_create_org_store = AsyncMock(return_value=mock_store_info)
-
-        # Patch at correct module locations
+        # Patch at correct module locations - imports happen inside save_and_index function
         with patch("src.api.routers.ingest.get_storage", return_value=mock_storage), \
              patch("src.api.routers.ingest.get_storage_config", return_value=mock_storage_config), \
-             patch.dict("sys.modules", {"src.api.routers.rag": mock_rag_module}), \
+             patch("src.api.routers.rag_helpers.get_or_create_org_store", new_callable=AsyncMock, return_value=mock_store_info), \
              patch("google.genai.Client") as mock_genai_client, \
              patch("src.rag.gemini_file_store.upload_file") as mock_upload:
 
