@@ -1,14 +1,28 @@
-"""Configuration for Sheets Agent."""
+"""Configuration for Sheets Agent.
+
+Inherits shared settings from BaseAgentConfig and adds sheets-specific options.
+"""
 
 import os
 from typing import List, Optional
-from pydantic import BaseModel, Field, field_validator
+from pydantic import Field, field_validator
+
+from src.agents.core.base_config import BaseAgentConfig
 
 
-class SheetsAgentConfig(BaseModel):
-    """Configuration settings for the Sheets Agent."""
+class SheetsAgentConfig(BaseAgentConfig):
+    """Configuration settings for the Sheets Agent.
 
-    # OpenAI LLM Configuration
+    Inherits from BaseAgentConfig:
+    - temperature, timeout_seconds, max_retries
+    - session_timeout_minutes
+    - rate_limit_requests, rate_limit_window_seconds
+    - allowed_file_base
+    - enable_short_term_memory, enable_long_term_memory, short_term_max_messages
+    - debug, log_level
+    """
+
+    # OpenAI LLM Configuration (sheets-specific)
     openai_api_key: Optional[str] = Field(
         default_factory=lambda: os.getenv("OPENAI_API_KEY"),
         description="OpenAI API key"
@@ -19,19 +33,13 @@ class SheetsAgentConfig(BaseModel):
         description="OpenAI model to use for sheets agent"
     )
 
+    # Override temperature with sheets-specific default
     temperature: float = Field(
         default_factory=lambda: float(os.getenv("OPENAI_TEMPERATURE", "0.1")),
         description="Temperature for LLM responses"
     )
 
-    @field_validator('temperature')
-    @classmethod
-    def validate_temperature(cls, v: float) -> float:
-        if not 0.0 <= v <= 2.0:
-            raise ValueError("Temperature must be between 0.0 and 2.0")
-        return v
-
-    # File Configuration
+    # File Configuration (sheets-specific)
     source_directory: str = Field(
         default_factory=lambda: os.getenv("SOURCE_DIRECTORY", "data/sheets"),
         description="Directory containing Excel/CSV files"
@@ -54,24 +62,7 @@ class SheetsAgentConfig(BaseModel):
             raise ValueError("Max file size must be between 1 and 500 MB")
         return v
 
-    # Agent Configuration
-    max_retries: int = Field(
-        default_factory=lambda: int(os.getenv("SHEETS_AGENT_MAX_RETRIES", "3")),
-        description="Maximum number of retries for agent operations"
-    )
-
-    timeout_seconds: int = Field(
-        default_factory=lambda: int(os.getenv("SHEETS_AGENT_TIMEOUT", "300")),
-        description="Timeout in seconds for agent operations"
-    )
-
-    @field_validator('timeout_seconds')
-    @classmethod
-    def validate_timeout(cls, v: int) -> int:
-        if not 10 <= v <= 600:
-            raise ValueError("Timeout must be between 10 and 600 seconds")
-        return v
-
+    # Agent Configuration (sheets-specific)
     max_tool_calls: int = Field(
         default_factory=lambda: int(os.getenv("MAX_TOOL_CALLS", "5")),
         description="Maximum number of tool calls per agent execution"
@@ -82,41 +73,7 @@ class SheetsAgentConfig(BaseModel):
         description="Maximum number of agent iterations"
     )
 
-    # Session Configuration
-    session_timeout_minutes: int = Field(
-        default_factory=lambda: int(os.getenv("SESSION_TIMEOUT_MINUTES", "30")),
-        description="Session timeout in minutes"
-    )
-
-    # Development Configuration
-    debug: bool = Field(
-        default_factory=lambda: os.getenv("DEBUG", "false").lower() == "true",
-        description="Enable debug mode"
-    )
-
-    log_level: str = Field(
-        default_factory=lambda: os.getenv("LOG_LEVEL", "INFO").upper(),
-        description="Logging level"
-    )
-
-    # Rate Limiting Configuration
-    rate_limit_requests: int = Field(
-        default_factory=lambda: int(os.getenv("RATE_LIMIT_REQUESTS", "10")),
-        description="Maximum requests per rate limit window"
-    )
-
-    rate_limit_window_seconds: int = Field(
-        default_factory=lambda: int(os.getenv("RATE_LIMIT_WINDOW", "60")),
-        description="Rate limit window in seconds"
-    )
-
-    # Security Configuration
-    allowed_file_base: str = Field(
-        default_factory=lambda: os.getenv("ALLOWED_FILE_BASE", "/Users"),
-        description="Base directory for allowed file access"
-    )
-
-    # Performance Configuration
+    # Performance Configuration (sheets-specific)
     max_result_rows: int = Field(
         default_factory=lambda: int(os.getenv("MAX_RESULT_ROWS", "10000")),
         description="Maximum rows returned from queries"
@@ -127,20 +84,30 @@ class SheetsAgentConfig(BaseModel):
         description="DuckDB connection pool size"
     )
 
-    # Memory Configuration
-    enable_short_term_memory: bool = Field(
-        default_factory=lambda: os.getenv("ENABLE_SHORT_TERM_MEMORY", "true").lower() == "true",
-        description="Enable short-term conversation memory"
+    # Middleware Configuration (LangChain built-in middleware)
+    enable_middleware: bool = Field(
+        default_factory=lambda: os.getenv("ENABLE_MIDDLEWARE", "true").lower() == "true",
+        description="Enable LangChain middleware stack"
     )
 
-    enable_long_term_memory: bool = Field(
-        default_factory=lambda: os.getenv("ENABLE_LONG_TERM_MEMORY", "true").lower() == "true",
-        description="Enable long-term persistent memory"
+    model_retry_max_attempts: int = Field(
+        default_factory=lambda: int(os.getenv("MODEL_RETRY_MAX_ATTEMPTS", "3")),
+        description="Maximum retry attempts for model calls"
     )
 
-    short_term_max_messages: int = Field(
-        default_factory=lambda: int(os.getenv("SHORT_TERM_MEMORY_MAX_MESSAGES", "20")),
-        description="Maximum messages to keep in short-term memory"
+    tool_retry_max_attempts: int = Field(
+        default_factory=lambda: int(os.getenv("TOOL_RETRY_MAX_ATTEMPTS", "2")),
+        description="Maximum retry attempts for tool calls"
+    )
+
+    model_call_limit: int = Field(
+        default_factory=lambda: int(os.getenv("MODEL_CALL_LIMIT", "10")),
+        description="Maximum model calls per run"
+    )
+
+    tool_call_limit: int = Field(
+        default_factory=lambda: int(os.getenv("TOOL_CALL_LIMIT", "20")),
+        description="Maximum tool calls per run"
     )
 
     class Config:

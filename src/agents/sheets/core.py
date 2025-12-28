@@ -1,30 +1,34 @@
-"""Core Sheets Agent implementation using LangGraph."""
+"""Core Sheets Agent implementation using LangChain 1.2.0."""
 
 import asyncio
-import threading
 import time
 import uuid
 import hashlib
 import logging
 import os
-from collections import defaultdict, OrderedDict
-from datetime import datetime, timedelta
+from collections import OrderedDict
 from typing import Dict, List, Any, Optional
 import pandas as pd
 
 from concurrent.futures import ThreadPoolExecutor
 
-from langchain_openai import ChatOpenAI
-from langgraph.prebuilt import create_react_agent
+from langchain.chat_models import init_chat_model
+from langchain.agents import create_agent
+from langchain.agents.middleware import (
+    ModelRetryMiddleware,
+    ToolRetryMiddleware,
+    ModelCallLimitMiddleware,
+    ToolCallLimitMiddleware,
+)
 from langchain_core.messages import HumanMessage, AIMessage
-from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
+from langgraph.checkpoint.memory import MemorySaver
 
 from .config import SheetsAgentConfig
 from src.utils.timer_utils import elapsed_ms
 
-# Shared agent infrastructure imports
-from src.agents.core.rate_limiter import RateLimiter
-from src.agents.core.session_manager import SessionManager
+# Base agent and shared utilities
+from src.agents.core.base_agent import BaseAgent
+from src.agents.core.token_utils import calculate_token_usage
 
 # Background executor for non-blocking audit logging
 _audit_executor: Optional[ThreadPoolExecutor] = None
@@ -43,18 +47,6 @@ from .schemas import (
     TokenUsage,
     SessionInfo
 )
-
-# Memory imports (optional - graceful fallback if not available)
-try:
-    from src.agents.core.memory import (
-        MemoryConfig,
-        ShortTermMemory,
-        PostgresLongTermMemory,
-        ConversationSummary
-    )
-    MEMORY_AVAILABLE = True
-except ImportError:
-    MEMORY_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
@@ -146,90 +138,66 @@ Tool Selection Priority:
 Use the available tools to analyze data and provide comprehensive answers to user questions."""
 
 
-class SheetsAgent:
-    """AI-powered Excel/Sheets analysis agent using LangGraph."""
+class SheetsAgent(BaseAgent):
+    """AI-powered Excel/Sheets analysis agent using LangGraph.
+
+    Inherits from BaseAgent for shared functionality:
+    - Session management
+    - Rate limiting
+    - Memory (short-term and long-term)
+    - Audit logging
+    """
 
     def __init__(self, config: SheetsAgentConfig):
-        """
-        Initialize Sheets Agent.
+        """Initialize Sheets Agent.
 
         Args:
             config: Agent configuration
         """
-        self.config = config
-        self.session_manager = SessionManager(config.session_timeout_minutes)
+        # File cache is sheets-specific (not in BaseAgent)
         self.file_cache = FileCache(max_size=50)
 
-        # Initialize rate limiter
-        self.rate_limiter = RateLimiter(
-            max_requests=config.rate_limit_requests,
-            window_seconds=config.rate_limit_window_seconds
-        )
+        # Initialize base agent (session manager, rate limiter, memory, audit)
+        super().__init__(config)
 
-        # Initialize LLM
+        # Initialize LLM (sheets-specific)
         self.llm = self._init_llm()
 
-        # Initialize tools
+        # Initialize tools (sheets-specific)
         self.tools = self._init_tools()
 
-        # Create ReAct agent
+        # Build middleware list from config (LangChain 1.2.0 built-in middleware)
+        self.middleware_list = self._build_middleware()
+
+        # Initialize checkpointer for conversation memory
+        self.checkpointer = MemorySaver()
+
+        # Create agent with middleware and checkpointer
         self.agent = self._create_agent()
 
-        # Initialize audit logging (optional)
-        self.audit_logger = self._init_audit_logging()
-
-        # Initialize memory systems
-        self.short_term_memory = None
-        self.long_term_memory = None
-        self._init_memory()
-
-        logger.info("Sheets Agent initialized successfully")
-
-    def _init_memory(self):
-        """Initialize short-term and long-term memory systems."""
-        if not MEMORY_AVAILABLE:
-            logger.warning("Memory module not available - memory features disabled")
-            return
-
-        # Initialize short-term memory
-        if self.config.enable_short_term_memory:
-            self.short_term_memory = ShortTermMemory(
-                max_messages=self.config.short_term_max_messages
-            )
-            logger.info(
-                f"Short-term memory enabled (max {self.config.short_term_max_messages} messages)"
-            )
-
-        # Initialize long-term memory (PostgreSQL)
-        if self.config.enable_long_term_memory:
-            try:
-                memory_config = MemoryConfig()
-                self.long_term_memory = PostgresLongTermMemory(memory_config)
-                logger.info("Long-term memory enabled (PostgreSQL)")
-            except Exception as e:
-                logger.warning(f"Failed to initialize long-term memory: {e}")
+        logger.info(f"Sheets Agent initialized with model: {self.config.openai_model}")
 
     def _init_llm(self):
-        """Initialize the language model."""
-        try:
-            if not self.config.openai_api_key:
-                raise ValueError("OpenAI API key is required")
+        """Initialize the language model using init_chat_model with token tracking callback."""
+        if not self.config.openai_api_key:
+            raise ValueError("OpenAI API key is required")
 
-            llm = ChatOpenAI(
-                model=self.config.openai_model,
-                api_key=self.config.openai_api_key,
-                temperature=self.config.temperature,
-                use_responses_api=True,  # Required for gpt-5.1-codex-mini
-                request_timeout=60,  # Prevent hanging requests
-                max_retries=2
-            )
+        # Use shared callback creation from BaseAgent
+        callbacks = self._create_token_tracking_callback("sheets_agent")
 
-            logger.info(f"Initialized LLM: {self.config.openai_model}")
-            return llm
+        llm = init_chat_model(
+            model=self.config.openai_model,
+            model_provider="openai",
+            temperature=self.config.temperature,
+            api_key=self.config.openai_api_key,
+            use_responses_api=True,  # Required for gpt-5.1-codex-mini
+            timeout=60,  # Prevent hanging requests
+            max_retries=2,
+            callbacks=callbacks if callbacks else None,
+        )
 
-        except Exception as e:
-            logger.error(f"Failed to initialize LLM: {e}")
-            raise
+        logger.info(f"Initialized LLM: {self.config.openai_model}")
+        return llm
 
     def _init_tools(self) -> List:
         """Initialize agent tools."""
@@ -244,29 +212,62 @@ class SheetsAgent:
         logger.info(f"Initialized {len(tools)} tools")
         return tools
 
+    def _build_middleware(self) -> List:
+        """Build LangChain middleware list from config."""
+        middleware = []
+
+        if not self.config.enable_middleware:
+            logger.info("Middleware disabled via configuration")
+            return middleware
+
+        try:
+            # Model retry with exponential backoff
+            middleware.append(
+                ModelRetryMiddleware(
+                    max_retries=self.config.model_retry_max_attempts,
+                    backoff_factor=2.0,
+                    initial_delay=1.0,
+                )
+            )
+
+            # Tool retry
+            middleware.append(
+                ToolRetryMiddleware(max_retries=self.config.tool_retry_max_attempts)
+            )
+
+            # Call limits to prevent runaway loops
+            middleware.append(
+                ModelCallLimitMiddleware(run_limit=self.config.model_call_limit)
+            )
+            middleware.append(
+                ToolCallLimitMiddleware(run_limit=self.config.tool_call_limit)
+            )
+
+            logger.info(f"Built {len(middleware)} middleware components")
+            return middleware
+
+        except Exception as e:
+            logger.warning(f"Failed to build middleware: {e}")
+            return []
+
     def _create_agent(self):
-        """Create the ReAct agent using LangGraph."""
-        agent = create_react_agent(
+        """Create the agent using LangChain 1.2.0 with built-in middleware and checkpointer."""
+        agent = create_agent(
             model=self.llm,
             tools=self.tools,
-            prompt=SYSTEM_PROMPT
+            system_prompt=SYSTEM_PROMPT,
+            middleware=self.middleware_list if self.middleware_list else None,
+            checkpointer=self.checkpointer  # Enable automatic conversation memory
         )
 
-        logger.info("Created ReAct agent with LangGraph")
+        logger.info(f"Created agent with LangChain 1.2.0 ({len(self.middleware_list)} middleware, checkpointer=MemorySaver)")
         return agent
 
-    def _init_audit_logging(self):
-        """Initialize audit logging (PostgreSQL)."""
-        try:
-            from src.db.repositories.audit_repository import log_event
-            logger.info("Initialized audit logging (PostgreSQL)")
-            return log_event  # Return the function
-        except ImportError as e:
-            logger.warning(f"Audit module not available: {e}")
-            return None
-        except Exception as e:
-            logger.warning(f"Failed to initialize audit logging: {e}")
-            return None
+    # _init_audit_logging() is inherited from BaseAgent
+
+    def _get_agent_type(self) -> str:
+        """Get agent type identifier for audit/memory."""
+        return "sheets"
 
     async def process_chat(self, request: ChatRequest) -> ChatResponse:
         """
@@ -333,7 +334,7 @@ class SheetsAgent:
             # Execute agent with timeout enforcement
             try:
                 async with asyncio.timeout(self.config.timeout_seconds):
-                    agent_result = await self._execute_agent(context, request.query, chat_history)
+                    agent_result = await self._execute_agent(context, request.query, chat_history, request)
             except asyncio.TimeoutError:
                 processing_time = elapsed_ms(start_time)
                 logger.error(f"Agent execution timed out after {self.config.timeout_seconds}s")
@@ -487,16 +488,54 @@ class SheetsAgent:
 
         return "\n".join(context_parts)
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=10),
-        retry=retry_if_exception_type((TimeoutError, ConnectionError, OSError)),
-        reraise=True
-    )
     async def _execute_agent(
+        self, context: str, query: str, chat_history: List = None, request: Any = None
+    ) -> Dict[str, Any]:
+        """Execute the agent with the given context and query.
+
+        Note: Retry logic is now handled by ModelRetryMiddleware (LangChain built-in).
+        Token tracking is handled via thread-local usage context.
+        """
+        # Import usage context for token tracking
+        try:
+            from src.core.usage.context import usage_context
+            USAGE_CONTEXT_AVAILABLE = True
+        except ImportError:
+            USAGE_CONTEXT_AVAILABLE = False
+            usage_context = None
+
+        # Extract org_id from request if available
+        org_id = getattr(request, 'organization_id', None) if request else None
+        user_id = getattr(request, 'user_id', None) if request else None
+        session_id = getattr(request, 'session_id', None) if request else None
+
+        # Set up usage context for token tracking (if available)
+        ctx_manager = None
+        if USAGE_CONTEXT_AVAILABLE and usage_context and org_id:
+            ctx_manager = usage_context(
+                org_id=org_id,
+                feature="sheets_agent",
+                user_id=user_id,
+                session_id=session_id,
+            )
+            logger.debug(f"Token tracking context set for org {org_id}")
+
+        try:
+            # Enter usage context if available
+            if ctx_manager:
+                ctx_manager.__enter__()
+
+            return await self._execute_agent_inner(context, query, chat_history)
+
+        finally:
+            # Exit usage context
+            if ctx_manager:
+                ctx_manager.__exit__(None, None, None)
+
+    async def _execute_agent_inner(
         self, context: str, query: str, chat_history: List = None
     ) -> Dict[str, Any]:
-        """Execute the agent with the given context and query, with retry logic."""
+        """Inner agent execution (called within usage context)."""
         try:
             message = HumanMessage(content=f"{context}\n\nPlease analyze the data and answer: {query}")
 
@@ -553,18 +592,15 @@ class SheetsAgent:
         ]
 
     def _calculate_token_usage(self, input_text: str, output_text: str) -> TokenUsage:
-        """Calculate token usage (estimation)."""
-        prompt_tokens = int(len(input_text.split()) * 1.3)
-        completion_tokens = int(len(output_text.split()) * 1.3)
-        total_tokens = prompt_tokens + completion_tokens
-
-        estimated_cost = (prompt_tokens * 0.00003 + completion_tokens * 0.00006) / 1000
-
+        """Calculate token usage using shared utility."""
+        estimate = calculate_token_usage(
+            input_text, output_text, model=self.config.openai_model
+        )
         return TokenUsage(
-            prompt_tokens=prompt_tokens,
-            completion_tokens=completion_tokens,
-            total_tokens=total_tokens,
-            estimated_cost_usd=round(estimated_cost, 6)
+            prompt_tokens=estimate.prompt_tokens,
+            completion_tokens=estimate.completion_tokens,
+            total_tokens=estimate.total_tokens,
+            estimated_cost_usd=estimate.estimated_cost_usd
         )
 
     def _get_file_extension(self, file_path: str) -> str:
@@ -591,12 +627,11 @@ class SheetsAgent:
     def get_health_status(self) -> Dict[str, Any]:
         """Get health status of the agent and its components."""
         try:
-            # Skip LLM health check to avoid blocking - just check if configured
-            openai_status = "healthy" if self.llm else "unhealthy"
+            # Get base health status (sessions, rate limiter, memory, audit)
+            base_status = self._get_base_health_status()
 
-            # Cleanup expired sessions and rate limiter entries
-            self.session_manager.cleanup_expired_sessions()
-            self.rate_limiter.cleanup()
+            # Check LLM status
+            openai_status = "healthy" if self.llm else "unhealthy"
 
             return {
                 "status": "healthy" if openai_status == "healthy" else "degraded",
@@ -604,26 +639,14 @@ class SheetsAgent:
                     "api": "healthy",
                     "openai": openai_status,
                     "duckdb": "healthy",
-                    "audit_logging": "healthy" if self.audit_logger else "disabled",
+                    "audit_logging": base_status["audit_logging"],
                     "short_term_memory": "enabled" if self.short_term_memory else "disabled",
                     "long_term_memory": "enabled" if self.long_term_memory else "disabled"
                 },
-                "sessions": {
-                    "active_count": len(self.session_manager.sessions),
-                    "total_queries": sum(s.query_count for s in self.session_manager.sessions.values())
-                },
+                "sessions": base_status["sessions"],
                 "cache": self.file_cache.get_stats(),
-                "rate_limiter": {
-                    "tracked_sessions": len(self.rate_limiter.requests)
-                },
-                "memory": {
-                    "short_term_sessions": (
-                        self.short_term_memory.get_session_count()
-                        if self.short_term_memory else 0
-                    ),
-                    "short_term_enabled": self.config.enable_short_term_memory,
-                    "long_term_enabled": self.config.enable_long_term_memory
-                }
+                "rate_limiter": base_status["rate_limiter"],
+                "memory": base_status["memory"]
             }
 
         except Exception as e:
@@ -639,88 +662,11 @@ class SheetsAgent:
                 }
             }
 
-    def end_session(
-        self,
-        session_id: str,
-        user_id: Optional[str] = None,
-        save_summary: bool = True
-    ) -> bool:
-        """
-        End a session and optionally save summary to long-term memory.
-
-        Args:
-            session_id: Session identifier
-            user_id: User ID for long-term memory
-            save_summary: Whether to save conversation summary
-
-        Returns:
-            True if session ended successfully
-        """
-        try:
-            # Get session info
-            session = self.session_manager.sessions.get(session_id)
-
-            if not session:
-                logger.warning(f"Session {session_id} not found")
-                return False
-
-            # Save conversation summary to long-term memory
-            if save_summary and self.long_term_memory and user_id:
-                self._save_conversation_summary(session_id, user_id, session)
-
-            # Clear short-term memory for session
-            if self.short_term_memory:
-                self.short_term_memory.delete_session(session_id)
-
-            # Remove from session manager
-            if session_id in self.session_manager.sessions:
-                del self.session_manager.sessions[session_id]
-
-            logger.info(f"Session {session_id} ended successfully")
-            return True
-
-        except Exception as e:
-            logger.error(f"Failed to end session {session_id}: {e}")
-            return False
-
-    def _save_conversation_summary(
-        self,
-        session_id: str,
-        user_id: str,
-        session: SessionInfo
-    ) -> None:
-        """Save conversation summary to long-term memory."""
-        if not self.long_term_memory or not MEMORY_AVAILABLE:
-            return
-
-        try:
-            # Get conversation summary from short-term memory
-            summary_text = ""
-            if self.short_term_memory:
-                summary_text = (
-                    self.short_term_memory.get_conversation_summary(session_id)
-                    or f"Session with {session.query_count} queries"
-                )
-
-            summary = ConversationSummary(
-                session_id=session_id,
-                user_id=user_id,
-                agent_type="sheets",
-                summary=summary_text,
-                key_topics=[],
-                documents_discussed=session.files_in_context,
-                queries_count=session.query_count
-            )
-
-            self.long_term_memory.save_conversation_summary(summary)
-            logger.info(f"Saved conversation summary for session {session_id}")
-
-        except Exception as e:
-            logger.error(f"Failed to save conversation summary: {e}")
+    # end_session() is inherited from BaseAgent
+    # _save_conversation_summary() is inherited from BaseAgent
 
     def shutdown(self, wait: bool = True) -> None:
-        """
-        Shutdown agent resources gracefully.
+        """Shutdown agent resources gracefully.
 
         This should be called before closing database connections to ensure
         all pending audit logs are written and resources are cleaned up.
@@ -739,7 +685,7 @@ class SheetsAgent:
             _audit_executor.shutdown(wait=wait, cancel_futures=not wait)
             logger.info("Audit executor shutdown complete")
 
-        # Clean up DuckDB connection pool
+        # Clean up DuckDB connection pool (sheets-specific)
         try:
             from .tools import get_duckdb_pool
             pool = get_duckdb_pool()
@@ -748,13 +694,10 @@ class SheetsAgent:
         except Exception as e:
             logger.warning(f"Failed to close DuckDB pool: {e}")
 
-        # Clean up expired sessions
-        self.session_manager.cleanup_expired_sessions()
+        # Cleanup base agent resources (sessions, rate limiter)
+        self._cleanup_resources()
 
-        # Clean up rate limiter
-        self.rate_limiter.cleanup()
-
-        # Clear file cache
+        # Clear file cache (sheets-specific)
         self.file_cache.clear()
 
         logger.info("SheetsAgent shutdown complete")
