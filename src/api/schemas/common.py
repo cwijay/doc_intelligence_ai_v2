@@ -52,6 +52,16 @@ class TokenUsage(BaseModel):
     estimated_cost_usd: Optional[float] = Field(default=None, example=0.000024)
 
 
+class ToolUsage(BaseModel):
+    """Information about tools used during processing."""
+    tool_name: str = Field(..., description="Name of the tool used")
+    input_data: Dict[str, Any] = Field(..., description="Input provided to the tool")
+    output_data: Optional[Dict[str, Any]] = Field(None, description="Output from the tool")
+    execution_time_ms: float = Field(..., description="Tool execution time")
+    success: bool = Field(..., description="Whether tool execution was successful")
+    error_message: Optional[str] = Field(None, description="Error message if tool failed")
+
+
 class ErrorResponse(BaseModel):
     """Standard error response."""
     success: bool = Field(default=False, example=False)

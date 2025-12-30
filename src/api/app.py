@@ -20,6 +20,8 @@ from .routers import (
     sessions_router,
     health_router,
     usage_router,
+    extraction_router,
+    content_router,
 )
 
 logger = logging.getLogger(__name__)
@@ -60,6 +62,14 @@ OPENAPI_TAGS = [
     {
         "name": "Usage",
         "description": "Usage tracking, quota status, and subscription management",
+    },
+    {
+        "name": "Extraction",
+        "description": "Extract structured data from documents using AI-powered field analysis and schema-based extraction",
+    },
+    {
+        "name": "Content",
+        "description": "Load pre-parsed document content from storage",
     },
 ]
 
@@ -390,6 +400,18 @@ def create_app() -> FastAPI:
         usage_router,
         prefix=f"{api_prefix}/usage",
         tags=["Usage"],
+    )
+
+    app.include_router(
+        extraction_router,
+        prefix=f"{api_prefix}/extraction",
+        tags=["Extraction"],
+    )
+
+    app.include_router(
+        content_router,
+        prefix=f"{api_prefix}/content",
+        tags=["Content"],
     )
 
     return app

@@ -155,10 +155,20 @@ class GCSStorage(StorageBackend):
             return False
 
     async def list_files(
-        self, directory: str, extension: Optional[str] = None
+        self, directory: str, extension: Optional[str] = None, use_prefix: bool = True
     ) -> List[str]:
-        """List blobs in a directory prefix."""
-        prefix = self._get_blob_name("", directory)
+        """List blobs in a directory prefix.
+
+        Args:
+            directory: Directory path to list
+            extension: Filter by file extension (e.g., ".json")
+            use_prefix: If True, prepend the configured GCS prefix. If False, use directory as-is.
+        """
+        if use_prefix:
+            prefix = self._get_blob_name("", directory)
+        else:
+            prefix = directory
+
         if prefix and not prefix.endswith("/"):
             prefix += "/"
 

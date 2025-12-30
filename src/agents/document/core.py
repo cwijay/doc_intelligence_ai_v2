@@ -19,21 +19,21 @@ from langchain.agents.middleware import (
     ToolCallLimitMiddleware,
     PIIMiddleware,
 )
-from langchain_core.messages import HumanMessage, AIMessage, ToolMessage
+from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
-import json
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from .config import DocumentAgentConfig
 from .tools import create_document_tools
+from .context import rag_filter_context
 from src.utils.timer_utils import elapsed_ms
 
 # Base agent and shared utilities
 from src.agents.core.base_agent import BaseAgent
-from src.agents.core.token_utils import calculate_token_usage
 
 # Tool selection imports
-from src.agents.core.middleware import LLMToolSelector, QueryClassifier, QueryIntent
+from .tool_selection import ToolSelectionManager, bind_rag_filters
+from .result_parser import AgentResultParser, calculate_agent_token_usage
 from .schemas import (
     DocumentRequest,
     DocumentResponse,
@@ -135,11 +135,15 @@ class DocumentAgent(BaseAgent):
         # Build tool name lookup for quick access
         self.tools_by_name = {tool.name: tool for tool in self.tools}
 
-        # Initialize tool selection components (document-specific)
-        self.query_classifier = None
-        self.tool_selector = None
-        if self.config.enable_tool_selection:
-            self._init_tool_selection()
+        # Initialize tool selection manager (document-specific)
+        self.tool_selection_manager = ToolSelectionManager(
+            tools=self.tools,
+            config=self.config,
+            api_key=self.config.google_api_key
+        )
+
+        # Initialize result parser for extracting structured content
+        self.result_parser = AgentResultParser()
 
         # Build middleware list from config (document-specific)
         self.middleware_list = self._build_middleware()
@@ -232,114 +236,6 @@ class DocumentAgent(BaseAgent):
         logger.info(f"Initialized LLM: {self.config.gemini_model}")
         return llm
 
-    def _init_tool_selection(self):
-        """Initialize query classifier and tool selector."""
-        try:
-            # Initialize query classifier with LLM fallback
-            self.query_classifier = QueryClassifier(
-                use_llm_fallback=True,
-                llm_model=self.config.tool_selector_model,
-                llm_provider="google_genai",
-                api_key=self.config.google_api_key
-            )
-
-            # Initialize LLM-based tool selector
-            self.tool_selector = LLMToolSelector(
-                model=self.config.tool_selector_model,
-                provider="google_genai",
-                max_tools=self.config.tool_selector_max_tools,
-                api_key=self.config.google_api_key
-            )
-
-            logger.info(
-                f"Tool selection enabled: classifier + selector "
-                f"(model={self.config.tool_selector_model}, max_tools={self.config.tool_selector_max_tools})"
-            )
-
-        except Exception as e:
-            logger.warning(f"Failed to initialize tool selection: {e}. Using all tools.")
-            self.query_classifier = None
-            self.tool_selector = None
-
-    def _get_tools_for_query(self, query: str, context: dict) -> list:
-        """
-        Get relevant tools based on query intent.
-
-        Uses two-stage filtering:
-        1. QueryClassifier determines intent (RAG vs Generation)
-        2. LLMToolSelector narrows down within the category
-
-        Args:
-            query: User's query string
-            context: Context dict with document_name, has_parsed_path, etc.
-
-        Returns:
-            List of relevant tools for this query
-        """
-        # If tool selection disabled, return all tools
-        if not self.config.enable_tool_selection or not self.query_classifier:
-            return self.tools
-
-        try:
-            # Stage 1: Classify query intent
-            intent = self.query_classifier.classify(query, context)
-            logger.debug(f"Query intent: {intent.value} for: {query[:50]}...")
-
-            # Map intent to tool subsets
-            if intent == QueryIntent.RAG_SEARCH:
-                # RAG search only needs the rag_search tool
-                candidate_tools = [self.tools_by_name.get('rag_search')]
-                candidate_tools = [t for t in candidate_tools if t is not None]
-
-            elif intent == QueryIntent.CONTENT_GENERATION:
-                # Content generation needs loader, generators, and persist
-                tool_names = [
-                    'document_loader',
-                    'summary_generator',
-                    'faq_generator',
-                    'question_generator',
-                    'content_persist'
-                ]
-                candidate_tools = [
-                    self.tools_by_name.get(name)
-                    for name in tool_names
-                    if self.tools_by_name.get(name) is not None
-                ]
-
-            elif intent == QueryIntent.DOCUMENT_LOAD:
-                # Just document loading
-                candidate_tools = [self.tools_by_name.get('document_loader')]
-                candidate_tools = [t for t in candidate_tools if t is not None]
-
-            elif intent == QueryIntent.CONVERSATIONAL:
-                # Conversational query (about previous questions, memory, etc.)
-                # Return empty list - let LLM answer from conversation history
-                logger.info("Conversational query - no tools needed, using memory")
-                return []
-
-            else:
-                # MIXED intent - use all tools and let LLMToolSelector narrow down
-                candidate_tools = self.tools
-
-            # Stage 2: Use LLMToolSelector to further narrow if we have many tools
-            if self.tool_selector and len(candidate_tools) > self.config.tool_selector_max_tools:
-                selected = self.tool_selector.select_tools(query, candidate_tools, context=None)
-                logger.info(
-                    f"Tool selection: {intent.value} -> {len(candidate_tools)} candidates -> "
-                    f"{len(selected)} selected: {[t.name for t in selected]}"
-                )
-                return selected
-
-            logger.info(
-                f"Tool selection: {intent.value} -> {len(candidate_tools)} tools: "
-                f"{[t.name for t in candidate_tools]}"
-            )
-            return candidate_tools
-
-        except Exception as e:
-            logger.warning(f"Tool selection failed: {e}. Using all tools.")
-            return self.tools
-
     def _create_agent(self):
         """Create the agent using LangChain 1.2.0 with built-in middleware and checkpointer."""
         agent = create_agent(
@@ -426,9 +322,10 @@ class DocumentAgent(BaseAgent):
 
             response_text = agent_result.get('response', '')
 
-            token_usage = self._calculate_token_usage(
+            token_usage = calculate_agent_token_usage(
                 request.query,
-                response_text
+                response_text,
+                model=self.config.gemini_model
             )
 
             self.session_manager.update_session(
@@ -570,13 +467,26 @@ class DocumentAgent(BaseAgent):
                 }
             }
 
-            # Get relevant tools for this query
+            # Get relevant tools for this query via tool selection manager
             query_context = {
                 "document_name": request.document_name,
                 "has_parsed_path": bool(request.parsed_file_path),
                 "organization_name": getattr(request, 'organization_id', None)
             }
-            relevant_tools = self._get_tools_for_query(request.query, query_context)
+            relevant_tools = self.tool_selection_manager.get_tools_for_query(
+                request.query, query_context
+            )
+
+            # Bind filters to RAG tool if present in request (ensures correct cache scoping)
+            if request.file_filter or request.folder_filter:
+                relevant_tools = bind_rag_filters(
+                    relevant_tools,
+                    file_filter=request.file_filter,
+                    folder_filter=request.folder_filter,
+                )
+                logger.debug(
+                    f"Bound RAG filters: file={request.file_filter}, folder={request.folder_filter}"
+                )
 
             # Handle conversational queries (no tools needed - just LLM)
             if not relevant_tools:
@@ -603,7 +513,7 @@ class DocumentAgent(BaseAgent):
                     )
                 )
             # Create dynamic agent with filtered tools if tool selection is enabled
-            elif self.config.enable_tool_selection and relevant_tools != self.tools:
+            elif self.tool_selection_manager.enabled and relevant_tools != self.tools:
                 dynamic_prompt = get_system_prompt([t.name for t in relevant_tools])
                 dynamic_agent = create_agent(
                     model=self.llm,
@@ -666,7 +576,7 @@ class DocumentAgent(BaseAgent):
                     response_text = str(result)
 
             # Parse result including tool outputs from all messages
-            parsed_result = self._parse_agent_result(response_text, all_messages)
+            parsed_result = self.result_parser.parse(response_text, all_messages)
             logger.info(f"Agent execution completed, response length: {len(response_text)} chars")
 
             # Save to short-term memory for conversation continuity
@@ -684,116 +594,6 @@ class DocumentAgent(BaseAgent):
                 "response": f"Error during processing: {str(e)}",
                 "content": None
             }
-
-    def _parse_agent_result(self, response_text: str, messages: List = None) -> Dict[str, Any]:
-        """Parse the agent's response to extract structured content from tool outputs."""
-        result = {
-            "response": response_text,
-            "content": None,
-            "source_path": None,
-            "metadata": None,
-            "tools_used": [],
-            "persisted": False
-        }
-
-        if not messages:
-            return result
-
-        # Extract content from tool messages
-        summary = None
-        faqs = None
-        questions = None
-        tools_used = []
-
-        for msg in messages:
-            # Check if it's a ToolMessage (contains tool output)
-            if isinstance(msg, ToolMessage):
-                tool_name = getattr(msg, 'name', '') or ''
-
-                # Try to parse the tool output as JSON
-                try:
-                    content = msg.content if hasattr(msg, 'content') else str(msg)
-                    tool_output = json.loads(content) if isinstance(content, str) else content
-
-                    # Create ToolUsage entry with parsed output
-                    tool_success = isinstance(tool_output, dict) and tool_output.get('success', False)
-                    tools_used.append({
-                        "tool_name": tool_name,
-                        "input_data": {},  # Not available from ToolMessage
-                        "output_data": tool_output if isinstance(tool_output, dict) else {"raw": str(tool_output)},
-                        "execution_time_ms": 0.0,  # Not tracked at this level
-                        "success": tool_success,
-                        "error_message": tool_output.get('error') if isinstance(tool_output, dict) else None
-                    })
-
-                    if tool_success:
-                        # Extract summary from summary_generator tool
-                        if 'summary' in tool_output and tool_output['summary']:
-                            summary = tool_output['summary']
-                            logger.debug(f"Extracted summary: {len(summary)} chars")
-
-                        # Extract FAQs from faq_generator tool
-                        if 'faqs' in tool_output and tool_output['faqs']:
-                            faqs = [
-                                FAQ(question=f['question'], answer=f['answer'])
-                                for f in tool_output['faqs']
-                                if isinstance(f, dict) and 'question' in f and 'answer' in f
-                            ]
-                            logger.debug(f"Extracted {len(faqs)} FAQs")
-
-                        # Extract questions from question_generator tool
-                        if 'questions' in tool_output and tool_output['questions']:
-                            questions = [
-                                Question(
-                                    question=q['question'],
-                                    expected_answer=q.get('expected_answer', ''),
-                                    difficulty=q.get('difficulty', 'medium')
-                                )
-                                for q in tool_output['questions']
-                                if isinstance(q, dict) and 'question' in q
-                            ]
-                            logger.debug(f"Extracted {len(questions)} questions")
-
-                        # Extract source path from document loader tool
-                        if 'source_path' in tool_output:
-                            result['source_path'] = tool_output['source_path']
-
-                except (json.JSONDecodeError, TypeError, KeyError) as e:
-                    logger.debug(f"Could not parse tool output as structured content: {e}")
-                    # Still add ToolUsage entry for failed parse
-                    tools_used.append({
-                        "tool_name": tool_name,
-                        "input_data": {},
-                        "output_data": None,
-                        "execution_time_ms": 0.0,
-                        "success": False,
-                        "error_message": str(e)
-                    })
-                    continue
-
-        # Build GeneratedContent if we have any content
-        if summary or faqs or questions:
-            result['content'] = GeneratedContent(
-                summary=summary,
-                faqs=faqs,
-                questions=questions
-            )
-            logger.info(f"Parsed content: summary={bool(summary)}, faqs={len(faqs) if faqs else 0}, questions={len(questions) if questions else 0}")
-
-        result['tools_used'] = tools_used
-        return result
-
-    def _calculate_token_usage(self, input_text: str, output_text: str) -> TokenUsage:
-        """Calculate token usage using shared utility."""
-        estimate = calculate_token_usage(
-            input_text, output_text, model=self.config.gemini_model
-        )
-        return TokenUsage(
-            prompt_tokens=estimate.prompt_tokens,
-            completion_tokens=estimate.completion_tokens,
-            total_tokens=estimate.total_tokens,
-            estimated_cost_usd=estimate.estimated_cost_usd
-        )
 
     def _log_audit_event_async(self, request: DocumentRequest, processing_time: float):
         """Log query for audit trail via centralized audit queue."""
@@ -1006,6 +806,8 @@ class DocumentAgent(BaseAgent):
             query=search_context,
             session_id=session_id,
             organization_id=organization_id,
+            file_filter=file_filter,      # Pass structured filter for cache scoping
+            folder_filter=folder_filter,  # Pass structured filter for cache scoping
         )
 
         return await self.process_request(request)

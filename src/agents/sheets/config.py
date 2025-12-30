@@ -8,6 +8,15 @@ from typing import List, Optional
 from pydantic import Field, field_validator
 
 from src.agents.core.base_config import BaseAgentConfig
+from src.constants import (
+    DEFAULT_FILE_CACHE_SIZE,
+    DEFAULT_PREVIEW_ROWS,
+    DEFAULT_SAMPLE_ROWS,
+    MAX_DISPLAY_ROWS,
+    MIN_FILE_SIZE_MB,
+    MAX_FILE_SIZE_MB,
+)
+from src.utils.env_utils import parse_bool_env, parse_int_env, parse_float_env
 
 
 class SheetsAgentConfig(BaseAgentConfig):
@@ -35,7 +44,7 @@ class SheetsAgentConfig(BaseAgentConfig):
 
     # Override temperature with sheets-specific default
     temperature: float = Field(
-        default_factory=lambda: float(os.getenv("OPENAI_TEMPERATURE", "0.1")),
+        default_factory=lambda: parse_float_env("OPENAI_TEMPERATURE", 0.1),
         description="Temperature for LLM responses"
     )
 
@@ -51,62 +60,62 @@ class SheetsAgentConfig(BaseAgentConfig):
     )
 
     max_file_size_mb: int = Field(
-        default_factory=lambda: int(os.getenv("MAX_FILE_SIZE_MB", "100")),
+        default_factory=lambda: parse_int_env("MAX_FILE_SIZE_MB", 100),
         description="Maximum file size in MB"
     )
 
     @field_validator('max_file_size_mb')
     @classmethod
     def validate_max_file_size(cls, v: int) -> int:
-        if not 1 <= v <= 500:
-            raise ValueError("Max file size must be between 1 and 500 MB")
+        if not MIN_FILE_SIZE_MB <= v <= MAX_FILE_SIZE_MB:
+            raise ValueError(f"Max file size must be between {MIN_FILE_SIZE_MB} and {MAX_FILE_SIZE_MB} MB")
         return v
 
     # Agent Configuration (sheets-specific)
     max_tool_calls: int = Field(
-        default_factory=lambda: int(os.getenv("MAX_TOOL_CALLS", "5")),
+        default_factory=lambda: parse_int_env("MAX_TOOL_CALLS", 5),
         description="Maximum number of tool calls per agent execution"
     )
 
     max_iterations: int = Field(
-        default_factory=lambda: int(os.getenv("MAX_ITERATIONS", "10")),
+        default_factory=lambda: parse_int_env("MAX_ITERATIONS", 10),
         description="Maximum number of agent iterations"
     )
 
     # Performance Configuration (sheets-specific)
     max_result_rows: int = Field(
-        default_factory=lambda: int(os.getenv("MAX_RESULT_ROWS", "10000")),
+        default_factory=lambda: parse_int_env("MAX_RESULT_ROWS", 10000),
         description="Maximum rows returned from queries"
     )
 
     duckdb_pool_size: int = Field(
-        default_factory=lambda: int(os.getenv("DUCKDB_POOL_SIZE", "5")),
+        default_factory=lambda: parse_int_env("DUCKDB_POOL_SIZE", 5),
         description="DuckDB connection pool size"
     )
 
     # Middleware Configuration (LangChain built-in middleware)
     enable_middleware: bool = Field(
-        default_factory=lambda: os.getenv("ENABLE_MIDDLEWARE", "true").lower() == "true",
+        default_factory=lambda: parse_bool_env("ENABLE_MIDDLEWARE", True),
         description="Enable LangChain middleware stack"
     )
 
     model_retry_max_attempts: int = Field(
-        default_factory=lambda: int(os.getenv("MODEL_RETRY_MAX_ATTEMPTS", "3")),
+        default_factory=lambda: parse_int_env("MODEL_RETRY_MAX_ATTEMPTS", 3),
         description="Maximum retry attempts for model calls"
     )
 
     tool_retry_max_attempts: int = Field(
-        default_factory=lambda: int(os.getenv("TOOL_RETRY_MAX_ATTEMPTS", "2")),
+        default_factory=lambda: parse_int_env("TOOL_RETRY_MAX_ATTEMPTS", 2),
         description="Maximum retry attempts for tool calls"
     )
 
     model_call_limit: int = Field(
-        default_factory=lambda: int(os.getenv("MODEL_CALL_LIMIT", "10")),
+        default_factory=lambda: parse_int_env("MODEL_CALL_LIMIT", 10),
         description="Maximum model calls per run"
     )
 
     tool_call_limit: int = Field(
-        default_factory=lambda: int(os.getenv("TOOL_CALL_LIMIT", "20")),
+        default_factory=lambda: parse_int_env("TOOL_CALL_LIMIT", 20),
         description="Maximum tool calls per run"
     )
 
@@ -143,22 +152,22 @@ class SheetsAgentConfig(BaseAgentConfig):
 
     # Preview/Sample sizes (centralized)
     preview_rows: int = Field(
-        default=5,
+        default=DEFAULT_PREVIEW_ROWS,
         description="Rows to show in file previews"
     )
 
     sample_rows: int = Field(
-        default=3,
+        default=DEFAULT_SAMPLE_ROWS,
         description="Rows to show in analysis samples"
     )
 
     max_display_rows: int = Field(
-        default=100,
+        default=MAX_DISPLAY_ROWS,
         description="Max rows for full data display"
     )
 
     file_cache_size: int = Field(
-        default=50,
+        default=DEFAULT_FILE_CACHE_SIZE,
         description="Number of files to cache in memory"
     )
 

@@ -61,3 +61,64 @@ DEFAULT_MAX_UPLOAD_SIZE_MB = 50
 DEFAULT_NUM_FAQS = 10
 DEFAULT_NUM_QUESTIONS = 10
 DEFAULT_SUMMARY_MAX_WORDS = 500
+
+# =============================================================================
+# Validation Bounds
+# =============================================================================
+MIN_NUM_FAQS = 1
+MAX_NUM_FAQS = 50
+MIN_NUM_QUESTIONS = 1
+MAX_NUM_QUESTIONS = 100
+MIN_SUMMARY_WORDS = 50
+MAX_SUMMARY_WORDS = 2000
+MIN_TEMPERATURE = 0.0
+MAX_TEMPERATURE = 2.0
+MIN_TIMEOUT_SECONDS = 10
+MAX_TIMEOUT_SECONDS = 600
+MIN_FILE_SIZE_MB = 1
+MAX_FILE_SIZE_MB = 500
+MIN_TOOL_SELECTOR_MAX_TOOLS = 1
+MAX_TOOL_SELECTOR_MAX_TOOLS = 10
+
+# =============================================================================
+# Preview/Display Settings (Sheets Agent)
+# =============================================================================
+DEFAULT_PREVIEW_ROWS = 5
+DEFAULT_SAMPLE_ROWS = 3
+MAX_DISPLAY_ROWS = 100
+
+# =============================================================================
+# Cache TTLs
+# =============================================================================
+STORE_CACHE_TTL_SECONDS = 300  # 5 minutes
+
+# =============================================================================
+# API Configuration
+# =============================================================================
+DOCS_URL = "/docs"
+REDOC_URL = "/redoc"
+OPENAPI_URL = "/openapi.json"
+DEFAULT_API_PREFIX = "/api/v1"
+
+# =============================================================================
+# Event Types (for audit logging)
+# =============================================================================
+EVENT_GENERATION_CACHE_HIT = "generation_cache_hit"
+EVENT_GENERATION_STARTED = "generation_started"
+EVENT_GENERATION_COMPLETED = "generation_completed"
+EVENT_GENERATION_FAILED = "generation_failed"
+
+# =============================================================================
+# Generation Types
+# =============================================================================
+GENERATION_TYPE_SUMMARY = "summary"
+GENERATION_TYPE_FAQS = "faqs"
+GENERATION_TYPE_QUESTIONS = "questions"
+
+# =============================================================================
+# Search Modes (RAG)
+# =============================================================================
+SEARCH_MODE_SEMANTIC = "semantic"
+SEARCH_MODE_KEYWORD = "keyword"
+SEARCH_MODE_HYBRID = "hybrid"
+VALID_SEARCH_MODES = [SEARCH_MODE_SEMANTIC, SEARCH_MODE_KEYWORD, SEARCH_MODE_HYBRID]

@@ -8,6 +8,20 @@ from typing import Optional
 from pydantic import Field, field_validator
 
 from src.agents.core.base_config import BaseAgentConfig
+from src.constants import (
+    DEFAULT_NUM_FAQS,
+    DEFAULT_NUM_QUESTIONS,
+    DEFAULT_SUMMARY_MAX_WORDS,
+    MIN_NUM_FAQS,
+    MAX_NUM_FAQS,
+    MIN_NUM_QUESTIONS,
+    MAX_NUM_QUESTIONS,
+    MIN_SUMMARY_WORDS,
+    MAX_SUMMARY_WORDS,
+    MIN_TOOL_SELECTOR_MAX_TOOLS,
+    MAX_TOOL_SELECTOR_MAX_TOOLS,
+)
+from src.utils.env_utils import parse_bool_env, parse_int_env, parse_float_env
 
 
 class DocumentAgentConfig(BaseAgentConfig):
@@ -35,7 +49,7 @@ class DocumentAgentConfig(BaseAgentConfig):
 
     # Override temperature with document-specific default
     temperature: float = Field(
-        default_factory=lambda: float(os.getenv("DOCUMENT_AGENT_TEMPERATURE", "0.3")),
+        default_factory=lambda: parse_float_env("DOCUMENT_AGENT_TEMPERATURE", 0.3),
         description="Temperature for LLM responses"
     )
 
@@ -52,54 +66,54 @@ class DocumentAgentConfig(BaseAgentConfig):
 
     # Generation Defaults (document-specific)
     default_num_faqs: int = Field(
-        default_factory=lambda: int(os.getenv("DOCUMENT_AGENT_NUM_FAQS", "10")),
+        default_factory=lambda: parse_int_env("DOCUMENT_AGENT_NUM_FAQS", DEFAULT_NUM_FAQS),
         description="Default number of FAQs to generate"
     )
 
     default_num_questions: int = Field(
-        default_factory=lambda: int(os.getenv("DOCUMENT_AGENT_NUM_QUESTIONS", "10")),
+        default_factory=lambda: parse_int_env("DOCUMENT_AGENT_NUM_QUESTIONS", DEFAULT_NUM_QUESTIONS),
         description="Default number of questions to generate"
     )
 
     max_num_faqs: int = Field(
-        default=20,
+        default=MAX_NUM_FAQS,
         description="Maximum allowed FAQs"
     )
 
     max_num_questions: int = Field(
-        default=50,
+        default=MAX_NUM_QUESTIONS,
         description="Maximum allowed questions"
     )
 
     summary_max_words: int = Field(
-        default_factory=lambda: int(os.getenv("DOCUMENT_AGENT_SUMMARY_WORDS", "500")),
+        default_factory=lambda: parse_int_env("DOCUMENT_AGENT_SUMMARY_WORDS", DEFAULT_SUMMARY_MAX_WORDS),
         description="Maximum words for summary"
     )
 
     @field_validator('default_num_faqs', 'max_num_faqs')
     @classmethod
     def validate_faqs(cls, v: int) -> int:
-        if not 1 <= v <= 50:
-            raise ValueError("FAQ count must be between 1 and 50")
+        if not MIN_NUM_FAQS <= v <= MAX_NUM_FAQS:
+            raise ValueError(f"FAQ count must be between {MIN_NUM_FAQS} and {MAX_NUM_FAQS}")
         return v
 
     @field_validator('default_num_questions', 'max_num_questions')
     @classmethod
     def validate_questions(cls, v: int) -> int:
-        if not 1 <= v <= 100:
-            raise ValueError("Question count must be between 1 and 100")
+        if not MIN_NUM_QUESTIONS <= v <= MAX_NUM_QUESTIONS:
+            raise ValueError(f"Question count must be between {MIN_NUM_QUESTIONS} and {MAX_NUM_QUESTIONS}")
         return v
 
     @field_validator('summary_max_words')
     @classmethod
     def validate_summary_words(cls, v: int) -> int:
-        if not 50 <= v <= 2000:
-            raise ValueError("Summary max words must be between 50 and 2000")
+        if not MIN_SUMMARY_WORDS <= v <= MAX_SUMMARY_WORDS:
+            raise ValueError(f"Summary max words must be between {MIN_SUMMARY_WORDS} and {MAX_SUMMARY_WORDS}")
         return v
 
     # Persistence (document-specific)
     persist_to_database: bool = Field(
-        default_factory=lambda: os.getenv("DOCUMENT_AGENT_PERSIST", "true").lower() == "true",
+        default_factory=lambda: parse_bool_env("DOCUMENT_AGENT_PERSIST", True),
         description="Whether to persist results to database"
     )
 
@@ -110,32 +124,32 @@ class DocumentAgentConfig(BaseAgentConfig):
 
     # Middleware Configuration (document-specific)
     enable_middleware: bool = Field(
-        default_factory=lambda: os.getenv("ENABLE_MIDDLEWARE", "true").lower() == "true",
+        default_factory=lambda: parse_bool_env("ENABLE_MIDDLEWARE", True),
         description="Enable LangChain middleware stack"
     )
 
     model_retry_max_attempts: int = Field(
-        default_factory=lambda: int(os.getenv("MODEL_RETRY_MAX_ATTEMPTS", "3")),
+        default_factory=lambda: parse_int_env("MODEL_RETRY_MAX_ATTEMPTS", 3),
         description="Maximum retry attempts for model calls"
     )
 
     tool_retry_max_attempts: int = Field(
-        default_factory=lambda: int(os.getenv("TOOL_RETRY_MAX_ATTEMPTS", "2")),
+        default_factory=lambda: parse_int_env("TOOL_RETRY_MAX_ATTEMPTS", 2),
         description="Maximum retry attempts for tool calls"
     )
 
     model_call_limit: int = Field(
-        default_factory=lambda: int(os.getenv("MODEL_CALL_LIMIT", "15")),
+        default_factory=lambda: parse_int_env("MODEL_CALL_LIMIT", 15),
         description="Maximum model calls per run"
     )
 
     tool_call_limit: int = Field(
-        default_factory=lambda: int(os.getenv("TOOL_CALL_LIMIT", "10")),
+        default_factory=lambda: parse_int_env("TOOL_CALL_LIMIT", 10),
         description="Maximum tool calls per run"
     )
 
     enable_pii_detection: bool = Field(
-        default_factory=lambda: os.getenv("ENABLE_PII_DETECTION", "true").lower() == "true",
+        default_factory=lambda: parse_bool_env("ENABLE_PII_DETECTION", True),
         description="Enable PII detection middleware"
     )
 
@@ -154,7 +168,7 @@ class DocumentAgentConfig(BaseAgentConfig):
 
     # Tool Selection Configuration (document-specific)
     enable_tool_selection: bool = Field(
-        default_factory=lambda: os.getenv("ENABLE_TOOL_SELECTION", "true").lower() == "true",
+        default_factory=lambda: parse_bool_env("ENABLE_TOOL_SELECTION", True),
         description="Enable intelligent tool pre-selection based on query intent"
     )
 
@@ -164,15 +178,15 @@ class DocumentAgentConfig(BaseAgentConfig):
     )
 
     tool_selector_max_tools: int = Field(
-        default_factory=lambda: int(os.getenv("TOOL_SELECTOR_MAX_TOOLS", "3")),
+        default_factory=lambda: parse_int_env("TOOL_SELECTOR_MAX_TOOLS", 3),
         description="Maximum tools to provide per query after filtering"
     )
 
     @field_validator('tool_selector_max_tools')
     @classmethod
     def validate_max_tools(cls, v: int) -> int:
-        if not 1 <= v <= 10:
-            raise ValueError("tool_selector_max_tools must be between 1 and 10")
+        if not MIN_TOOL_SELECTOR_MAX_TOOLS <= v <= MAX_TOOL_SELECTOR_MAX_TOOLS:
+            raise ValueError(f"tool_selector_max_tools must be between {MIN_TOOL_SELECTOR_MAX_TOOLS} and {MAX_TOOL_SELECTOR_MAX_TOOLS}")
         return v
 
     class Config:

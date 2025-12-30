@@ -4,6 +4,7 @@ Multi-tenancy: All endpoints are scoped by organization_id from request headers.
 """
 
 import logging
+import os
 import time
 from typing import Optional
 
@@ -529,13 +530,21 @@ async def chat_with_documents(
         # Use organization_name from request (required field)
         organization_name = request.organization_name
 
+        # Transform original filename to parsed filename for Gemini File Search
+        # Indexed files use .md extension (e.g., "IMG_4696.JPEG" -> "IMG_4696.md")
+        effective_file_filter = request.file_filter
+        if effective_file_filter:
+            stem = os.path.splitext(effective_file_filter)[0]
+            effective_file_filter = f"{stem}.md"
+            logger.info(f"Transformed file_filter: {request.file_filter} -> {effective_file_filter}")
+
         # Use the agent's chat method
         response = await agent.chat(
             query=request.query,
             organization_name=organization_name,
             session_id=request.session_id,
             folder_filter=request.folder_filter,
-            file_filter=request.file_filter,
+            file_filter=effective_file_filter,
             search_mode=request.search_mode,
             organization_id=org_id,
         )

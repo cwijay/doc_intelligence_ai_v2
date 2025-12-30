@@ -30,6 +30,35 @@ class RAGSearchTool(BaseTool):
 
     config: DocumentAgentConfig = Field(default_factory=DocumentAgentConfig)
 
+    # Bound filter values from request context - used when LLM doesn't extract filters
+    # These are set via with_bound_filters() to ensure correct cache scoping
+    _bound_file_filter: Optional[str] = None
+    _bound_folder_filter: Optional[str] = None
+
+    def with_bound_filters(
+        self,
+        file_filter: Optional[str] = None,
+        folder_filter: Optional[str] = None,
+    ) -> "RAGSearchTool":
+        """Create a new tool instance with bound filter values.
+
+        Bound filters are used for cache operations when the LLM doesn't
+        extract filter values from the query text. This ensures the semantic
+        cache correctly scopes queries by document.
+
+        Args:
+            file_filter: File name to scope cache operations
+            folder_filter: Folder name to scope cache operations
+
+        Returns:
+            New RAGSearchTool instance with bound filters
+        """
+        return RAGSearchTool(
+            config=self.config,
+            _bound_file_filter=file_filter,
+            _bound_folder_filter=folder_filter,
+        )
+
     def _run(
         self,
         query: str,
@@ -42,6 +71,17 @@ class RAGSearchTool(BaseTool):
     ) -> str:
         """Search documents using Gemini File Search with semantic caching."""
         start_time = time.time()
+
+        # Resolve filter values: use LLM-extracted values if provided, else use bound values
+        # Bound values come from the request context and ensure correct cache scoping
+        effective_file_filter = file_filter if file_filter is not None else self._bound_file_filter
+        effective_folder_filter = folder_filter if folder_filter is not None else self._bound_folder_filter
+
+        if effective_file_filter != file_filter or effective_folder_filter != folder_filter:
+            logger.debug(
+                f"Using bound filters - file: {effective_file_filter}, folder: {effective_folder_filter} "
+                f"(LLM extracted: file={file_filter}, folder={folder_filter})"
+            )
 
         try:
             from src.rag.gemini_file_store import query_store, generate_store_display_name, client as gemini_client
@@ -76,8 +116,8 @@ class RAGSearchTool(BaseTool):
                         cached = await semantic_cache_repository.find_similar_query(
                             org_id=org_id,
                             query_embedding=query_embedding,
-                            folder_filter=folder_filter,
-                            file_filter=file_filter,
+                            folder_filter=effective_folder_filter,
+                            file_filter=effective_file_filter,
                         )
 
                         if cached:
@@ -92,8 +132,8 @@ class RAGSearchTool(BaseTool):
                                 "query": query,
                                 "search_mode": cached.get("search_mode", search_mode),
                                 "filters": {
-                                    "folder": folder_filter,
-                                    "file": file_filter
+                                    "folder": effective_folder_filter,
+                                    "file": effective_file_filter
                                 },
                                 "cached": True,
                                 "cache_similarity": cached["similarity"],
@@ -129,8 +169,8 @@ class RAGSearchTool(BaseTool):
                 response = query_store(
                     file_search_store=store,
                     prompt=query,
-                    file_name_filter=file_filter,
-                    folder_name_filter=folder_filter,
+                    file_name_filter=effective_file_filter,
+                    folder_name_filter=effective_folder_filter,
                     search_mode=search_mode,
                     generate_answer=True,
                     top_k=max_sources
@@ -176,11 +216,11 @@ class RAGSearchTool(BaseTool):
                             query_embedding=query_embedding,
                             answer=answer,
                             citations=citations,
-                            folder_filter=folder_filter,
-                            file_filter=file_filter,
+                            folder_filter=effective_folder_filter,
+                            file_filter=effective_file_filter,
                             search_mode=search_mode,
                         )
-                        logger.debug(f"Cached RAG response for future similar queries")
+                        logger.debug(f"Cached RAG response for future similar queries (file_filter={effective_file_filter})")
                     except Exception as cache_error:
                         logger.warning(f"Failed to cache RAG response: {cache_error}")
 
@@ -191,8 +231,8 @@ class RAGSearchTool(BaseTool):
                     "query": query,
                     "search_mode": search_mode,
                     "filters": {
-                        "folder": folder_filter,
-                        "file": file_filter
+                        "folder": effective_folder_filter,
+                        "file": effective_file_filter
                     },
                     "cached": False,
                 }
@@ -225,6 +265,16 @@ class RAGSearchTool(BaseTool):
     ) -> str:
         """Async version: Search documents using Gemini File Search with semantic caching."""
         start_time = time.time()
+
+        # Resolve filter values: use LLM-extracted values if provided, else use bound values
+        effective_file_filter = file_filter if file_filter is not None else self._bound_file_filter
+        effective_folder_filter = folder_filter if folder_filter is not None else self._bound_folder_filter
+
+        if effective_file_filter != file_filter or effective_folder_filter != folder_filter:
+            logger.debug(
+                f"Using bound filters - file: {effective_file_filter}, folder: {effective_folder_filter} "
+                f"(LLM extracted: file={file_filter}, folder={folder_filter})"
+            )
 
         try:
             from src.rag.gemini_file_store import query_store, generate_store_display_name, client as gemini_client
@@ -259,8 +309,8 @@ class RAGSearchTool(BaseTool):
                     cached = await semantic_cache_repository.find_similar_query(
                         org_id=org_id,
                         query_embedding=query_embedding,
-                        folder_filter=folder_filter,
-                        file_filter=file_filter,
+                        folder_filter=effective_folder_filter,
+                        file_filter=effective_file_filter,
                     )
 
                     if cached:
@@ -275,8 +325,8 @@ class RAGSearchTool(BaseTool):
                             "query": query,
                             "search_mode": cached.get("search_mode", search_mode),
                             "filters": {
-                                "folder": folder_filter,
-                                "file": file_filter
+                                "folder": effective_folder_filter,
+                                "file": effective_file_filter
                             },
                             "cached": True,
                             "cache_similarity": cached["similarity"],
@@ -313,8 +363,8 @@ class RAGSearchTool(BaseTool):
             response = query_store(
                 file_search_store=store,
                 prompt=query,
-                file_name_filter=file_filter,
-                folder_name_filter=folder_filter,
+                file_name_filter=effective_file_filter,
+                folder_name_filter=effective_folder_filter,
                 search_mode=search_mode,
                 generate_answer=True,
                 top_k=max_sources
@@ -360,11 +410,11 @@ class RAGSearchTool(BaseTool):
                         query_embedding=query_embedding,
                         answer=answer,
                         citations=citations,
-                        folder_filter=folder_filter,
-                        file_filter=file_filter,
+                        folder_filter=effective_folder_filter,
+                        file_filter=effective_file_filter,
                         search_mode=search_mode,
                     )
-                    logger.debug(f"Cached RAG response for future similar queries")
+                    logger.debug(f"Cached RAG response for future similar queries (file_filter={effective_file_filter})")
                 except Exception as cache_error:
                     logger.warning(f"Failed to cache RAG response: {cache_error}")
 
@@ -375,8 +425,8 @@ class RAGSearchTool(BaseTool):
                 "query": query,
                 "search_mode": search_mode,
                 "filters": {
-                    "folder": folder_filter,
-                    "file": file_filter
+                    "folder": effective_folder_filter,
+                    "file": effective_file_filter
                 },
                 "cached": False,
                 "processing_time_ms": elapsed_ms(start_time),

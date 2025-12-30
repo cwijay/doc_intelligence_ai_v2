@@ -7,6 +7,18 @@ between SheetsAgentConfig and DocumentAgentConfig.
 import os
 from pydantic import BaseModel, Field, field_validator
 
+from src.constants import (
+    MIN_TEMPERATURE,
+    MAX_TEMPERATURE,
+    MIN_TIMEOUT_SECONDS,
+    MAX_TIMEOUT_SECONDS,
+    DEFAULT_AGENT_TIMEOUT_SECONDS,
+    DEFAULT_SESSION_TIMEOUT_MINUTES,
+    DEFAULT_RATE_LIMIT_REQUESTS,
+    DEFAULT_RATE_LIMIT_WINDOW_SECONDS,
+)
+from src.utils.env_utils import parse_bool_env, parse_int_env
+
 
 class BaseAgentConfig(BaseModel):
     """Base configuration shared by all agents.
@@ -29,13 +41,13 @@ class BaseAgentConfig(BaseModel):
     @classmethod
     def validate_temperature(cls, v: float) -> float:
         """Validate temperature is within valid range."""
-        if not 0.0 <= v <= 2.0:
-            raise ValueError("Temperature must be between 0.0 and 2.0")
+        if not MIN_TEMPERATURE <= v <= MAX_TEMPERATURE:
+            raise ValueError(f"Temperature must be between {MIN_TEMPERATURE} and {MAX_TEMPERATURE}")
         return v
 
     # Agent Timeout
     timeout_seconds: int = Field(
-        default_factory=lambda: int(os.getenv("AGENT_TIMEOUT", "300")),
+        default_factory=lambda: parse_int_env("AGENT_TIMEOUT", DEFAULT_AGENT_TIMEOUT_SECONDS),
         description="Timeout in seconds for agent operations"
     )
 
@@ -43,30 +55,30 @@ class BaseAgentConfig(BaseModel):
     @classmethod
     def validate_timeout(cls, v: int) -> int:
         """Validate timeout is within reasonable range."""
-        if not 10 <= v <= 600:
-            raise ValueError("Timeout must be between 10 and 600 seconds")
+        if not MIN_TIMEOUT_SECONDS <= v <= MAX_TIMEOUT_SECONDS:
+            raise ValueError(f"Timeout must be between {MIN_TIMEOUT_SECONDS} and {MAX_TIMEOUT_SECONDS} seconds")
         return v
 
     # Retry Configuration
     max_retries: int = Field(
-        default_factory=lambda: int(os.getenv("AGENT_MAX_RETRIES", "3")),
+        default_factory=lambda: parse_int_env("AGENT_MAX_RETRIES", 3),
         description="Maximum number of retries for agent operations"
     )
 
     # Session Configuration
     session_timeout_minutes: int = Field(
-        default_factory=lambda: int(os.getenv("SESSION_TIMEOUT_MINUTES", "30")),
+        default_factory=lambda: parse_int_env("SESSION_TIMEOUT_MINUTES", DEFAULT_SESSION_TIMEOUT_MINUTES),
         description="Session timeout in minutes"
     )
 
     # Rate Limiting Configuration
     rate_limit_requests: int = Field(
-        default_factory=lambda: int(os.getenv("RATE_LIMIT_REQUESTS", "10")),
+        default_factory=lambda: parse_int_env("RATE_LIMIT_REQUESTS", DEFAULT_RATE_LIMIT_REQUESTS),
         description="Maximum requests per rate limit window"
     )
 
     rate_limit_window_seconds: int = Field(
-        default_factory=lambda: int(os.getenv("RATE_LIMIT_WINDOW", "60")),
+        default_factory=lambda: parse_int_env("RATE_LIMIT_WINDOW", DEFAULT_RATE_LIMIT_WINDOW_SECONDS),
         description="Rate limit window in seconds"
     )
 
@@ -78,23 +90,23 @@ class BaseAgentConfig(BaseModel):
 
     # Memory Configuration
     enable_short_term_memory: bool = Field(
-        default_factory=lambda: os.getenv("ENABLE_SHORT_TERM_MEMORY", "true").lower() == "true",
+        default_factory=lambda: parse_bool_env("ENABLE_SHORT_TERM_MEMORY", True),
         description="Enable short-term conversation memory"
     )
 
     enable_long_term_memory: bool = Field(
-        default_factory=lambda: os.getenv("ENABLE_LONG_TERM_MEMORY", "true").lower() == "true",
+        default_factory=lambda: parse_bool_env("ENABLE_LONG_TERM_MEMORY", True),
         description="Enable long-term persistent memory"
     )
 
     short_term_max_messages: int = Field(
-        default_factory=lambda: int(os.getenv("SHORT_TERM_MEMORY_MAX_MESSAGES", "20")),
+        default_factory=lambda: parse_int_env("SHORT_TERM_MEMORY_MAX_MESSAGES", 20),
         description="Maximum messages to keep in short-term memory"
     )
 
     # Development Configuration
     debug: bool = Field(
-        default_factory=lambda: os.getenv("DEBUG", "false").lower() == "true",
+        default_factory=lambda: parse_bool_env("DEBUG", False),
         description="Enable debug mode"
     )
 

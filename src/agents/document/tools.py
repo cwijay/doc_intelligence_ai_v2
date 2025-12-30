@@ -113,8 +113,8 @@ class DocumentLoaderTool(BaseTool):
             parsed_path = f"{org_name}/parsed/{folder_name}/{md_name}"
 
             # Try to read from GCS
-            if await storage.exists(parsed_path):
-                content = await storage.read(parsed_path)
+            if await storage.exists(parsed_path, use_prefix=False):
+                content = await storage.read(parsed_path, use_prefix=False)
                 if content:
                     return {
                         "success": True,

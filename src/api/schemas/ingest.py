@@ -96,7 +96,7 @@ class SaveAndIndexRequest(BaseModel):
         example="Acme Corp/parsed/invoices/Sample.md"
     )
     org_name: str = Field(..., description="Organization name for store naming", example="Acme Corp")
-    folder_name: Optional[str] = Field(None, description="Folder name for metadata", example="invoices")
+    folder_name: str = Field(..., description="Folder name for GCS path and metadata", example="invoices")
     original_filename: str = Field(..., description="Original document filename", example="Sample.pdf")
     original_gcs_path: Optional[str] = Field(
         None,

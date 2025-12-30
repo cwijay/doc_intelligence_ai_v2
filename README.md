@@ -332,6 +332,7 @@ Both agents use a composable middleware stack for resilience and safety:
 - **gcs_utils.py**: GCS path parsing (`is_gcs_path()`, `parse_gcs_uri()`, `build_gcs_uri()`, `extract_gcs_path_parts()`)
 - **timer_utils.py**: Performance timing (`elapsed_ms()`, `Timer` context manager)
 - **async_utils.py**: Async/sync interop (`run_async()`, `run_sync_in_executor()`)
+- **env_utils.py**: Environment variable parsing (`parse_bool_env()`, `parse_int_env()`, `parse_float_env()`)
 
 ### Constants (`src/constants.py`)
 Centralized configuration values replacing magic numbers:
@@ -400,7 +401,8 @@ src/
 ├── utils/                # Utility modules
 │   ├── gcs_utils.py      # GCS path parsing utilities
 │   ├── timer_utils.py    # Performance timing utilities
-│   └── async_utils.py    # Async/sync helpers
+│   ├── async_utils.py    # Async/sync helpers
+│   └── env_utils.py      # Environment variable parsing
 ├── api/                  # FastAPI routers & schemas
 │   ├── app.py            # App factory with lifespan management
 │   ├── middleware.py     # CORS, logging, exception handlers
@@ -415,6 +417,8 @@ src/
 │   │   └── sessions.py   # Session management
 │   └── schemas/          # Pydantic models
 │       ├── errors.py     # Shared error response definitions
+│       ├── common.py     # Shared schemas (TokenUsage, ToolUsage)
+│       ├── validators.py # Shared validators (path, query, options)
 │       ├── documents.py  # Document request/response
 │       ├── sheets.py     # Sheets request/response
 │       └── rag.py        # RAG request/response
@@ -431,9 +435,12 @@ src/
 │   │       ├── resilience.py        # Retry logic
 │   │       └── safety.py            # PII detection
 │   ├── document/         # DocumentAgent (Gemini)
-│   │   ├── core.py       # Agent implementation
+│   │   ├── core.py       # Agent implementation (875 lines)
 │   │   ├── config.py     # Agent configuration
+│   │   ├── schemas.py    # Request/response schemas
 │   │   ├── gcs_cache.py  # GCS content caching
+│   │   ├── tool_selection.py  # ToolSelectionManager + bind_rag_filters
+│   │   ├── result_parser.py   # AgentResultParser for tool outputs
 │   │   └── tools/        # Tool package
 │   │       ├── __init__.py         # Tool factory
 │   │       ├── base.py             # Shared utilities
@@ -444,14 +451,21 @@ src/
 │   │       ├── persist.py          # Save to GCS/DB
 │   │       └── rag_search.py       # Semantic search
 │   └── sheets/           # SheetsAgent (OpenAI + DuckDB)
-│       ├── core.py       # Agent implementation
+│       ├── core.py       # Agent implementation (686 lines)
 │       ├── config.py     # Agent configuration
+│       ├── cache.py      # FileCache (LRU DataFrame caching)
 │       └── tools.py      # Analysis tools
 ├── db/                   # PostgreSQL models & connection
 │   ├── connection.py     # DatabaseManager singleton
 │   ├── models.py         # SQLAlchemy ORM models
 │   └── repositories/     # Data access layer
-│       ├── audit_repository.py
+│       ├── audit_repository.py  # DEPRECATED: re-exports from audit/
+│       ├── audit/               # Split audit repositories
+│       │   ├── __init__.py          # Re-exports all functions
+│       │   ├── document_repository.py  # Document CRUD
+│       │   ├── job_repository.py       # Job lifecycle
+│       │   ├── audit_log_repository.py # Event logging
+│       │   └── generation_repository.py # Generated content
 │       ├── memory_repository.py
 │       └── rag_repository.py
 ├── rag/                  # Document parsing & search

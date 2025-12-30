@@ -145,7 +145,7 @@ Key files:
 
 ### Agents (`src/agents/`)
 
-**SheetsAgent** (`src/agents/sheets/core.py`):
+**SheetsAgent** (`src/agents/sheets/core.py`, 686 lines):
 - ReAct pattern with `langgraph.prebuilt.create_react_agent`
 - Uses `ChatOpenAI` with `use_responses_api=True` for gpt-5.1-codex-mini compatibility
 - Tools in `tools.py`:
@@ -156,9 +156,9 @@ Key files:
   - `DataAnalysisTool`: Statistical analysis (summary, correlation, trends, outliers, quality)
 - DuckDB connection pool (`DuckDBPool`) for SQL queries on DataFrames
 - SQL injection protection via `validate_sql_query()` and `DANGEROUS_SQL_KEYWORDS`
-- LRU file cache (`FileCache`) with 50-file capacity
+- LRU file cache via `FileCache` class (`cache.py`) with 50-file capacity
 
-**DocumentAgent** (`src/agents/document/core.py`):
+**DocumentAgent** (`src/agents/document/core.py`, 875 lines):
 - Uses `init_chat_model` from `langchain.chat_models` for Gemini LLM initialization
 - Tools organized as package (`tools/`):
   - `base.py`: Shared utilities (path derivation, content formatting, input schemas)
@@ -171,7 +171,8 @@ Key files:
 - Factory: `create_document_tools(config)` in `tools/__init__.py` creates all tools
 - GCS caching (`gcs_cache.py`) with SHA-256 hash validation via `check_and_read_cached_*()` functions
 - Convenience methods: `generate_summary()`, `generate_faqs()`, `generate_questions()`, `generate_all()`, `chat()`
-- Hybrid tool selection via `QueryClassifier` + `LLMToolSelector` for intent-based tool routing
+- Hybrid tool selection via `ToolSelectionManager` (`tool_selection.py`) with `QueryClassifier` + `LLMToolSelector`
+- Result parsing via `AgentResultParser` (`result_parser.py`) for extracting structured content from tool outputs
 
 ### Core Agent Infrastructure (`src/agents/core/`)
 
@@ -244,7 +245,12 @@ Token tracking, quota enforcement, and subscription management:
   - **Memory tables**: `UserPreference`, `ConversationSummary`, `MemoryEntry`
   - **RAG tables**: `FileSearchStore`, `DocumentFolder`
 - `repositories/`:
-  - `audit_repository.py`: Logging, job tracking, caching with content hash validation
+  - `audit_repository.py`: DEPRECATED - re-exports from `audit/` subpackage for backwards compatibility
+  - `audit/`: Split audit repositories (preferred imports):
+    - `document_repository.py`: Document CRUD operations (`register_document`, `get_document_by_name`, etc.)
+    - `job_repository.py`: Job lifecycle (`start_job`, `complete_job`, `fail_job`, `find_cached_result`)
+    - `audit_log_repository.py`: Event logging (`log_event`, `get_audit_trail`, `get_document_summary`)
+    - `generation_repository.py`: Generated content (`save_document_generation`, `find_cached_generation`)
   - `memory_repository.py`: Long-term memory persistence
   - `rag_repository.py`: File store and folder management
 - `utils.py`: Database utility functions
@@ -323,6 +329,11 @@ Google Cloud Storage integration for parsed documents and generated content.
 - `run_async(coro)` - Run async coroutine from sync context (handles nested event loops)
 - `run_sync_in_executor(func, *args)` - Run blocking sync function in thread pool
 
+**env_utils.py** - Environment variable parsing:
+- `parse_bool_env(key, default)` - Parse boolean from env var (handles "true"/"false")
+- `parse_int_env(key, default)` - Parse integer from env var
+- `parse_float_env(key, default)` - Parse float from env var
+
 ### Constants (`src/constants.py`)
 
 Centralized application constants replacing magic numbers throughout codebase:
@@ -354,6 +365,24 @@ DEFAULT_DB_MAX_OVERFLOW = 10
 DEFAULT_NUM_FAQS = 10
 DEFAULT_NUM_QUESTIONS = 10
 DEFAULT_SUMMARY_MAX_WORDS = 500
+
+# Validation Bounds (added in refactoring)
+MIN_NUM_FAQS = 1
+MAX_NUM_FAQS = 50
+MIN_NUM_QUESTIONS = 1
+MAX_NUM_QUESTIONS = 100
+MIN_SUMMARY_WORDS = 50
+MAX_SUMMARY_WORDS = 2000
+MIN_TEMPERATURE = 0.0
+MAX_TEMPERATURE = 2.0
+
+# Event Types (for audit logging)
+EVENT_GENERATION_CACHE_HIT = "generation_cache_hit"
+EVENT_GENERATION_STARTED = "generation_started"
+EVENT_GENERATION_COMPLETED = "generation_completed"
+
+# Search Modes
+VALID_SEARCH_MODES = ["semantic", "keyword", "hybrid"]
 ```
 
 ## Key Patterns
@@ -506,17 +535,23 @@ agent.shutdown(wait=True)
 | App Factory | `src/api/app.py` | Lifespan management, periodic cleanup |
 | Token Tracking | `src/api/usage.py` | Usage tracking and cost estimation |
 | Error Schemas | `src/api/schemas/errors.py` | Shared error response definitions |
+| Shared Validators | `src/api/schemas/validators.py` | Path, query, options validation |
 | Constants | `src/constants.py` | Centralized application constants |
+| Env Utilities | `src/utils/env_utils.py` | Boolean/int/float env parsing |
 | GCS Utilities | `src/utils/gcs_utils.py` | Path parsing and URI building |
 | Timer Utilities | `src/utils/timer_utils.py` | Performance timing helpers |
 | Async Utilities | `src/utils/async_utils.py` | Async/sync interoperability |
 | Rate Limiting | `src/agents/core/rate_limiter.py` | Per-session sliding window limits |
 | Session Mgmt | `src/agents/core/session_manager.py` | Session lifecycle and caching |
 | GCS Caching | `src/agents/document/gcs_cache.py` | SHA-256 based content caching |
+| Tool Selection | `src/agents/document/tool_selection.py` | ToolSelectionManager + filters |
+| Result Parser | `src/agents/document/result_parser.py` | Agent output parsing |
 | Tool Factory | `src/agents/document/tools/__init__.py` | Document tools creation |
+| File Cache | `src/agents/sheets/cache.py` | LRU DataFrame caching |
 | DuckDB Pool | `src/agents/sheets/tools.py` | Connection pooling for SQL queries |
 | Middleware Stack | `src/agents/core/middleware/stack.py` | Composable middleware |
 | DB Connection | `src/db/connection.py` | Per-event-loop async sessions |
+| Audit Repositories | `src/db/repositories/audit/` | Split document/job/log/generation repos |
 | RAG Repository | `src/db/repositories/rag_repository.py` | Store/folder management |
 | Usage Service | `src/core/usage/service.py` | Token/resource tracking |
 | Quota Checker | `src/core/usage/quota_checker.py` | Limit enforcement with caching |

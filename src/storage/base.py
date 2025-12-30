@@ -54,7 +54,7 @@ class StorageBackend(ABC):
 
     @abstractmethod
     async def list_files(
-        self, directory: str, extension: Optional[str] = None
+        self, directory: str, extension: Optional[str] = None, use_prefix: bool = True
     ) -> List[str]:
         """
         List files in directory.
@@ -62,6 +62,8 @@ class StorageBackend(ABC):
         Args:
             directory: Directory to list
             extension: Filter by file extension (e.g., ".md")
+            use_prefix: If True, prepend configured prefix to directory.
+                       If False, use directory directly without prefix.
 
         Returns:
             List of file URIs/paths

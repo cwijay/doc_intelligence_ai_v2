@@ -6,6 +6,15 @@ from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
+from src.api.schemas.validators import (
+    validate_parsed_file_path,
+    validate_document_name,
+    validate_query as _validate_query,
+    validate_num_faqs,
+    validate_num_questions,
+    validate_summary_max_words,
+)
+
 
 class GenerationOptions(BaseModel):
     """Options for content generation."""
@@ -27,24 +36,18 @@ class GenerationOptions(BaseModel):
 
     @field_validator('num_faqs')
     @classmethod
-    def validate_num_faqs(cls, v: Optional[int]) -> Optional[int]:
-        if v is not None and not 1 <= v <= 50:
-            raise ValueError("num_faqs must be between 1 and 50")
-        return v
+    def _validate_num_faqs(cls, v: Optional[int]) -> Optional[int]:
+        return validate_num_faqs(v)
 
     @field_validator('num_questions')
     @classmethod
-    def validate_num_questions(cls, v: Optional[int]) -> Optional[int]:
-        if v is not None and not 1 <= v <= 100:
-            raise ValueError("num_questions must be between 1 and 100")
-        return v
+    def _validate_num_questions(cls, v: Optional[int]) -> Optional[int]:
+        return validate_num_questions(v)
 
     @field_validator('summary_max_words')
     @classmethod
-    def validate_summary_words(cls, v: Optional[int]) -> Optional[int]:
-        if v is not None and not 50 <= v <= 2000:
-            raise ValueError("summary_max_words must be between 50 and 2000")
-        return v
+    def _validate_summary_words(cls, v: Optional[int]) -> Optional[int]:
+        return validate_summary_max_words(v)
 
 
 class DocumentRequest(BaseModel):
@@ -89,6 +92,16 @@ class DocumentRequest(BaseModel):
         description="Organization ID for multi-tenant isolation"
     )
 
+    file_filter: Optional[str] = Field(
+        default=None,
+        description="File name filter for RAG cache scoping (single document context)"
+    )
+
+    folder_filter: Optional[str] = Field(
+        default=None,
+        description="Folder name filter for RAG cache scoping (folder context)"
+    )
+
     options: Optional[GenerationOptions] = Field(
         default=None,
         description="Optional generation settings"
@@ -96,32 +109,21 @@ class DocumentRequest(BaseModel):
 
     @field_validator('document_name')
     @classmethod
-    def validate_document_name(cls, v: str) -> str:
+    def _validate_document_name(cls, v: str) -> str:
         """Validate document name to prevent path traversal."""
-        if '..' in v or '/' in v or '\\' in v:
-            raise ValueError("Invalid document name: path traversal not allowed")
-        return v.strip()
+        return validate_document_name(v)
 
     @field_validator('parsed_file_path')
     @classmethod
-    def validate_parsed_file_path(cls, v: str) -> str:
+    def _validate_parsed_file_path(cls, v: str) -> str:
         """Validate parsed_file_path to prevent path traversal."""
-        if '..' in v:
-            raise ValueError('Invalid path: ".." not allowed')
-        if v.startswith('/'):
-            raise ValueError('Invalid path: must be relative, not absolute')
-        if '\\' in v:
-            raise ValueError('Invalid path: backslashes not allowed')
-        return v.strip()
+        return validate_parsed_file_path(v)
 
     @field_validator('query')
     @classmethod
     def validate_query(cls, query: str) -> str:
         """Sanitize query input."""
-        query = query.replace('\x00', '').strip()
-        if not query:
-            raise ValueError("Query cannot be empty")
-        return query
+        return _validate_query(query)
 
 
 class FAQ(BaseModel):

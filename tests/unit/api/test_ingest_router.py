@@ -447,7 +447,8 @@ class TestSaveAndIndexEndpoint:
                     "content": "# Test Content",
                     "target_path": "org/parsed/folder/doc.md",
                     "org_name": "Test Org",
-                    "original_filename": "doc.pdf",  # Required field
+                    "folder_name": "folder",
+                    "original_filename": "doc.pdf",
                 }
             )
 
@@ -487,7 +488,8 @@ class TestSaveAndIndexEndpoint:
                     "content": "# Test Content",
                     "target_path": "org/parsed/doc.md",
                     "org_name": "Test Org",
-                    "original_filename": "doc.pdf",  # Required field
+                    "folder_name": "documents",
+                    "original_filename": "doc.pdf",
                 }
             )
 

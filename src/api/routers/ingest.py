@@ -617,10 +617,11 @@ async def save_and_index(
         storage = get_storage()
         storage_config = get_storage_config()
 
-        # Extract directory and filename from target_path
-        # e.g., "Acme Corp/parsed/invoices/Sample.md" -> dir="Acme Corp/parsed/invoices", file="Sample.md"
-        target_dir = os.path.dirname(request.target_path)
+        # Extract filename from target_path
         target_filename = os.path.basename(request.target_path)
+
+        # Construct directory using org_name and folder_name (consistent with load-parsed endpoint)
+        target_dir = f"{request.org_name}/parsed/{request.folder_name}"
 
         logger.info(f"Saving content to GCS: {target_dir}/{target_filename}")
 

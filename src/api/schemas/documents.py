@@ -6,17 +6,7 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, field_validator
 
 from .common import TokenUsage, DifficultyLevel
-
-
-def _validate_parsed_file_path(v: str) -> str:
-    """Validate parsed_file_path to prevent path traversal attacks."""
-    if '..' in v:
-        raise ValueError('Invalid path: ".." not allowed')
-    if v.startswith('/'):
-        raise ValueError('Invalid path: must be relative, not absolute')
-    if '\\' in v:
-        raise ValueError('Invalid path: backslashes not allowed')
-    return v
+from .validators import validate_parsed_file_path as _validate_parsed_file_path
 
 
 # =============================================================================

@@ -7,11 +7,7 @@ import uuid
 import hashlib
 import logging
 import os
-from collections import OrderedDict
 from typing import Dict, List, Any, Optional
-import pandas as pd
-
-from concurrent.futures import ThreadPoolExecutor
 
 from src.core.executors import get_executors
 
@@ -23,10 +19,11 @@ from langchain.agents.middleware import (
     ModelCallLimitMiddleware,
     ToolCallLimitMiddleware,
 )
-from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 
 from .config import SheetsAgentConfig
+from .cache import FileCache
 from .gcs_loader import validate_file_path as gcs_validate_file_path
 from src.utils.timer_utils import elapsed_ms
 from src.utils.gcs_utils import is_gcs_path
@@ -36,8 +33,6 @@ from src.agents.core.audit_queue import enqueue_audit_event
 from src.agents.core.base_agent import BaseAgent
 from src.agents.core.token_utils import calculate_token_usage
 
-# Background executor for non-blocking audit logging
-_audit_executor: Optional[ThreadPoolExecutor] = None
 from .tools import (
     FilePreviewTool,
     CrossFileQueryTool,
@@ -56,63 +51,7 @@ logger = logging.getLogger(__name__)
 
 
 # NOTE: RateLimiter class has been moved to src/agents/core/rate_limiter.py
-
-
-class FileCache:
-    """Manages cached file data to avoid redundant reads using efficient OrderedDict LRU."""
-
-    def __init__(self, max_size: int = 50):
-        self.cache: OrderedDict[str, pd.DataFrame] = OrderedDict()
-        self.max_size = max_size
-        self._hits = 0
-        self._misses = 0
-
-    def get(self, file_path: str) -> Optional[pd.DataFrame]:
-        """Get cached DataFrame if available, moving to end (most recently used)."""
-        if file_path in self.cache:
-            # Move to end to mark as recently used
-            self.cache.move_to_end(file_path)
-            self._hits += 1
-            logger.debug(f"Cache hit for {file_path}")
-            return self.cache[file_path].copy()
-        self._misses += 1
-        return None
-
-    def put(self, file_path: str, df: pd.DataFrame):
-        """Cache DataFrame with LRU eviction using OrderedDict."""
-        if file_path in self.cache:
-            # Update existing entry and move to end
-            self.cache.move_to_end(file_path)
-            self.cache[file_path] = df.copy()
-        else:
-            # Evict oldest if at capacity
-            if len(self.cache) >= self.max_size:
-                oldest_file, _ = self.cache.popitem(last=False)
-                logger.debug(f"Evicted {oldest_file} from cache")
-
-            self.cache[file_path] = df.copy()
-        logger.debug(f"Cached {file_path} (shape: {df.shape})")
-
-    def clear(self):
-        """Clear all cached data."""
-        self.cache.clear()
-        self._hits = 0
-        self._misses = 0
-        logger.debug("File cache cleared")
-
-    def get_stats(self) -> Dict[str, Any]:
-        """Get cache statistics."""
-        total = self._hits + self._misses
-        hit_rate = (self._hits / total * 100) if total > 0 else 0
-        return {
-            "size": len(self.cache),
-            "max_size": self.max_size,
-            "hits": self._hits,
-            "misses": self._misses,
-            "hit_rate_percent": round(hit_rate, 2)
-        }
-
-
+# NOTE: FileCache class has been moved to src/agents/sheets/cache.py
 # NOTE: SessionManager class has been moved to src/agents/core/session_manager.py
 
 
@@ -727,15 +666,7 @@ class SheetsAgent(BaseAgent):
             wait: If True, wait for pending tasks to complete.
                   If False, cancel pending tasks immediately.
         """
-        global _audit_executor
-
         logger.info(f"Shutting down SheetsAgent (wait={wait})")
-
-        # Shutdown audit executor if exists
-        if _audit_executor:
-            logger.info("Shutting down audit executor")
-            _audit_executor.shutdown(wait=wait, cancel_futures=not wait)
-            logger.info("Audit executor shutdown complete")
 
         # Clean up DuckDB connection pool (sheets-specific)
         try:
