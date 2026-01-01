@@ -32,8 +32,10 @@ class RAGSearchTool(BaseTool):
 
     # Bound filter values from request context - used when LLM doesn't extract filters
     # These are set via with_bound_filters() to ensure correct cache scoping
-    _bound_file_filter: Optional[str] = None
-    _bound_folder_filter: Optional[str] = None
+    # Note: Using regular fields (not underscore-prefixed) because Pydantic v2 ignores
+    # underscore-prefixed kwargs in constructor, causing bound filters to never be set
+    bound_file_filter: Optional[str] = Field(default=None, exclude=True)
+    bound_folder_filter: Optional[str] = Field(default=None, exclude=True)
 
     def with_bound_filters(
         self,
@@ -55,8 +57,8 @@ class RAGSearchTool(BaseTool):
         """
         return RAGSearchTool(
             config=self.config,
-            _bound_file_filter=file_filter,
-            _bound_folder_filter=folder_filter,
+            bound_file_filter=file_filter,
+            bound_folder_filter=folder_filter,
         )
 
     def _run(
@@ -72,15 +74,16 @@ class RAGSearchTool(BaseTool):
         """Search documents using Gemini File Search with semantic caching."""
         start_time = time.time()
 
-        # Resolve filter values: use LLM-extracted values if provided, else use bound values
+        # Resolve filter values: use LLM-extracted values if non-empty, else use bound values
         # Bound values come from the request context and ensure correct cache scoping
-        effective_file_filter = file_filter if file_filter is not None else self._bound_file_filter
-        effective_folder_filter = folder_filter if folder_filter is not None else self._bound_folder_filter
+        # Note: LLM may pass empty strings "", so we check truthiness not just None
+        effective_file_filter = file_filter if file_filter else self.bound_file_filter
+        effective_folder_filter = folder_filter if folder_filter else self.bound_folder_filter
 
         if effective_file_filter != file_filter or effective_folder_filter != folder_filter:
             logger.debug(
                 f"Using bound filters - file: {effective_file_filter}, folder: {effective_folder_filter} "
-                f"(LLM extracted: file={file_filter}, folder={folder_filter})"
+                f"(LLM provided: file={file_filter!r}, folder={folder_filter!r})"
             )
 
         try:
@@ -266,14 +269,15 @@ class RAGSearchTool(BaseTool):
         """Async version: Search documents using Gemini File Search with semantic caching."""
         start_time = time.time()
 
-        # Resolve filter values: use LLM-extracted values if provided, else use bound values
-        effective_file_filter = file_filter if file_filter is not None else self._bound_file_filter
-        effective_folder_filter = folder_filter if folder_filter is not None else self._bound_folder_filter
+        # Resolve filter values: use LLM-extracted values if non-empty, else use bound values
+        # Note: LLM may pass empty strings "", so we check truthiness not just None
+        effective_file_filter = file_filter if file_filter else self.bound_file_filter
+        effective_folder_filter = folder_filter if folder_filter else self.bound_folder_filter
 
         if effective_file_filter != file_filter or effective_folder_filter != folder_filter:
             logger.debug(
                 f"Using bound filters - file: {effective_file_filter}, folder: {effective_folder_filter} "
-                f"(LLM extracted: file={file_filter}, folder={folder_filter})"
+                f"(LLM provided: file={file_filter!r}, folder={folder_filter!r})"
             )
 
         try:
