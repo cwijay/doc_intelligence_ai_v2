@@ -139,7 +139,7 @@ class DocumentAgent(BaseAgent):
         self.tool_selection_manager = ToolSelectionManager(
             tools=self.tools,
             config=self.config,
-            api_key=self.config.google_api_key
+            api_key=self.config.openai_api_key
         )
 
         # Initialize result parser for extracting structured content
@@ -154,7 +154,7 @@ class DocumentAgent(BaseAgent):
         # Create agent
         self.agent = self._create_agent()
 
-        logger.info(f"Document Agent initialized with model: {self.config.gemini_model}")
+        logger.info(f"Document Agent initialized with model: {self.config.openai_model}")
 
     def _build_middleware(self) -> List:
         """Build LangChain middleware list from config."""
@@ -214,26 +214,24 @@ class DocumentAgent(BaseAgent):
 
     def _init_llm(self):
         """Initialize the language model using init_chat_model with token tracking callback."""
-        if not self.config.google_api_key:
-            raise ValueError(
-                "GOOGLE_API_KEY environment variable is required. "
-                "Get your API key from https://aistudio.google.com/app/apikey"
-            )
+        if not self.config.openai_api_key:
+            raise ValueError("OPENAI_API_KEY environment variable is required.")
 
         # Use shared callback creation from BaseAgent
         callbacks = self._create_token_tracking_callback("document_agent")
 
         llm = init_chat_model(
-            model=self.config.gemini_model,
-            model_provider="google_genai",
+            model=self.config.openai_model,
+            model_provider="openai",
             temperature=self.config.temperature,
-            api_key=self.config.google_api_key,
-            timeout=60,  # Prevent hanging requests
+            api_key=self.config.openai_api_key,
+            use_responses_api=True,  # Required for gpt-5-nano
+            timeout=300,  # 5 minutes for complex generation tasks
             max_retries=2,
             callbacks=callbacks if callbacks else None,
         )
 
-        logger.info(f"Initialized LLM: {self.config.gemini_model}")
+        logger.info(f"Initialized LLM: {self.config.openai_model}")
         return llm
 
     def _create_agent(self):
@@ -325,7 +323,7 @@ class DocumentAgent(BaseAgent):
             token_usage = calculate_agent_token_usage(
                 request.query,
                 response_text,
-                model=self.config.gemini_model
+                model=self.config.openai_model
             )
 
             self.session_manager.update_session(
@@ -478,12 +476,14 @@ class DocumentAgent(BaseAgent):
             )
 
             # Bind filters to RAG tool if present in request (ensures correct cache scoping)
+            filters_bound = False
             if request.file_filter or request.folder_filter:
                 relevant_tools = bind_rag_filters(
                     relevant_tools,
                     file_filter=request.file_filter,
                     folder_filter=request.folder_filter,
                 )
+                filters_bound = True
                 logger.debug(
                     f"Bound RAG filters: file={request.file_filter}, folder={request.folder_filter}"
                 )
@@ -512,8 +512,10 @@ class DocumentAgent(BaseAgent):
                         config
                     )
                 )
-            # Create dynamic agent with filtered tools if tool selection is enabled
-            elif self.tool_selection_manager.enabled and relevant_tools != self.tools:
+            # Create dynamic agent with filtered tools if:
+            # - Filters are bound (to ensure bound RAG tool is used), OR
+            # - Tool selection is enabled and filtered tools differ from default
+            elif filters_bound or (self.tool_selection_manager.enabled and relevant_tools != self.tools):
                 dynamic_prompt = get_system_prompt([t.name for t in relevant_tools])
                 dynamic_agent = create_agent(
                     model=self.llm,
@@ -552,6 +554,9 @@ class DocumentAgent(BaseAgent):
                 if isinstance(result, dict):
                     if "messages" in result and result["messages"]:
                         all_messages = result["messages"]
+                        # Debug: Log message types to trace tool outputs
+                        msg_types = [type(m).__name__ for m in all_messages]
+                        logger.info(f"Agent returned {len(all_messages)} messages: {msg_types}")
                         last_message = all_messages[-1]
                         if hasattr(last_message, 'content'):
                             content = last_message.content
@@ -652,8 +657,17 @@ class DocumentAgent(BaseAgent):
         )
         response = await self.process_request(request)
 
+        # Debug: Log response structure to trace summary extraction
+        logger.info(
+            f"generate_summary response: success={response.success}, "
+            f"has_content={response.content is not None}, "
+            f"has_summary={response.content.summary is not None if response.content else False}, "
+            f"summary_len={len(response.content.summary) if response.content and response.content.summary else 0}"
+        )
+
         if response.success and response.content and response.content.summary:
             return response.content.summary
+        logger.warning(f"generate_summary falling back to message: {response.message[:100]}...")
         return response.message
 
     async def generate_faqs(
@@ -825,7 +839,7 @@ class DocumentAgent(BaseAgent):
                 "status": "healthy" if llm_status == "healthy" else "degraded",
                 "components": {
                     "llm": llm_status,
-                    "model": self.config.gemini_model,
+                    "model": self.config.openai_model,
                     "audit_logging": base_status["audit_logging"],
                     "short_term_memory": "enabled" if self.short_term_memory else "disabled",
                     "long_term_memory": "enabled" if self.long_term_memory else "disabled"

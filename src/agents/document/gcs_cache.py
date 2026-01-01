@@ -98,10 +98,31 @@ def _parse_faqs_json(content: str) -> List[Dict[str, str]]:
         "metadata": {...},
         "faqs": [{"question": "...", "answer": "..."}, ...]
     }
+
+    Also handles malformed nested format from older persist logic:
+    {
+        "metadata": {...},
+        "faqs": {"success": true, "faqs": [...]}
+    }
     """
     try:
         data = json.loads(content)
-        return data.get('faqs', [])
+        # Handle double-encoded JSON
+        if isinstance(data, str):
+            data = json.loads(data)
+
+        faqs = data.get('faqs', [])
+
+        # Handle nested structure from old persist bug
+        if isinstance(faqs, dict) and 'faqs' in faqs:
+            faqs = faqs['faqs']
+
+        # Validate it's a list
+        if not isinstance(faqs, list):
+            logger.warning(f"FAQs is not a list: {type(faqs)}")
+            return []
+
+        return faqs
     except json.JSONDecodeError as e:
         logger.warning(f"Failed to parse FAQs JSON: {e}")
         return []
@@ -116,10 +137,31 @@ def _parse_questions_json(content: str) -> List[Dict[str, str]]:
         "metadata": {...},
         "questions": [{"question": "...", "expected_answer": "...", "difficulty": "..."}, ...]
     }
+
+    Also handles malformed nested format from older persist logic:
+    {
+        "metadata": {...},
+        "questions": {"success": true, "questions": [...]}
+    }
     """
     try:
         data = json.loads(content)
-        return data.get('questions', [])
+        # Handle double-encoded JSON
+        if isinstance(data, str):
+            data = json.loads(data)
+
+        questions = data.get('questions', [])
+
+        # Handle nested structure from old persist bug
+        if isinstance(questions, dict) and 'questions' in questions:
+            questions = questions['questions']
+
+        # Validate it's a list
+        if not isinstance(questions, list):
+            logger.warning(f"Questions is not a list: {type(questions)}")
+            return []
+
+        return questions
     except json.JSONDecodeError as e:
         logger.warning(f"Failed to parse questions JSON: {e}")
         return []
@@ -190,7 +232,7 @@ async def check_and_read_cached_faqs(
 
     try:
         storage = get_storage()
-        gcs_path = _build_content_path(parsed_file_path, 'faqs', document_name)
+        gcs_path = _build_content_path(parsed_file_path, 'faq', document_name)
 
         logger.debug(f"Checking GCS cache for FAQs: {gcs_path}")
 

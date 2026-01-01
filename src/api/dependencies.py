@@ -12,8 +12,54 @@ from functools import lru_cache
 from typing import Optional, Dict, Any
 
 from fastapi import Depends, HTTPException, Header
+from sqlalchemy import select, func
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# Organization Lookup (for multi-tenancy)
+# =============================================================================
+
+async def lookup_organization(identifier: str) -> Optional[Any]:
+    """
+    Look up organization by ID or name.
+
+    Tries exact ID match first, then falls back to case-insensitive name match.
+
+    Args:
+        identifier: Organization ID (UUID string) or name
+
+    Returns:
+        OrganizationModel instance or None if not found
+    """
+    try:
+        from src.db.connection import db
+        from src.db.models import OrganizationModel
+
+        async with db.session() as session:
+            if session is None:
+                # Database disabled - return None (will use header as-is)
+                logger.debug("Database disabled, skipping org lookup")
+                return None
+
+            # Try by ID first (exact string match - id column is VARCHAR)
+            stmt = select(OrganizationModel).where(OrganizationModel.id == identifier)
+            result = await session.execute(stmt)
+            org = result.scalar_one_or_none()
+            if org:
+                return org
+
+            # Try by name (case-insensitive)
+            stmt = select(OrganizationModel).where(
+                func.lower(OrganizationModel.name) == identifier.lower()
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
+    except Exception as e:
+        logger.warning(f"Organization lookup failed for '{identifier}': {e}")
+        return None
 
 
 # =============================================================================
@@ -38,31 +84,58 @@ async def get_org_id(
     x_organization_id: Optional[str] = Header(None, alias="X-Organization-ID")
 ) -> str:
     """
-    Extract organization ID from request header.
+    Extract and resolve organization ID from request header.
 
+    Looks up the organization by UUID or name and returns the actual UUID.
     Required for multi-tenant isolation. All data operations must be
     scoped to the organization.
 
-    In production, this should be extracted from a validated JWT token
-    via shared auth with v2.0 backend.
+    Args:
+        x_organization_id: Organization identifier (UUID or name) from header
+
+    Returns:
+        Organization UUID string
+
+    Raises:
+        HTTPException 400: If header is missing
+        HTTPException 404: If organization not found
     """
     if not x_organization_id:
         raise HTTPException(
             status_code=400,
             detail="X-Organization-ID header required for multi-tenant operation"
         )
-    return x_organization_id
+
+    # Look up organization to get actual UUID
+    org = await lookup_organization(x_organization_id)
+    if not org:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Organization not found: {x_organization_id}"
+        )
+
+    return str(org.id)
 
 
 async def get_optional_org_id(
     x_organization_id: Optional[str] = Header(None, alias="X-Organization-ID")
 ) -> Optional[str]:
     """
-    Extract optional organization ID from request header.
+    Extract and resolve optional organization ID from request header.
 
     Use for endpoints that can work without org context (e.g., health checks).
+    Returns the actual UUID if org is found, None otherwise.
     """
-    return x_organization_id
+    if not x_organization_id:
+        return None
+
+    # Look up organization to get actual UUID
+    org = await lookup_organization(x_organization_id)
+    if org:
+        return str(org.id)
+
+    # Return None if org not found (optional context)
+    return None
 
 
 async def get_user_id(

@@ -6,7 +6,12 @@ from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, field_validator
 
 from .common import TokenUsage, DifficultyLevel
-from .validators import validate_parsed_file_path as _validate_parsed_file_path
+from .validators import (
+    validate_parsed_file_path as _validate_parsed_file_path,
+    validate_summary_path as _validate_summary_path,
+    validate_faq_path as _validate_faq_path,
+    validate_questions_path as _validate_questions_path,
+)
 
 
 # =============================================================================
@@ -18,6 +23,44 @@ class GenerationOptions(BaseModel):
     num_faqs: int = Field(default=10, ge=1, le=50, example=10)
     num_questions: int = Field(default=10, ge=1, le=100, example=10)
     summary_max_words: int = Field(default=500, ge=50, le=2000, example=500)
+
+
+class ContentOutputPaths(BaseModel):
+    """Explicit output paths for generated content.
+
+    When provided, these paths are used instead of deriving paths from parsed_file_path.
+    All paths are optional - if not provided, the path will be derived from parsed_file_path.
+    """
+    summary_path: Optional[str] = Field(
+        default=None,
+        description="GCS path for summary output (e.g., 'Acme corp/summary/invoices/Sample1.md')",
+        example="Acme corp/summary/invoices/Sample1.md"
+    )
+    faq_path: Optional[str] = Field(
+        default=None,
+        description="GCS path for FAQ output (e.g., 'Acme corp/faq/invoices/Sample1.json')",
+        example="Acme corp/faq/invoices/Sample1.json"
+    )
+    questions_path: Optional[str] = Field(
+        default=None,
+        description="GCS path for questions output (e.g., 'Acme corp/questions/invoices/Sample1.json')",
+        example="Acme corp/questions/invoices/Sample1.json"
+    )
+
+    @field_validator('summary_path')
+    @classmethod
+    def validate_summary(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_summary_path(v)
+
+    @field_validator('faq_path')
+    @classmethod
+    def validate_faq(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_faq_path(v)
+
+    @field_validator('questions_path')
+    @classmethod
+    def validate_questions(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_questions_path(v)
 
 
 class DocumentProcessRequest(BaseModel):
@@ -47,6 +90,11 @@ class SummarizeRequest(BaseModel):
         description="GCS path to parsed document (e.g., 'Acme corp/parsed/invoices/Sample1.md')",
         example="Acme corp/parsed/invoices/Sample1.md"
     )
+    summary_path: Optional[str] = Field(
+        default=None,
+        description="GCS path for summary output (e.g., 'Acme corp/summary/invoices/Sample1.md'). If not provided, derived from parsed_file_path.",
+        example="Acme corp/summary/invoices/Sample1.md"
+    )
     max_words: int = Field(default=500, ge=50, le=2000, example=300)
     session_id: Optional[str] = Field(default=None, example="sess_abc123")
     force: bool = Field(default=False, description="Force regeneration, bypassing GCS cache")
@@ -55,6 +103,11 @@ class SummarizeRequest(BaseModel):
     @classmethod
     def validate_path(cls, v: str) -> str:
         return _validate_parsed_file_path(v)
+
+    @field_validator('summary_path')
+    @classmethod
+    def validate_summary(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_summary_path(v)
 
 
 class FAQsRequest(BaseModel):
@@ -65,6 +118,11 @@ class FAQsRequest(BaseModel):
         description="GCS path to parsed document (e.g., 'Acme corp/parsed/invoices/Sample1.md')",
         example="Acme corp/parsed/invoices/Sample1.md"
     )
+    faq_path: Optional[str] = Field(
+        default=None,
+        description="GCS path for FAQ output (e.g., 'Acme corp/faq/invoices/Sample1.json'). If not provided, derived from parsed_file_path.",
+        example="Acme corp/faq/invoices/Sample1.json"
+    )
     num_faqs: int = Field(default=10, ge=1, le=50, example=10)
     session_id: Optional[str] = Field(default=None, example="sess_abc123")
     force: bool = Field(default=False, description="Force regeneration, bypassing GCS cache")
@@ -73,6 +131,11 @@ class FAQsRequest(BaseModel):
     @classmethod
     def validate_path(cls, v: str) -> str:
         return _validate_parsed_file_path(v)
+
+    @field_validator('faq_path')
+    @classmethod
+    def validate_faq(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_faq_path(v)
 
 
 class QuestionsRequest(BaseModel):
@@ -83,6 +146,11 @@ class QuestionsRequest(BaseModel):
         description="GCS path to parsed document (e.g., 'Acme corp/parsed/invoices/Sample1.md')",
         example="Acme corp/parsed/invoices/Sample1.md"
     )
+    questions_path: Optional[str] = Field(
+        default=None,
+        description="GCS path for questions output (e.g., 'Acme corp/questions/invoices/Sample1.json'). If not provided, derived from parsed_file_path.",
+        example="Acme corp/questions/invoices/Sample1.json"
+    )
     num_questions: int = Field(default=10, ge=1, le=100, example=10)
     session_id: Optional[str] = Field(default=None, example="sess_abc123")
     force: bool = Field(default=False, description="Force regeneration, bypassing GCS cache")
@@ -92,6 +160,11 @@ class QuestionsRequest(BaseModel):
     def validate_path(cls, v: str) -> str:
         return _validate_parsed_file_path(v)
 
+    @field_validator('questions_path')
+    @classmethod
+    def validate_questions(cls, v: Optional[str]) -> Optional[str]:
+        return _validate_questions_path(v)
+
 
 class GenerateAllRequest(BaseModel):
     """Request for generating all content types."""
@@ -100,6 +173,10 @@ class GenerateAllRequest(BaseModel):
         ...,
         description="GCS path to parsed document (e.g., 'Acme corp/parsed/invoices/Sample1.md')",
         example="Acme corp/parsed/invoices/Sample1.md"
+    )
+    output_paths: Optional[ContentOutputPaths] = Field(
+        default=None,
+        description="Explicit output paths for generated content. If not provided, paths are derived from parsed_file_path."
     )
     options: Optional[GenerationOptions] = None
     session_id: Optional[str] = Field(default=None, example="sess_abc123")

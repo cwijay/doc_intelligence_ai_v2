@@ -349,3 +349,240 @@ def cleanup_db_after_module():
         loop.run_until_complete(delete_test_records(prefix="test-"))
     except Exception:
         pass
+
+
+# =============================================================================
+# Bulk Processing Fixtures
+# =============================================================================
+
+@pytest.fixture(autouse=True)
+def reset_bulk_singletons():
+    """Reset bulk module singletons before and after each test."""
+    # Reset before test
+    try:
+        from src.bulk.config import reset_bulk_config
+        from src.bulk.folder_manager import reset_folder_manager
+        reset_bulk_config()
+        reset_folder_manager()
+    except ImportError:
+        pass
+
+    yield
+
+    # Reset after test
+    try:
+        from src.bulk.config import reset_bulk_config
+        from src.bulk.folder_manager import reset_folder_manager
+        reset_bulk_config()
+        reset_folder_manager()
+    except ImportError:
+        pass
+
+
+@pytest.fixture
+def mock_bulk_config():
+    """Create mock bulk processing config with test defaults."""
+    from src.bulk.config import BulkProcessingConfig
+    return BulkProcessingConfig(
+        max_documents_per_folder=10,
+        max_file_size_mb=50,
+        concurrent_documents=3,
+        parse_timeout_seconds=300,
+        index_timeout_seconds=60,
+        generation_timeout_seconds=300,
+        job_timeout_seconds=3600,
+        max_retries_per_document=3,
+        auto_start_delay_seconds=60,
+        auto_start_min_documents=1,
+        webhook_enabled=True,
+        webhook_secret=None,
+    )
+
+
+@pytest.fixture
+def mock_folder_manager():
+    """Create mock folder manager with AsyncMock methods."""
+    from src.bulk.schemas import BulkFolderInfo, SignedUrlInfo
+    from datetime import datetime
+
+    manager = MagicMock()
+    manager.create_folder = AsyncMock(return_value=BulkFolderInfo(
+        folder_name="test-folder",
+        gcs_path="gs://test-bucket/test-org/bulk/test-folder",
+        document_count=0,
+        total_size_bytes=0,
+        created_at=datetime.utcnow(),
+        org_id="test-org",
+    ))
+    manager.get_folder_info = AsyncMock(return_value=BulkFolderInfo(
+        folder_name="test-folder",
+        gcs_path="gs://test-bucket/test-org/bulk/test-folder",
+        document_count=3,
+        total_size_bytes=1024000,
+        created_at=datetime.utcnow(),
+        org_id="test-org",
+    ))
+    manager.list_folders = AsyncMock(return_value=[])
+    manager.list_documents = AsyncMock(return_value=[])
+    manager.generate_upload_urls = AsyncMock(return_value=[])
+    manager.validate_folder_limit = AsyncMock(return_value=(True, "Folder is valid"))
+    manager.folder_exists = AsyncMock(return_value=False)
+    manager._is_supported_file = MagicMock(return_value=True)
+    manager._get_content_type = MagicMock(return_value="application/pdf")
+    return manager
+
+
+@pytest.fixture
+def mock_bulk_service():
+    """Create mock bulk job service with AsyncMock methods."""
+    from src.bulk.schemas import BulkJobInfo, BulkJobStatus, ProcessingOptions
+    from datetime import datetime
+
+    service = MagicMock()
+
+    sample_job = BulkJobInfo(
+        id="job-123",
+        organization_id="test-org",
+        folder_name="test-folder",
+        source_path="gs://test-bucket/test-org/bulk/test-folder",
+        total_documents=5,
+        completed_count=0,
+        failed_count=0,
+        skipped_count=0,
+        status=BulkJobStatus.PENDING,
+        options=ProcessingOptions(),
+        created_at=datetime.utcnow(),
+    )
+
+    service.create_job = AsyncMock(return_value=sample_job)
+    service.start_job_processing = AsyncMock()
+    service.process_single_document = AsyncMock()
+    service.finalize_job = AsyncMock()
+    service.cancel_job = AsyncMock(return_value=True)
+    service.retry_failed_documents = AsyncMock(return_value=0)
+    service.get_job_status = AsyncMock(return_value=sample_job)
+    service.list_jobs = AsyncMock(return_value=[sample_job])
+    return service
+
+
+@pytest.fixture
+def mock_bulk_queue():
+    """Create mock bulk job queue."""
+    queue = MagicMock()
+    queue.enqueue = MagicMock()
+    queue.start = MagicMock()
+    queue.shutdown = MagicMock()
+    queue.is_running = True
+    return queue
+
+
+@pytest.fixture
+def sample_bulk_job_dict():
+    """Sample bulk job dictionary for testing."""
+    from datetime import datetime
+    return {
+        "id": "job-123",
+        "organization_id": "test-org",
+        "folder_name": "test-folder",
+        "source_path": "gs://test-bucket/test-org/bulk/test-folder",
+        "total_documents": 5,
+        "completed_count": 0,
+        "failed_count": 0,
+        "skipped_count": 0,
+        "status": "pending",
+        "options": {
+            "generate_summary": True,
+            "generate_faqs": True,
+            "generate_questions": True,
+            "num_faqs": 10,
+            "num_questions": 10,
+            "summary_max_words": 500,
+        },
+        "created_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@pytest.fixture
+def sample_document_item_dict():
+    """Sample document item dictionary for testing."""
+    from datetime import datetime
+    return {
+        "id": "doc-123",
+        "bulk_job_id": "job-123",
+        "original_path": "gs://test-bucket/test-org/bulk/test-folder/test.pdf",
+        "original_filename": "test.pdf",
+        "parsed_path": None,
+        "status": "pending",
+        "error_message": None,
+        "retry_count": 0,
+        "parse_time_ms": None,
+        "index_time_ms": None,
+        "generation_time_ms": None,
+        "total_time_ms": None,
+        "token_usage": 0,
+        "llamaparse_pages": 0,
+        "content_hash": None,
+        "created_at": datetime.utcnow().isoformat(),
+        "updated_at": datetime.utcnow().isoformat(),
+    }
+
+
+@pytest.fixture
+def mock_bulk_repository():
+    """Mock bulk_repository module for testing."""
+    mock_repo = MagicMock()
+
+    # Job operations
+    mock_repo.create_bulk_job = AsyncMock(return_value={"id": "job-123"})
+    mock_repo.get_bulk_job = AsyncMock(return_value=None)
+    mock_repo.list_bulk_jobs = AsyncMock(return_value=[])
+    mock_repo.count_bulk_jobs = AsyncMock(return_value=0)
+    mock_repo.update_bulk_job_status = AsyncMock(return_value=True)
+    mock_repo.increment_job_completed = AsyncMock(return_value=True)
+    mock_repo.increment_job_failed = AsyncMock(return_value=True)
+    mock_repo.increment_job_skipped = AsyncMock(return_value=True)
+    mock_repo.increment_total_documents = AsyncMock(return_value=True)
+    mock_repo.find_active_job_for_folder = AsyncMock(return_value=None)
+
+    # Document operations
+    mock_repo.create_document_item = AsyncMock(return_value={"id": "doc-123"})
+    mock_repo.get_document_item = AsyncMock(return_value=None)
+    mock_repo.get_document_item_by_path = AsyncMock(return_value=None)
+    mock_repo.get_all_document_items = AsyncMock(return_value=[])
+    mock_repo.get_pending_documents = AsyncMock(return_value=[])
+    mock_repo.get_failed_documents = AsyncMock(return_value=[])
+    mock_repo.count_documents_in_job = AsyncMock(return_value=0)
+    mock_repo.count_in_progress_documents = AsyncMock(return_value=0)
+    mock_repo.update_document_item = AsyncMock(return_value=True)
+    mock_repo.reset_document_for_retry = AsyncMock(return_value=True)
+    mock_repo.get_latest_document_in_job = AsyncMock(return_value=None)
+
+    return mock_repo
+
+
+@pytest.fixture
+def mock_gcs_for_bulk():
+    """Mock GCS client for bulk folder operations."""
+    with patch("google.cloud.storage.Client") as mock_client:
+        mock_bucket = MagicMock()
+        mock_blob = MagicMock()
+
+        # Configure blob behavior
+        mock_blob.exists.return_value = True
+        mock_blob.upload_from_string = MagicMock()
+        mock_blob.generate_signed_url.return_value = "https://storage.googleapis.com/signed-url"
+        mock_blob.size = 1024
+        mock_blob.name = "test-org/bulk/test-folder/test.pdf"
+
+        # Configure bucket behavior
+        mock_bucket.blob.return_value = mock_blob
+        mock_bucket.list_blobs.return_value = [mock_blob]
+
+        mock_client.return_value.bucket.return_value = mock_bucket
+
+        yield {
+            "client": mock_client,
+            "bucket": mock_bucket,
+            "blob": mock_blob,
+        }

@@ -120,29 +120,28 @@ class ExtractorAgent(BaseAgent):
         # Create agent (simplified - we'll invoke tools directly for extraction)
         self.agent = self._create_agent()
 
-        logger.info(f"Extractor Agent initialized with model: {self.config.gemini_model}")
+        logger.info(f"Extractor Agent initialized with model: {self.config.openai_model}")
 
     def _init_llm(self):
         """Initialize the language model."""
-        if not self.config.google_api_key:
+        if not self.config.openai_api_key:
             raise ValueError(
-                "GOOGLE_API_KEY environment variable is required. "
-                "Get your API key from https://aistudio.google.com/app/apikey"
+                "OPENAI_API_KEY environment variable is required."
             )
 
         callbacks = self._create_token_tracking_callback("extractor_agent")
 
         llm = init_chat_model(
-            model=self.config.gemini_model,
-            model_provider="google_genai",
+            model=self.config.openai_model,
+            model_provider="openai",
             temperature=self.config.temperature,
-            api_key=self.config.google_api_key,
+            api_key=self.config.openai_api_key,
             timeout=self.config.extraction_timeout_seconds,
             max_retries=2,
             callbacks=callbacks if callbacks else None,
         )
 
-        logger.info(f"Initialized LLM: {self.config.gemini_model}")
+        logger.info(f"Initialized LLM: {self.config.openai_model}")
         return llm
 
     def _init_tools(self) -> List:
@@ -316,6 +315,7 @@ class ExtractorAgent(BaseAgent):
         template_name: str,
         document_type: str,
         organization_id: str,
+        folder_name: Optional[str] = None,
         save_to_gcs: bool = True,
         session_id: Optional[str] = None
     ) -> GenerateSchemaResponse:
@@ -379,14 +379,24 @@ class ExtractorAgent(BaseAgent):
             if save_to_gcs and result.get("schema"):
                 try:
                     from src.storage.config import get_storage
+                    from src.db.repositories.extraction_repository import get_organization_name
 
                     storage = get_storage()
                     schema_content = json.dumps(result["schema"], indent=2, ensure_ascii=False)
 
-                    # Build GCS path: {org_id}/schemas/{template_name}.json
+                    # Resolve org_id to org_name for path construction
+                    org_name = await get_organization_name(organization_id)
+                    if not org_name:
+                        logger.warning(f"Could not resolve org_name for {organization_id}, using org_id as fallback")
+                        org_name = organization_id
+
+                    # Build GCS path: {org_name}/schema/{folder_name}/{template_name}.json
                     safe_name = template_name.strip().replace(' ', '_').lower()
                     filename = f"{safe_name}.json"
-                    directory = f"{organization_id}/schemas"
+                    if folder_name:
+                        directory = f"{org_name}/schema/{folder_name}"
+                    else:
+                        directory = f"{org_name}/schema"
 
                     gcs_uri = await storage.save(
                         content=schema_content,
@@ -527,8 +537,8 @@ class ExtractorAgent(BaseAgent):
                             input_tokens=token_usage.prompt_tokens,
                             output_tokens=token_usage.completion_tokens,
                             total_tokens=token_usage.total_tokens,
-                            provider="google",
-                            model=self.config.gemini_model
+                            provider="openai",
+                            model=self.config.openai_model
                         )
                         await usage_service.log_token_usage(
                             org_id=organization_id,
@@ -630,17 +640,23 @@ class ExtractorAgent(BaseAgent):
         """
         return await list_schemas_from_gcs(organization_id)
 
-    async def get_template(self, organization_id: str, template_name: str) -> Optional[Dict[str, Any]]:
+    async def get_template(
+        self,
+        organization_id: str,
+        template_name: str,
+        folder_name: Optional[str] = None
+    ) -> Optional[Dict[str, Any]]:
         """Get a specific template by name.
 
         Args:
-            organization_id: Organization ID
+            organization_id: Organization ID (UUID)
             template_name: Template name
+            folder_name: Optional folder name where schema is stored
 
         Returns:
             Schema dict if found, None otherwise
         """
-        return await load_schema_from_gcs(organization_id, template_name)
+        return await load_schema_from_gcs(organization_id, template_name, folder_name)
 
     # ==========================================================================
     # Helper Methods
@@ -669,7 +685,7 @@ class ExtractorAgent(BaseAgent):
     def _calculate_token_usage(self, input_text: str, output_text: str) -> TokenUsage:
         """Calculate token usage using shared utility."""
         estimate = calculate_token_usage(
-            input_text, output_text, model=self.config.gemini_model
+            input_text, output_text, model=self.config.openai_model
         )
         return TokenUsage(
             prompt_tokens=estimate.prompt_tokens,
@@ -711,7 +727,7 @@ class ExtractorAgent(BaseAgent):
                 "status": "healthy" if llm_status == "healthy" else "degraded",
                 "components": {
                     "llm": llm_status,
-                    "model": self.config.gemini_model,
+                    "model": self.config.openai_model,
                     "tools": [t.name for t in self.tools],
                     "audit_logging": base_status["audit_logging"],
                 },

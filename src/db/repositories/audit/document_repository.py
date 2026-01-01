@@ -104,8 +104,8 @@ async def register_uploaded_document(
     """
     Register a new uploaded document with status='uploaded'.
 
-    Uses file_path as unique lookup key (GCS URI includes bucket/org/folder/filename).
-    Computes content hash from local temp file if available.
+    Checks for existing active document with same (org_id, folder_id, filename)
+    to prevent duplicates. If exists, updates it. Otherwise creates new.
 
     Multi-tenancy: Scoped by organization_id.
 
@@ -119,9 +119,19 @@ async def register_uploaded_document(
     Returns:
         File hash (SHA-256 if computed, or hash of file_path as fallback)
     """
-    # Generate hash - use file_path hash as fallback for GCS files
-    # (actual content hash would require downloading)
-    file_hash = hashlib.sha256(file_path.encode()).hexdigest()
+    # Normalize storage_path to always include gs:// prefix
+    normalized_path = file_path
+    if not file_path.startswith("gs://"):
+        try:
+            from src.storage import get_storage
+            storage = get_storage()
+            normalized_path = f"gs://{storage.bucket_name}/{file_path}"
+        except Exception as e:
+            logger.warning(f"Could not normalize path, using original: {e}")
+            normalized_path = file_path
+
+    # Generate hash from normalized path
+    file_hash = hashlib.sha256(normalized_path.encode()).hexdigest()
 
     # Infer file type from extension
     ext = Path(file_path).suffix.lower().lstrip(".")
@@ -133,11 +143,43 @@ async def register_uploaded_document(
 
         now = datetime.utcnow()
 
+        # Check for existing active document with same org + folder + filename
+        existing_stmt = (
+            select(Document)
+            .where(
+                and_(
+                    Document.organization_id == organization_id,
+                    Document.folder_id == folder_name,
+                    Document.filename == file_name,
+                    Document.is_active == True,
+                )
+            )
+            .limit(1)
+        )
+        result = await session.execute(existing_stmt)
+        existing = result.scalar_one_or_none()
+
+        if existing:
+            # Update existing record instead of creating duplicate
+            existing.storage_path = normalized_path
+            existing.file_size = file_size
+            existing.file_hash = file_hash
+            existing.updated_at = now
+            # Don't change status if already parsed
+            if existing.status != "parsed":
+                existing.status = "uploaded"
+            logger.info(
+                f"Updated existing document: {file_name} in folder={folder_name} "
+                f"org={organization_id}"
+            )
+            return existing.file_hash
+
+        # No existing - create new record
         stmt = (
             insert(Document)
             .values(
                 file_hash=file_hash,
-                storage_path=file_path,
+                storage_path=normalized_path,
                 filename=file_name,
                 original_filename=file_name,
                 file_type=file_type,
@@ -163,7 +205,7 @@ async def register_uploaded_document(
         )
 
         await session.execute(stmt)
-        logger.debug(f"Registered uploaded document: {file_name} at {file_path} org={organization_id}")
+        logger.debug(f"Registered uploaded document: {file_name} at {normalized_path} org={organization_id}")
 
     return file_hash
 
@@ -225,8 +267,8 @@ async def register_or_update_parsed_document(
     """
     Update existing document to parsed status, or create new if not found.
 
-    Lookup strategy: Find existing document by filename + organization_id,
-    then UPDATE it. This preserves the original record created during upload.
+    Lookup strategy: Find existing active document by (org_id, folder_id, filename).
+    This prevents duplicate records for the same file.
 
     Multi-tenancy: Scoped by organization_id.
 
@@ -236,24 +278,37 @@ async def register_or_update_parsed_document(
         organization_id: Organization ID for tenant isolation
         parsed_path: GCS path to parsed .md file
         file_size: Optional file size in bytes
-        folder_id: Optional folder ID for organization
+        folder_id: Folder name (not UUID) for organization
 
     Returns:
         True if document was updated/created, False on error
     """
+    # Normalize storage_path to always include gs:// prefix
+    normalized_path = storage_path
+    if not storage_path.startswith("gs://"):
+        try:
+            from src.storage import get_storage
+            storage = get_storage()
+            normalized_path = f"gs://{storage.bucket_name}/{storage_path}"
+        except Exception as e:
+            logger.warning(f"Could not normalize path, using original: {e}")
+            normalized_path = storage_path
+
     async with db.session() as session:
         if session is None:
             return False
 
         now = datetime.utcnow()
 
-        # Look up existing document by filename + organization_id
+        # Primary lookup: by org + folder + filename + is_active
         stmt = (
             select(Document)
             .where(
                 and_(
-                    Document.filename == filename,
                     Document.organization_id == organization_id,
+                    Document.folder_id == folder_id,
+                    Document.filename == filename,
+                    Document.is_active == True,
                 )
             )
             .limit(1)
@@ -261,25 +316,49 @@ async def register_or_update_parsed_document(
         result = await session.execute(stmt)
         doc = result.scalar_one_or_none()
 
+        # Fallback: try by org + filename only (for backwards compatibility)
+        if not doc:
+            stmt = (
+                select(Document)
+                .where(
+                    and_(
+                        Document.organization_id == organization_id,
+                        Document.filename == filename,
+                        Document.is_active == True,
+                    )
+                )
+                .limit(1)
+            )
+            result = await session.execute(stmt)
+            doc = result.scalar_one_or_none()
+            if doc:
+                logger.info(f"Found document by filename fallback: {filename}")
+
         if doc:
-            # UPDATE existing record - preserve original data
+            # UPDATE existing record
             doc.status = "parsed"
             doc.parsed_path = parsed_path
             doc.parsed_at = now
             doc.updated_at = now
+            # Normalize storage_path if different
+            if doc.storage_path != normalized_path:
+                doc.storage_path = normalized_path
+            # Update folder_id if provided and different
+            if folder_id and doc.folder_id != folder_id:
+                doc.folder_id = folder_id
             logger.info(
                 f"Updated existing document to parsed: {filename} "
-                f"parsed_path={parsed_path} org={organization_id}"
+                f"folder={folder_id} parsed_path={parsed_path} org={organization_id}"
             )
         else:
             # INSERT new record (fallback for documents not pre-registered)
-            file_hash = hashlib.sha256(storage_path.encode()).hexdigest()
+            file_hash = hashlib.sha256(normalized_path.encode()).hexdigest()
             ext = Path(storage_path).suffix.lower().lstrip(".")
             file_type = ext if ext else "unknown"
 
             new_doc = Document(
                 file_hash=file_hash,
-                storage_path=storage_path,
+                storage_path=normalized_path,
                 filename=filename,
                 original_filename=filename,
                 file_type=file_type,
@@ -296,8 +375,8 @@ async def register_or_update_parsed_document(
             )
             session.add(new_doc)
             logger.info(
-                f"Created new parsed document: {filename} at {storage_path} "
-                f"parsed_path={parsed_path} org={organization_id}"
+                f"Created new parsed document: {filename} at {normalized_path} "
+                f"folder={folder_id} parsed_path={parsed_path} org={organization_id}"
             )
 
         return True

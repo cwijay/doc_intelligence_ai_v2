@@ -53,16 +53,18 @@ def derive_document_base(document_name: str) -> str:
 
 def build_content_path(parsed_file_path: str, content_type: str, document_name: str) -> str:
     """
-    Build GCS path for a content type (summary, faqs, questions).
+    Build GCS path for a content type (summary, faq, questions).
+
+    NOTE: This function is a FALLBACK. Frontend should provide explicit paths.
 
     Args:
         parsed_file_path: e.g., "Acme corp/parsed/invoices/Sample1.md"
-        content_type: 'summary', 'faqs', or 'questions'
+        content_type: 'summary', 'faq', or 'questions'
         document_name: e.g., "Sample1.md"
 
     Returns:
         GCS path, e.g., "Acme corp/summary/invoices/Sample1.md" or
-        "Acme corp/faqs/invoices/Sample1.json"
+        "Acme corp/faq/invoices/Sample1.json"
     """
     org_name, folder_name = derive_org_and_folder(parsed_file_path)
     doc_base = derive_document_base(document_name)

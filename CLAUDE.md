@@ -6,12 +6,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Document Intelligence AI v3.0 is an AI-powered document analysis system with two main agents:
 - **SheetsAgent**: Excel/CSV analysis using OpenAI GPT and LangGraph's ReAct agent
-- **DocumentAgent**: Document processing with content generation (summaries, FAQs, questions) using Google Gemini and LangChain
+- **DocumentAgent**: Document processing with content generation (summaries, FAQs, questions) using OpenAI GPT and LangChain
 
 ## Technology Stack
 
 - Python 3.12, LangGraph 1.0.4+, LangChain 1.2.0+
-- LLMs: OpenAI (gpt-5.1-codex-mini with responses API), Google Gemini (gemini-3-flash-preview)
+- LLMs: OpenAI (gpt-5.1-codex-mini for SheetsAgent, gpt-5-nano for DocumentAgent, both with responses API)
 - Data: DuckDB (SQL on DataFrames with connection pooling), Pandas, LlamaParse (document parsing with OCR)
 - Storage: Google Cloud Storage (parsed docs, generated content), PostgreSQL (Cloud SQL), SQLAlchemy 2.0 async
 - Web Framework: FastAPI with uvicorn
@@ -66,7 +66,7 @@ API docs available at `/docs` (Swagger) and `/redoc` when server is running.
 ```
 # API Keys
 OPENAI_API_KEY=<key>
-GOOGLE_API_KEY=<key>
+GOOGLE_API_KEY=<key>  # Required for Gemini File Search (RAG module)
 LLAMA_CLOUD_API_KEY=<key>
 
 # Database (Cloud SQL)
@@ -88,7 +88,7 @@ DATABASE_URL=postgresql+asyncpg://...  # For local development
 
 # Optional - Agents
 OPENAI_SHEET_MODEL=gpt-5.1-codex-mini
-DOCUMENT_AGENT_MODEL=gemini-3-flash-preview
+DOCUMENT_AGENT_MODEL=gpt-5-nano
 OPENAI_TEMPERATURE=0.1
 DOCUMENT_AGENT_TEMPERATURE=0.3
 
@@ -159,7 +159,7 @@ Key files:
 - LRU file cache via `FileCache` class (`cache.py`) with 50-file capacity
 
 **DocumentAgent** (`src/agents/document/core.py`, 875 lines):
-- Uses `init_chat_model` from `langchain.chat_models` for Gemini LLM initialization
+- Uses `init_chat_model` from `langchain.chat_models` for OpenAI LLM initialization
 - Tools organized as package (`tools/`):
   - `base.py`: Shared utilities (path derivation, content formatting, input schemas)
   - `document_loader.py`: Load documents from GCS parsed directory or local upload
@@ -464,13 +464,13 @@ Both agents use Pydantic configs with environment variable defaults:
 - `enable_short_term_memory`, `enable_long_term_memory`: true
 
 **DocumentAgentConfig** (`src/agents/document/config.py`):
-- `gemini_model`: gemini-3-flash-preview (via `DOCUMENT_AGENT_MODEL`)
+- `openai_model`: gpt-5-nano (via `DOCUMENT_AGENT_MODEL`)
 - `default_num_faqs`: 10, `default_num_questions`: 10, `summary_max_words`: 500
 - `timeout_seconds`: 300s, `session_timeout_minutes`: 30
 - `rate_limit_requests`: 10, `rate_limit_window_seconds`: 60
 - `persist_to_database`: true, `middleware`: MiddlewareConfig
 - `enable_short_term_memory`, `enable_long_term_memory`: true
-- `enable_tool_selection`: true, `tool_selector_model`: gemini-3-flash-preview (via `TOOL_SELECTOR_MODEL`)
+- `enable_tool_selection`: true, `tool_selector_model`: gpt-5-nano (via `TOOL_SELECTOR_MODEL`)
 - `tool_selector_max_tools`: 3 (max tools per query after filtering)
 
 ## Usage Examples
@@ -495,7 +495,7 @@ from src.agents.document.config import DocumentAgentConfig
 
 agent = DocumentAgent()  # Uses default config
 # Or with custom config:
-# agent = DocumentAgent(DocumentAgentConfig(gemini_model="gemini-2.5-pro"))
+# agent = DocumentAgent(DocumentAgentConfig(openai_model="gpt-5-nano"))
 
 summary = await agent.generate_summary("Sample1.md")
 faqs = await agent.generate_faqs("Sample1.md", num_faqs=5)

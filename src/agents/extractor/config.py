@@ -22,22 +22,22 @@ class ExtractorAgentConfig(BaseAgentConfig):
     - debug, log_level
     """
 
-    # Google API Key (for Gemini)
-    google_api_key: Optional[str] = Field(
-        default_factory=lambda: os.getenv("GOOGLE_API_KEY"),
-        description="Google API key for Gemini"
+    # OpenAI API Key
+    openai_api_key: Optional[str] = Field(
+        default_factory=lambda: os.getenv("OPENAI_API_KEY"),
+        description="OpenAI API key for extraction"
     )
 
-    # Primary LLM: Gemini Pro
-    gemini_model: str = Field(
-        default_factory=lambda: os.getenv("EXTRACTOR_AGENT_MODEL", "gemini-3-pro-preview"),
-        description="Gemini model for extraction (primary)"
+    # Primary LLM: GPT-5-nano (fast, cheap, reliable)
+    openai_model: str = Field(
+        default_factory=lambda: os.getenv("EXTRACTOR_AGENT_MODEL", "gpt-5-nano"),
+        description="OpenAI model for extraction (primary)"
     )
 
-    # Fallback LLM: Gemini Flash (faster, cheaper)
-    gemini_fallback_model: str = Field(
-        default_factory=lambda: os.getenv("EXTRACTOR_FALLBACK_MODEL", "gemini-3-flash-preview"),
-        description="Gemini Flash model for fallback extraction"
+    # Fallback LLM: GPT-4o-mini (reliable fallback)
+    openai_fallback_model: str = Field(
+        default_factory=lambda: os.getenv("EXTRACTOR_FALLBACK_MODEL", "gpt-4o-mini"),
+        description="OpenAI model for fallback extraction"
     )
 
     # Override temperature with extraction-specific default (lower for structured output)

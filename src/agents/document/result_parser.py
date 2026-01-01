@@ -52,6 +52,7 @@ class AgentResultParser:
         }
 
         if not messages:
+            logger.warning("No messages to parse - returning empty result")
             return result
 
         # Extract content from tool messages
@@ -59,6 +60,13 @@ class AgentResultParser:
         faqs = None
         questions = None
         tools_used = []
+
+        # Debug: Log all message types to trace tool output
+        logger.debug(f"Parsing {len(messages)} messages for tool outputs")
+        for i, msg in enumerate(messages):
+            msg_type = type(msg).__name__
+            is_tool_msg = isinstance(msg, ToolMessage)
+            logger.debug(f"Message [{i}]: type={msg_type}, is_ToolMessage={is_tool_msg}")
 
         for msg in messages:
             # Check if it's a ToolMessage (contains tool output)
@@ -109,6 +117,11 @@ class AgentResultParser:
             )
 
         result['tools_used'] = tools_used
+
+        # Debug final result
+        has_summary = result['content'] and result['content'].summary if result['content'] else False
+        logger.info(f"Parse complete: has_content={result['content'] is not None}, has_summary={has_summary}")
+
         return result
 
     def _parse_tool_message(self, msg: ToolMessage) -> Dict[str, Any]:
@@ -132,7 +145,9 @@ class AgentResultParser:
 
         try:
             content = msg.content if hasattr(msg, 'content') else str(msg)
+            logger.debug(f"ToolMessage '{tool_name}': content_type={type(content).__name__}, content_length={len(str(content))}")
             tool_output = json.loads(content) if isinstance(content, str) else content
+            logger.debug(f"ToolMessage '{tool_name}': parsed output keys={list(tool_output.keys()) if isinstance(tool_output, dict) else 'not a dict'}")
 
             # Create ToolUsage entry with parsed output
             tool_success = isinstance(tool_output, dict) and tool_output.get('success', False)
@@ -151,6 +166,7 @@ class AgentResultParser:
                 # Extract summary from summary_generator tool
                 if 'summary' in tool_output and tool_output['summary']:
                     result["summary"] = tool_output['summary']
+                    logger.info(f"ToolMessage '{tool_name}': Extracted summary ({len(result['summary'])} chars)")
 
                 # Extract FAQs from faq_generator tool
                 if 'faqs' in tool_output and tool_output['faqs']:

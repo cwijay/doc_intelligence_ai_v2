@@ -6,11 +6,11 @@ Extracts structured data from documents using a provided JSON schema.
 import json
 import logging
 import time
-from typing import Optional, Type, Dict, Any
+from typing import Any, Optional, Type, Dict
 
 from langchain_core.tools import BaseTool
 from langchain_core.callbacks import CallbackManagerForToolRun
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.chat_models import init_chat_model
 from pydantic import BaseModel, Field
 
 from ..config import ExtractorAgentConfig
@@ -40,29 +40,31 @@ class DataExtractorTool(BaseTool):
     args_schema: Type[BaseModel] = DataExtractorInput
 
     config: ExtractorAgentConfig = Field(default_factory=ExtractorAgentConfig)
-    llm: Optional[ChatGoogleGenerativeAI] = None
-    fallback_llm: Optional[ChatGoogleGenerativeAI] = None
+    llm: Optional[Any] = None
+    fallback_llm: Optional[Any] = None
 
-    def _get_llm(self) -> ChatGoogleGenerativeAI:
-        """Get or create primary LLM instance (Gemini Pro)."""
+    def _get_llm(self):
+        """Get or create primary LLM instance (gpt-5-nano)."""
         if self.llm is None:
-            self.llm = ChatGoogleGenerativeAI(
-                model=self.config.gemini_model,
-                google_api_key=self.config.google_api_key,
-                temperature=self.config.temperature
+            self.llm = init_chat_model(
+                model=self.config.openai_model,
+                model_provider="openai",
+                temperature=self.config.temperature,
+                api_key=self.config.openai_api_key,
             )
-            logger.info(f"Using primary LLM: {self.config.gemini_model}")
+            logger.info(f"Using primary LLM: {self.config.openai_model}")
         return self.llm
 
-    def _get_fallback_llm(self) -> ChatGoogleGenerativeAI:
-        """Get or create fallback LLM instance (Gemini Flash)."""
+    def _get_fallback_llm(self):
+        """Get or create fallback LLM instance (gpt-4o-mini)."""
         if self.fallback_llm is None:
-            self.fallback_llm = ChatGoogleGenerativeAI(
-                model=self.config.gemini_fallback_model,
-                google_api_key=self.config.google_api_key,
-                temperature=self.config.temperature
+            self.fallback_llm = init_chat_model(
+                model=self.config.openai_fallback_model,
+                model_provider="openai",
+                temperature=self.config.temperature,
+                api_key=self.config.openai_api_key,
             )
-            logger.info(f"Using fallback LLM: {self.config.gemini_fallback_model}")
+            logger.info(f"Using fallback LLM: {self.config.openai_fallback_model}")
         return self.fallback_llm
 
     def _run(
@@ -139,15 +141,15 @@ class DataExtractorTool(BaseTool):
                     # Parsing failed - extract from raw response
                     raw_message = response.get('raw')
                     extracted_data = self._extract_from_raw_response(raw_message, schema)
-                    # If raw extraction failed, try fallback with Gemini Flash
+                    # If raw extraction failed, try fallback model
                     if extracted_data is None:
-                        logger.info("Raw extraction failed, trying fallback extraction with Gemini Flash")
+                        logger.info("Raw extraction failed, trying fallback extraction")
                         fallback_llm = self._get_fallback_llm()
                         extracted_data = self._fallback_extraction(fallback_llm, prompt, schema)
 
             except Exception as e:
-                logger.warning(f"Structured extraction failed, trying fallback with Gemini Flash: {e}")
-                # Fallback: try regular extraction with Gemini Flash
+                logger.warning(f"Structured extraction failed, trying fallback: {e}")
+                # Fallback: try regular extraction with fallback model
                 fallback_llm = self._get_fallback_llm()
                 extracted_data = self._fallback_extraction(fallback_llm, prompt, schema)
 
@@ -233,7 +235,7 @@ Extract the data according to the schema:"""
     ) -> Optional[Dict[str, Any]]:
         """Extract data from raw LLM response when structured parsing fails.
 
-        Handles the 'parameters' wrapper that Gemini returns in tool calls.
+        Handles the 'parameters' wrapper that some LLMs return in tool calls.
         Returns None if extraction fails, so caller can try fallback.
         """
         # Debug logging for raw message structure
@@ -293,11 +295,11 @@ Extract the data according to the schema:"""
 
     def _fallback_extraction(
         self,
-        llm: ChatGoogleGenerativeAI,
+        llm,
         prompt: str,
         schema: Dict[str, Any]
     ) -> Dict[str, Any]:
-        """Fallback extraction using Gemini with JSON parsing."""
+        """Fallback extraction using JSON parsing."""
         fallback_prompt = prompt + "\n\nRespond with a valid JSON object only, no other text."
 
         response = llm.invoke(fallback_prompt)

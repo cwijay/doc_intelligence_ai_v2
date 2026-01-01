@@ -49,23 +49,26 @@ def derive_document_base(document_name: str) -> str:
     return Path(document_name).stem
 
 
-def build_schema_path(organization_id: str, template_name: str) -> str:
+def build_schema_path(org_name: str, folder_name: str, template_name: str) -> str:
     """
     Build GCS path for extraction schema template.
 
     Args:
-        organization_id: Organization ID
+        org_name: Organization name (not ID)
+        folder_name: Folder name for schema organization
         template_name: Template name
 
     Returns:
-        GCS path, e.g., "org_123/schemas/invoice_template.json"
+        GCS path, e.g., "Acme corp/schema/invoices/invoice_template.json"
     """
-    safe_name = template_name.replace(' ', '_').lower()
-    return f"{organization_id}/schemas/{safe_name}.json"
+    safe_name = template_name.strip().replace(' ', '_').lower()
+    if folder_name:
+        return f"{org_name}/schema/{folder_name}/{safe_name}.json"
+    return f"{org_name}/schema/{safe_name}.json"
 
 
 def build_extracted_path(
-    organization_id: str,
+    org_name: str,
     folder_name: str,
     document_name: str
 ) -> str:
@@ -73,15 +76,15 @@ def build_extracted_path(
     Build GCS path for extracted data Excel export.
 
     Args:
-        organization_id: Organization ID
+        org_name: Organization name (not ID)
         folder_name: Folder containing the document
         document_name: Original document name
 
     Returns:
-        GCS path, e.g., "org_123/extracted/invoices/sample1_extracted.xlsx"
+        GCS path, e.g., "Acme corp/extracted/invoices/sample1_extracted.xlsx"
     """
     doc_base = derive_document_base(document_name)
-    parts = [organization_id, "extracted"]
+    parts = [org_name, "extracted"]
     if folder_name:
         parts.append(folder_name)
     parts.append(f"{doc_base}_extracted.xlsx")

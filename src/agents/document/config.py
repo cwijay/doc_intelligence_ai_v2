@@ -36,15 +36,15 @@ class DocumentAgentConfig(BaseAgentConfig):
     - debug, log_level
     """
 
-    # LLM Settings (Gemini - document-specific)
-    google_api_key: Optional[str] = Field(
-        default_factory=lambda: os.getenv("GOOGLE_API_KEY"),
-        description="Google API key for Gemini"
+    # LLM Settings (OpenAI - document-specific)
+    openai_api_key: Optional[str] = Field(
+        default_factory=lambda: os.getenv("OPENAI_API_KEY"),
+        description="OpenAI API key"
     )
 
-    gemini_model: str = Field(
-        default_factory=lambda: os.getenv("DOCUMENT_AGENT_MODEL", "gemini-3-flash-preview"),
-        description="Gemini model to use"
+    openai_model: str = Field(
+        default_factory=lambda: os.getenv("DOCUMENT_AGENT_MODEL", "gpt-5-nano"),
+        description="OpenAI model to use"
     )
 
     # Override temperature with document-specific default
@@ -173,8 +173,8 @@ class DocumentAgentConfig(BaseAgentConfig):
     )
 
     tool_selector_model: str = Field(
-        default_factory=lambda: os.getenv("TOOL_SELECTOR_MODEL", "gemini-3-flash-preview"),
-        description="Model for tool selection (should be fast/cheap)"
+        default_factory=lambda: os.getenv("TOOL_SELECTOR_MODEL", "gpt-5.2-2025-12-11"),
+        description="Model for tool selection (gpt-5.2 for better accuracy)"
     )
 
     tool_selector_max_tools: int = Field(

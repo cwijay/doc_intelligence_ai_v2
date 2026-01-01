@@ -102,6 +102,11 @@ class GenerateSchemaRequest(BaseModel):
         description="Type of document",
         example="invoice"
     )
+    folder_name: str = Field(
+        ...,
+        description="Folder name for schema organization (e.g., 'invoices')",
+        example="invoices"
+    )
     selected_fields: List[FieldSelectionSchema] = Field(
         ...,
         description="Fields selected for extraction",
@@ -272,6 +277,10 @@ class SaveExtractedDataRequest(BaseModel):
     source_file_path: Optional[str] = Field(
         default=None,
         description="Path to the source file"
+    )
+    folder_name: Optional[str] = Field(
+        default=None,
+        description="Folder name where the template is stored (e.g., 'invoices')"
     )
 
 

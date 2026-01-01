@@ -1,6 +1,5 @@
 """Content persistence tool for saving generated content to GCS and PostgreSQL."""
 
-import asyncio
 import json
 import logging
 import time
@@ -49,9 +48,24 @@ class ContentPersistTool(BaseTool):
         """Persist generated content to GCS and PostgreSQL."""
         start_time = time.time()
 
-        # Parse JSON strings back to objects
-        faqs_list = json.loads(faqs) if faqs else None
-        questions_list = json.loads(questions) if questions else None
+        # Parse JSON strings back to objects, extracting the list from tool responses
+        faqs_list = None
+        if faqs:
+            faqs_data = json.loads(faqs)
+            # Handle tool response format: {"success": true, "faqs": [...]}
+            if isinstance(faqs_data, dict) and 'faqs' in faqs_data:
+                faqs_list = faqs_data['faqs']
+            elif isinstance(faqs_data, list):
+                faqs_list = faqs_data
+
+        questions_list = None
+        if questions:
+            questions_data = json.loads(questions)
+            # Handle tool response format: {"success": true, "questions": [...]}
+            if isinstance(questions_data, dict) and 'questions' in questions_data:
+                questions_list = questions_data['questions']
+            elif isinstance(questions_data, list):
+                questions_list = questions_data
 
         # Prepare content object
         content = {
@@ -61,7 +75,7 @@ class ContentPersistTool(BaseTool):
             "summary": summary,
             "faqs": faqs_list,
             "questions": questions_list,
-            "model": self.config.gemini_model
+            "model": self.config.openai_model
         }
 
         results = {
@@ -95,7 +109,7 @@ class ContentPersistTool(BaseTool):
                     summary_content = format_summary_markdown(
                         summary=summary,
                         document_name=document_name,
-                        model=self.config.gemini_model,
+                        model=self.config.openai_model,
                         generated_at=generated_at,
                         content_hash=content_hash
                     )
@@ -111,7 +125,7 @@ class ContentPersistTool(BaseTool):
 
                 # Save FAQs as JSON
                 if faqs_list:
-                    faqs_path = build_content_path(parsed_file_path, "faqs", document_name)
+                    faqs_path = build_content_path(parsed_file_path, "faq", document_name)
                     if '/' in faqs_path:
                         faqs_dir, faqs_filename = faqs_path.rsplit('/', 1)
                     else:
@@ -121,7 +135,7 @@ class ContentPersistTool(BaseTool):
                         faqs=faqs_list,
                         document_name=document_name,
                         parsed_file_path=parsed_file_path,
-                        model=self.config.gemini_model,
+                        model=self.config.openai_model,
                         generated_at=generated_at,
                         content_hash=content_hash
                     )
@@ -147,7 +161,7 @@ class ContentPersistTool(BaseTool):
                         questions=questions_list,
                         document_name=document_name,
                         parsed_file_path=parsed_file_path,
-                        model=self.config.gemini_model,
+                        model=self.config.openai_model,
                         generated_at=generated_at,
                         content_hash=content_hash
                     )
@@ -179,7 +193,7 @@ class ContentPersistTool(BaseTool):
         # Save to PostgreSQL if enabled
         if self.config.persist_to_database:
             try:
-                from src.db.repositories.audit_repository import save_document_generation
+                from src.agents.core.audit_queue import enqueue_audit_event
 
                 # Determine generation type
                 if summary and faqs_list and questions_list:
@@ -208,43 +222,32 @@ class ContentPersistTool(BaseTool):
 
                 processing_time = elapsed_ms(start_time)
 
-                # Run async function
-                async def save_async():
-                    return await save_document_generation(
-                        document_name=document_name,
-                        source_path=parsed_file_path,  # GCS path to parsed document
-                        generation_type=generation_type,
-                        content=content_for_db,
-                        options=options,
-                        model=self.config.gemini_model,
-                        processing_time_ms=processing_time,
-                        document_hash=content_hash,  # Pass content hash for cache validation
-                        organization_id=organization_id,
-                    )
-
-                # Get or create event loop
-                try:
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        # If we're already in an async context, create a task
-                        import nest_asyncio
-                        nest_asyncio.apply()
-                        doc_id = loop.run_until_complete(save_async())
-                    else:
-                        doc_id = loop.run_until_complete(save_async())
-                except RuntimeError:
-                    # No event loop, create one
-                    doc_id = asyncio.run(save_async())
+                # Enqueue database save to audit queue (runs in dedicated background thread)
+                # This avoids event loop mismatch issues with Cloud SQL Connector
+                enqueue_audit_event(
+                    event_type="generation_save",
+                    file_name=document_name,
+                    organization_id=organization_id,
+                    document_hash=content_hash,
+                    details={
+                        "source_path": parsed_file_path,
+                        "generation_type": generation_type,
+                        "content": content_for_db,
+                        "options": options,
+                        "model": self.config.openai_model,
+                        "processing_time_ms": processing_time,
+                    }
+                )
 
                 results["database_saved"] = True
-                results["database_id"] = doc_id
-                logger.info(f"Saved to PostgreSQL: {doc_id}")
+                results["database_queued"] = True
+                logger.info(f"Queued database save for: {document_name}")
 
             except ImportError as e:
-                logger.warning(f"Database module not available: {e}")
-                results["database_error"] = f"Database module not available: {e}"
+                logger.warning(f"Audit queue not available: {e}")
+                results["database_error"] = f"Audit queue not available: {e}"
             except Exception as e:
-                logger.error(f"Failed to save to database: {e}")
+                logger.error(f"Failed to queue database save: {e}")
                 results["database_error"] = str(e)
 
         duration_ms = elapsed_ms(start_time)

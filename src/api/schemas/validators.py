@@ -158,3 +158,106 @@ def validate_top_k(v: int, min_val: int = 1, max_val: int = 20) -> int:
     if not min_val <= v <= max_val:
         raise ValueError(f"top_k must be between {min_val} and {max_val}")
     return v
+
+
+# =============================================================================
+# Content Type Path Validators
+# =============================================================================
+
+def _validate_content_path(v: str, content_type: str) -> str:
+    """Validate a content path (summary, faq, questions).
+
+    Args:
+        v: The file path to validate.
+        content_type: Expected content type folder name.
+
+    Returns:
+        The validated path.
+
+    Raises:
+        ValueError: If path format is invalid.
+    """
+    # Apply base path validation first
+    v = validate_parsed_file_path(v)
+
+    # Validate path format: {org_name}/{content_type}/{folder_name}/{filename}
+    parts = v.split('/')
+    if len(parts) < 4:
+        raise ValueError(
+            f'Invalid path format. Expected: {{org_name}}/{content_type}/{{folder_name}}/{{filename}}'
+        )
+
+    if parts[1] != content_type:
+        raise ValueError(
+            f'Second path segment must be "{content_type}", got "{parts[1]}"'
+        )
+
+    return v
+
+
+def validate_original_path(v: Optional[str]) -> Optional[str]:
+    """Validate original file path format.
+
+    Args:
+        v: The file path to validate (can be None).
+
+    Returns:
+        The validated path or None.
+
+    Raises:
+        ValueError: If path format is invalid.
+    """
+    if v is None:
+        return None
+    return _validate_content_path(v, 'original')
+
+
+def validate_summary_path(v: Optional[str]) -> Optional[str]:
+    """Validate summary path format.
+
+    Args:
+        v: The file path to validate (can be None).
+
+    Returns:
+        The validated path or None.
+
+    Raises:
+        ValueError: If path format is invalid.
+    """
+    if v is None:
+        return None
+    return _validate_content_path(v, 'summary')
+
+
+def validate_faq_path(v: Optional[str]) -> Optional[str]:
+    """Validate FAQ path format.
+
+    Args:
+        v: The file path to validate (can be None).
+
+    Returns:
+        The validated path or None.
+
+    Raises:
+        ValueError: If path format is invalid.
+    """
+    if v is None:
+        return None
+    return _validate_content_path(v, 'faq')
+
+
+def validate_questions_path(v: Optional[str]) -> Optional[str]:
+    """Validate questions path format.
+
+    Args:
+        v: The file path to validate (can be None).
+
+    Returns:
+        The validated path or None.
+
+    Raises:
+        ValueError: If path format is invalid.
+    """
+    if v is None:
+        return None
+    return _validate_content_path(v, 'questions')

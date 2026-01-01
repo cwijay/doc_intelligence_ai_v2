@@ -39,6 +39,12 @@ class AuditQueue(BackgroundQueue[AuditEvent]):
 
     async def _process_event(self, event: AuditEvent) -> None:
         """Process a single audit event."""
+        # Handle generation_save specially - it saves to document_generations table
+        if event.event_type == "generation_save":
+            await self._process_generation_save(event)
+            return
+
+        # All other events go to audit log
         from src.db.repositories.audit_repository import log_event
 
         await log_event(
@@ -49,6 +55,29 @@ class AuditQueue(BackgroundQueue[AuditEvent]):
             document_hash=event.document_hash,
             job_id=event.job_id,
         )
+
+    async def _process_generation_save(self, event: AuditEvent) -> None:
+        """Process a generation_save event - saves to document_generations table."""
+        from src.db.repositories.audit_repository import save_document_generation
+
+        details = event.details or {}
+        try:
+            doc_id = await save_document_generation(
+                document_name=event.file_name,
+                source_path=details.get("source_path", ""),
+                generation_type=details.get("generation_type", "all"),
+                content=details.get("content", {}),
+                options=details.get("options", {}),
+                model=details.get("model", "unknown"),
+                processing_time_ms=details.get("processing_time_ms", 0),
+                document_hash=event.document_hash,
+                organization_id=event.organization_id,
+            )
+            if doc_id:
+                logger.debug(f"Saved generation to PostgreSQL: {doc_id}")
+            # None return means save was skipped (e.g., org doesn't exist)
+        except Exception as e:
+            logger.error(f"Failed to save generation to database: {e}")
 
 
 # Singleton accessor

@@ -73,7 +73,7 @@ class QueryClassifier:
         self,
         use_llm_fallback: bool = True,
         llm_model: Optional[str] = None,
-        llm_provider: str = "google_genai",
+        llm_provider: str = "openai",
         api_key: Optional[str] = None
     ):
         """
@@ -104,7 +104,8 @@ class QueryClassifier:
             kwargs = {
                 "model": self.llm_model,
                 "model_provider": self.llm_provider,
-                "temperature": 0
+                "temperature": 0,
+                "use_responses_api": True,  # Required for gpt-5-nano
             }
             if self.api_key:
                 kwargs["api_key"] = self.api_key

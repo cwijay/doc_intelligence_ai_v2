@@ -46,8 +46,8 @@ class MiddlewareStack:
 
     def initialize(
         self,
-        primary_model: str = "gemini-3-flash-preview",
-        primary_provider: str = "google_genai"
+        primary_model: str = "gpt-5-nano",
+        primary_provider: str = "openai"
     ):
         """
         Initialize all middleware components based on config.
@@ -67,7 +67,7 @@ class MiddlewareStack:
         if self.config.tool_selector_enabled:
             self._tool_selector = LLMToolSelector(
                 model=self.config.tool_selector_model,
-                provider="google_genai",
+                provider="openai",
                 max_tools=self.config.tool_selector_max_tools
             )
             logger.debug("Tool selector initialized")
@@ -275,8 +275,8 @@ class MiddlewareStack:
 
 def create_middleware_stack(
     config: Optional[MiddlewareConfig] = None,
-    primary_model: str = "gemini-3-flash-preview",
-    primary_provider: str = "google_genai"
+    primary_model: str = "gpt-5-nano",
+    primary_provider: str = "openai"
 ) -> MiddlewareStack:
     """
     Factory function to create and initialize a middleware stack.

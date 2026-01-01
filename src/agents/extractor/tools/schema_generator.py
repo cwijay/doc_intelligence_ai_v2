@@ -182,13 +182,18 @@ class SchemaGeneratorTool(BaseTool):
 async def load_schema_from_gcs(
     organization_id: str,
     template_name: str,
+    folder_name: Optional[str] = None,
     use_cache: bool = True
 ) -> Optional[Dict[str, Any]]:
     """Load a schema template from GCS with caching.
 
+    Uses org_name and folder_name to match the save path structure:
+    {org_name}/schema/{folder_name}/{template_name}.json
+
     Args:
-        organization_id: Organization ID
+        organization_id: Organization ID (UUID)
         template_name: Template name
+        folder_name: Optional folder name where schema is stored
         use_cache: Whether to use the in-memory cache (default: True)
 
     Returns:
@@ -203,11 +208,26 @@ async def load_schema_from_gcs(
 
     try:
         from src.storage.config import get_storage
+        from src.db.repositories.extraction_repository import get_organization_name
 
         storage = get_storage()
         safe_name = template_name.strip().replace(' ', '_').lower()
-        path = f"{organization_id}/schemas/{safe_name}.json"
-        content = await storage.read(path, use_prefix=False)  # Use org path directly
+
+        # Resolve org_id to org_name for path construction
+        org_name = await get_organization_name(organization_id)
+        if not org_name:
+            logger.warning(f"Could not resolve org_name for {organization_id}, using org_id as fallback")
+            org_name = organization_id
+
+        # Build path matching save structure: {org_name}/schema/{folder_name}/{template}.json
+        if folder_name:
+            path = f"{org_name}/schema/{folder_name}/{safe_name}.json"
+        else:
+            path = f"{org_name}/schema/{safe_name}.json"
+
+        logger.info(f"Loading schema from GCS: {path}")
+        content = await storage.read(path, use_prefix=False)
+
         if content:
             schema = json.loads(content)
             # Cache the schema
@@ -215,6 +235,8 @@ async def load_schema_from_gcs(
                 _set_cached_schema(organization_id, template_name, schema)
             logger.info(f"Schema loaded from GCS: {template_name}")
             return schema
+
+        logger.warning(f"Schema not found at path: {path}")
         return None
 
     except Exception as e:
@@ -225,17 +247,30 @@ async def load_schema_from_gcs(
 async def list_schemas_from_gcs(organization_id: str) -> List[Dict[str, Any]]:
     """List all schema templates for an organization from GCS.
 
+    Uses org_name to match the save path structure:
+    {org_name}/schema/**/*.json
+
     Args:
-        organization_id: Organization ID
+        organization_id: Organization ID (UUID)
 
     Returns:
         List of schema metadata dicts
     """
     try:
         from src.storage.config import get_storage
+        from src.db.repositories.extraction_repository import get_organization_name
 
         storage = get_storage()
-        directory = f"{organization_id}/schemas"
+
+        # Resolve org_id to org_name for path construction
+        org_name = await get_organization_name(organization_id)
+        if not org_name:
+            logger.warning(f"Could not resolve org_name for {organization_id}, using org_id as fallback")
+            org_name = organization_id
+
+        # List from org_name/schema directory
+        directory = f"{org_name}/schema"
+        logger.info(f"Listing schemas from GCS: {directory}")
         files = await storage.list_files(directory, extension=".json", use_prefix=False)
 
         schemas = []
@@ -254,6 +289,7 @@ async def list_schemas_from_gcs(organization_id: str) -> List[Dict[str, Any]]:
             except Exception as e:
                 logger.warning(f"Failed to read schema {file_path}: {e}")
 
+        logger.info(f"Found {len(schemas)} schemas for org {org_name}")
         return schemas
 
     except Exception as e:

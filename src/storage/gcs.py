@@ -92,6 +92,80 @@ class GCSStorage(StorageBackend):
         logger.info(f"Saved to GCS: {uri}")
         return uri
 
+    async def save_bytes(
+        self,
+        content: bytes,
+        filename: str,
+        directory: str = "",
+        use_prefix: bool = True,
+    ) -> str:
+        """Save binary content to GCS.
+
+        Args:
+            content: Binary content to save
+            filename: Name of the file
+            directory: Directory path within storage
+            use_prefix: If True, prepend the configured GCS prefix. If False, use directory as-is.
+
+        Returns:
+            Full GCS URI (gs://bucket/path)
+        """
+        if use_prefix:
+            blob_name = self._get_blob_name(filename, directory)
+        else:
+            # Skip prefix - use directory and filename directly
+            parts = [p for p in [directory, filename] if p]
+            blob_name = "/".join(parts)
+
+        blob = self._bucket.blob(blob_name)
+
+        # Determine content type from extension
+        content_type = self._get_content_type_for_extension(filename)
+
+        loop = asyncio.get_running_loop()
+        try:
+            await loop.run_in_executor(
+                get_executors().io_executor,
+                partial(blob.upload_from_string, content, content_type=content_type),
+            )
+        except GoogleAPIError as e:
+            logger.error(f"Failed to save bytes to GCS: {e}")
+            raise
+
+        uri = f"gs://{self.bucket_name}/{blob_name}"
+        logger.info(f"Saved bytes to GCS: {uri} ({len(content)} bytes)")
+        return uri
+
+    def _get_content_type_for_extension(self, filename: str) -> str:
+        """Get content type based on file extension."""
+        from pathlib import Path
+
+        ext = Path(filename).suffix.lower()
+        content_types = {
+            ".pdf": "application/pdf",
+            ".doc": "application/msword",
+            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ".ppt": "application/vnd.ms-powerpoint",
+            ".pptx": "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            ".xls": "application/vnd.ms-excel",
+            ".csv": "text/csv",
+            ".txt": "text/plain",
+            ".md": "text/markdown",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".png": "image/png",
+            ".gif": "image/gif",
+            ".tiff": "image/tiff",
+            ".webp": "image/webp",
+            ".bmp": "image/bmp",
+            ".html": "text/html",
+            ".htm": "text/html",
+            ".json": "application/json",
+            ".rtf": "application/rtf",
+        }
+        return content_types.get(ext, "application/octet-stream")
+
     async def read(self, path: str, use_prefix: bool = True) -> Optional[str]:
         """Read content from GCS.
 

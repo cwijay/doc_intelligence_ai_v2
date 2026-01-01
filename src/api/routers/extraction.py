@@ -315,6 +315,7 @@ async def generate_extraction_schema(
             template_name=request.template_name,
             document_type=request.document_type,
             organization_id=org_id,
+            folder_name=request.folder_name,
             save_to_gcs=request.save_template,
             session_id=request.session_id
         )
@@ -405,6 +406,7 @@ async def list_extraction_templates(
 )
 async def get_extraction_template(
     template_name: str,
+    folder_name: Optional[str] = None,
     agent=Depends(get_extractor_agent),
     org_id: str = Depends(get_org_id),
 ):
@@ -413,11 +415,15 @@ async def get_extraction_template(
 
     **Multi-tenancy**: Only returns template if owned by the organization.
 
+    Args:
+        template_name: Name of the template
+        folder_name: Optional folder where template is stored
+
     Returns:
         TemplateResponse with full schema
     """
     try:
-        template = await agent.get_template(org_id, template_name)
+        template = await agent.get_template(org_id, template_name, folder_name)
 
         if template:
             return TemplateResponse(
@@ -429,7 +435,7 @@ async def get_extraction_template(
         else:
             return TemplateResponse(
                 success=False,
-                error=f"Template not found: {template_name}"
+                error=f"Template not found: {template_name} in folder '{folder_name}'"
             )
 
     except Exception as e:
@@ -488,12 +494,14 @@ async def extract_document_data(
         schema = request.schema_definition
 
         if not schema and template_name:
-            schema = await agent.get_template(org_id, template_name)
+            # Load template with folder_name for correct GCS path
+            schema = await agent.get_template(org_id, template_name, folder_name)
             if not schema:
+                logger.warning(f"Template not found: {template_name} in folder {folder_name}")
                 return ExtractDataResponse(
                     success=False,
                     document_name=request.document_name,
-                    error=f"Template not found: {request.template_name}",
+                    error=f"Template not found: {request.template_name} in folder '{folder_name}'",
                     processing_time_ms=elapsed_ms(start_time)
                 )
         elif schema and not template_name:
@@ -626,20 +634,43 @@ async def save_extracted_data(
     )
 
     try:
+        # Use explicit folder_name or derive from source_file_path
+        folder_name = request.folder_name
+        if not folder_name and request.source_file_path:
+            folder_name = _derive_folder_from_path(request.source_file_path)
+
+        logger.info(f"[SAVE] Request: template={request.template_name}, folder={folder_name}, doc={request.document_id}")
+
         # Resolve org_id to org_name for table naming
         org_name = await get_organization_name(org_id)
         if not org_name:
             logger.warning(f"Organization name not found for {org_id}, using org_id")
             org_name = org_id  # Fallback to org_id if not found
 
-        # Load template schema
-        schema = await agent.get_template(org_id, request.template_name)
+        logger.info(f"[SAVE] Resolved org_name={org_name}")
+
+        # Load template schema with folder_name
+        schema = await agent.get_template(org_id, request.template_name, folder_name)
+        logger.info(f"[SAVE] Template loaded: {bool(schema)}")
+
         if not schema:
+            logger.error(f"[SAVE] Template not found: {request.template_name} in folder {folder_name}")
             return SaveExtractedDataResponse(
                 success=False,
                 message="Template not found",
-                error=f"Template '{request.template_name}' not found for organization"
+                error=f"Template '{request.template_name}' not found in folder '{folder_name}'"
             )
+
+        # Validate schema has properties
+        if not schema.get("properties"):
+            logger.error(f"[SAVE] Schema has no properties!")
+            return SaveExtractedDataResponse(
+                success=False,
+                message="Invalid template",
+                error="Template schema has no properties defined"
+            )
+
+        logger.info(f"[SAVE] Schema has {len(schema.get('properties', {}))} properties")
 
         # Save to database (creates tables if needed, uses UPSERT if entity ID found)
         save_result = await save_extracted_record(

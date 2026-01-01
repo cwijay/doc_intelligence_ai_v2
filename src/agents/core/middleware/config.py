@@ -28,7 +28,7 @@ class MiddlewareConfig(BaseModel):
         description="Enable LLM-based tool selection"
     )
     tool_selector_model: str = Field(
-        default_factory=lambda: os.getenv("TOOL_SELECTOR_MODEL", "gemini-2.0-flash"),
+        default_factory=lambda: os.getenv("TOOL_SELECTOR_MODEL", "gpt-5-nano"),
         description="Lightweight model for tool selection"
     )
     tool_selector_max_tools: int = Field(

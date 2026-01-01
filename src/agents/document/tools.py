@@ -11,7 +11,7 @@ from typing import Optional, List, Dict, Any, Type
 
 from langchain_core.tools import BaseTool
 from langchain_core.callbacks import CallbackManagerForToolRun
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.chat_models import init_chat_model
 from pydantic import BaseModel, Field
 
 from .config import DocumentAgentConfig
@@ -193,15 +193,18 @@ class SummaryGeneratorTool(BaseTool):
     args_schema: Type[BaseModel] = SummaryGeneratorInput
 
     config: DocumentAgentConfig = Field(default_factory=DocumentAgentConfig)
-    llm: Optional[ChatGoogleGenerativeAI] = None
+    llm: Optional[Any] = None
 
-    def _get_llm(self) -> ChatGoogleGenerativeAI:
+    def _get_llm(self) -> Any:
         """Get or create LLM instance."""
         if self.llm is None:
-            self.llm = ChatGoogleGenerativeAI(
-                model=self.config.gemini_model,
-                google_api_key=self.config.google_api_key,
-                temperature=self.config.temperature
+            self.llm = init_chat_model(
+                model=self.config.openai_model,
+                model_provider="openai",
+                temperature=self.config.temperature,
+                api_key=self.config.openai_api_key,
+                use_responses_api=True,  # Required for gpt-5-nano
+                timeout=300,
             )
         return self.llm
 
@@ -226,7 +229,7 @@ class SummaryGeneratorTool(BaseTool):
                 cached = await find_cached_generation(
                     document_name=document_name,
                     generation_type='summary',
-                    model=self.config.gemini_model,
+                    model=self.config.openai_model,
                     content_hash=content_hash
                 )
                 if cached:
@@ -339,15 +342,18 @@ class FAQGeneratorTool(BaseTool):
     args_schema: Type[BaseModel] = FAQGeneratorInput
 
     config: DocumentAgentConfig = Field(default_factory=DocumentAgentConfig)
-    llm: Optional[ChatGoogleGenerativeAI] = None
+    llm: Optional[Any] = None
 
-    def _get_llm(self) -> ChatGoogleGenerativeAI:
+    def _get_llm(self) -> Any:
         """Get or create LLM instance."""
         if self.llm is None:
-            self.llm = ChatGoogleGenerativeAI(
-                model=self.config.gemini_model,
-                google_api_key=self.config.google_api_key,
-                temperature=self.config.temperature
+            self.llm = init_chat_model(
+                model=self.config.openai_model,
+                model_provider="openai",
+                temperature=self.config.temperature,
+                api_key=self.config.openai_api_key,
+                use_responses_api=True,  # Required for gpt-5-nano
+                timeout=300,
             )
         return self.llm
 
@@ -372,7 +378,7 @@ class FAQGeneratorTool(BaseTool):
                 cached = await find_cached_generation(
                     document_name=document_name,
                     generation_type='faqs',
-                    model=self.config.gemini_model,
+                    model=self.config.openai_model,
                     content_hash=content_hash
                 )
                 if cached:
@@ -508,15 +514,18 @@ class QuestionGeneratorTool(BaseTool):
     args_schema: Type[BaseModel] = QuestionGeneratorInput
 
     config: DocumentAgentConfig = Field(default_factory=DocumentAgentConfig)
-    llm: Optional[ChatGoogleGenerativeAI] = None
+    llm: Optional[Any] = None
 
-    def _get_llm(self) -> ChatGoogleGenerativeAI:
+    def _get_llm(self) -> Any:
         """Get or create LLM instance."""
         if self.llm is None:
-            self.llm = ChatGoogleGenerativeAI(
-                model=self.config.gemini_model,
-                google_api_key=self.config.google_api_key,
-                temperature=self.config.temperature
+            self.llm = init_chat_model(
+                model=self.config.openai_model,
+                model_provider="openai",
+                temperature=self.config.temperature,
+                api_key=self.config.openai_api_key,
+                use_responses_api=True,  # Required for gpt-5-nano
+                timeout=300,
             )
         return self.llm
 
@@ -541,7 +550,7 @@ class QuestionGeneratorTool(BaseTool):
                 cached = await find_cached_generation(
                     document_name=document_name,
                     generation_type='questions',
-                    model=self.config.gemini_model,
+                    model=self.config.openai_model,
                     content_hash=content_hash
                 )
                 if cached:
@@ -732,7 +741,7 @@ class ContentPersistTool(BaseTool):
             "summary": summary,
             "faqs": faqs_list,
             "questions": questions_list,
-            "model": self.config.gemini_model
+            "model": self.config.openai_model
         }
 
         results = {
@@ -813,7 +822,7 @@ class ContentPersistTool(BaseTool):
                         generation_type=generation_type,
                         content=content_for_db,
                         options=options,
-                        model=self.config.gemini_model,
+                        model=self.config.openai_model,
                         processing_time_ms=processing_time,
                         document_hash=content_hash,  # Pass content hash for cache validation
                     )

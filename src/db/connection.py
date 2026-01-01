@@ -13,7 +13,7 @@ import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
-from typing import Any, AsyncGenerator, Dict, Optional, Tuple
+from typing import Any, AsyncGenerator, Dict, Optional
 
 from dotenv import load_dotenv
 from sqlalchemy.ext.asyncio import (
@@ -48,8 +48,11 @@ class DatabaseConfig:
         self.cloud_sql_ip_type = os.getenv("CLOUD_SQL_IP_TYPE", "PRIVATE").upper()
 
         # Connection pool settings
-        self.pool_size = int(os.getenv("DB_POOL_SIZE", "5"))
-        self.max_overflow = int(os.getenv("DB_MAX_OVERFLOW", "10"))
+        # Main loop gets larger pool for API concurrency
+        self.pool_size = int(os.getenv("DB_POOL_SIZE", "3"))
+        # Background/executor loops get smaller pool (sequential operations)
+        self.background_pool_size = int(os.getenv("DB_BACKGROUND_POOL_SIZE", "2"))
+        self.max_overflow = int(os.getenv("DB_MAX_OVERFLOW", "5"))
         self.pool_timeout = int(os.getenv("DB_POOL_TIMEOUT", "30"))
         self.pool_recycle = int(os.getenv("DB_POOL_RECYCLE", "1800"))  # 30 min
 
@@ -72,19 +75,26 @@ class DatabaseManager:
     """
     Manages async PostgreSQL connections with Cloud SQL connector support.
 
-    Implements singleton pattern with per-event-loop resource management.
-    This allows the same DatabaseManager instance to work across multiple
-    event loops (e.g., main loop + background thread pools).
+    Implements singleton pattern with PER-LOOP engines to avoid
+    "Future attached to different loop" errors when using background threads.
+    Each event loop gets its own engine, connector, and connection pool.
+
+    Pool sizes are differentiated:
+    - Main loop: pool_size (default 3) for API request concurrency
+    - Background loops: background_pool_size (default 2) for sequential operations
     """
 
     _instance: Optional["DatabaseManager"] = None
     _initialized: bool = False
     _shutdown: bool = False  # Prevents new connections after close_all()
 
-    # Per-loop resources: maps loop_id -> resource
-    _connectors: Dict[int, Any] = {}
-    _engines: Dict[int, AsyncEngine] = {}
-    _session_factories: Dict[int, async_sessionmaker] = {}
+    # Track the main event loop for pool size differentiation
+    _main_loop_id: Optional[int] = None
+
+    # Per-loop resources (each loop gets its own engine and pool)
+    _connectors: Dict[int, Any] = {}  # Per-loop Cloud SQL connectors
+    _engines: Dict[int, AsyncEngine] = {}  # Per-loop engines
+    _session_factories: Dict[int, async_sessionmaker] = {}  # Per-loop session factories
 
     def __new__(cls):
         if cls._instance is None:
@@ -112,12 +122,29 @@ class DatabaseManager:
             # No running loop - use a default key
             return 0
 
+    def _get_pool_size_for_loop(self, loop_id: int) -> int:
+        """
+        Get appropriate pool size for a given event loop.
+
+        Main loop gets larger pool for API concurrency.
+        Background/executor loops get smaller pool for sequential operations.
+        """
+        # First engine created is considered the main loop
+        if self._main_loop_id is None:
+            self._main_loop_id = loop_id
+            return self.config.pool_size  # Main loop: default 3
+
+        if loop_id == self._main_loop_id:
+            return self.config.pool_size  # Main loop: default 3
+
+        return self.config.background_pool_size  # Background: default 2
+
     async def _async_setup_engine_for_loop(self, loop_id: int):
         """
-        Initialize engine and session factory for the current event loop.
+        Initialize a NEW engine for this specific event loop.
 
-        MUST be called from within an async context so the Connector
-        captures the correct event loop.
+        Each event loop gets its own engine with its own connection pool
+        to avoid "Future attached to different loop" errors.
         """
         # Don't create new connections if shutting down
         if self._shutdown:
@@ -129,19 +156,23 @@ class DatabaseManager:
             logger.debug(f"Skipping engine setup for loop {loop_id} - database disabled")
             return
 
+        # Fast path: engine already exists for this loop
         if loop_id in self._engines:
-            return  # Already set up for this loop
+            return
 
-        using_cloud_sql = False
+        # Get appropriate pool size for this loop
+        pool_size = self._get_pool_size_for_loop(loop_id)
+        is_main = loop_id == self._main_loop_id
+
+        # Create engine for this loop
         if self.config.use_cloud_sql_connector:
-            engine, connector = await self._create_cloud_sql_engine_async()
-            self._connectors[loop_id] = connector
-            # Check if we actually got a Cloud SQL connector or fell back
-            using_cloud_sql = connector is not None
+            engine = await self._create_cloud_sql_engine_for_loop(loop_id, pool_size)
         else:
-            engine = self._create_direct_engine()
+            engine = self._create_direct_engine(pool_size)
 
         self._engines[loop_id] = engine
+
+        # Create session factory for this loop using its own engine
         self._session_factories[loop_id] = async_sessionmaker(
             bind=engine,
             class_=AsyncSession,
@@ -149,43 +180,39 @@ class DatabaseManager:
             autoflush=False,
         )
 
-        connection_type = "cloud_sql" if using_cloud_sql else "direct"
-        logger.info(
-            f"Database engine initialized for loop {loop_id}: "
-            f"pool_size={self.config.pool_size}, "
-            f"connection={connection_type}"
-        )
+        loop_type = "main" if is_main else "background"
+        logger.info(f"Created database engine for loop {loop_id} ({loop_type}, pool_size={pool_size})")
 
-    async def _create_cloud_sql_engine_async(self) -> Tuple[AsyncEngine, Any]:
+    async def _create_cloud_sql_engine_for_loop(self, loop_id: int, pool_size: int) -> AsyncEngine:
         """
-        Create engine and connector for current event loop.
+        Create a dedicated engine with Cloud SQL connector for a specific event loop.
 
-        MUST be called from async context so Connector binds to the correct loop.
-        Includes timeout handling and fallback to direct connection.
+        Each loop gets its own connector and engine to avoid cross-loop Future issues.
+
+        Args:
+            loop_id: The event loop ID
+            pool_size: Connection pool size for this engine
         """
-        # Connection timeout for Cloud SQL Connector (seconds)
         CLOUD_SQL_CONNECT_TIMEOUT = 30.0
 
         try:
             from google.cloud.sql.connector import Connector, IPTypes
 
             ip_type = IPTypes.PUBLIC if self.config.cloud_sql_ip_type == "PUBLIC" else IPTypes.PRIVATE
+            loop = asyncio.get_running_loop()
 
+            # Create connector bound to this specific loop
+            connector = Connector(loop=loop)
+            self._connectors[loop_id] = connector
+
+            # Test connection
             logger.info(
-                f"Attempting Cloud SQL connection: "
+                f"Creating Cloud SQL engine for loop {loop_id}: "
                 f"instance={self.config.instance_connection_name}, "
-                f"ip_type={self.config.cloud_sql_ip_type}, "
-                f"user={self.config.db_user}, "
-                f"database={self.config.db_name}"
+                f"ip_type={self.config.cloud_sql_ip_type}"
             )
 
-            # Explicitly pass the current running loop to the Connector
-            loop = asyncio.get_running_loop()
-            connector = Connector(loop=loop)
-
-            # Test the connection before creating the engine
             try:
-                logger.debug(f"Testing Cloud SQL connection (timeout={CLOUD_SQL_CONNECT_TIMEOUT}s)...")
                 test_conn = await asyncio.wait_for(
                     connector.connect_async(
                         self.config.instance_connection_name,
@@ -198,38 +225,40 @@ class DatabaseManager:
                     timeout=CLOUD_SQL_CONNECT_TIMEOUT
                 )
                 await test_conn.close()
-                logger.info("Cloud SQL Connector test connection successful")
+                logger.info(f"Cloud SQL connection test successful for loop {loop_id}")
             except asyncio.TimeoutError:
                 logger.warning(
-                    f"Cloud SQL Connector timed out after {CLOUD_SQL_CONNECT_TIMEOUT}s. "
-                    f"Check if your IP is whitelisted in Cloud SQL authorized networks. "
+                    f"Cloud SQL Connector timed out for loop {loop_id}. "
                     f"Falling back to direct connection."
                 )
-                try:
-                    connector.close()
-                except Exception:
-                    pass
-                return self._create_direct_engine(), None
+                connector.close()
+                del self._connectors[loop_id]
+                return self._create_direct_engine(pool_size)
             except Exception as e:
                 logger.warning(
-                    f"Cloud SQL Connector failed ({type(e).__name__}: {e}). "
+                    f"Cloud SQL Connector failed for loop {loop_id} ({type(e).__name__}: {e}). "
                     f"Falling back to direct connection."
                 )
-                try:
-                    connector.close()
-                except Exception:
-                    pass
-                return self._create_direct_engine(), None
+                connector.close()
+                del self._connectors[loop_id]
+                return self._create_direct_engine(pool_size)
 
-            # Create connection factory with timeout
+            # Capture config for the getconn closure
+            instance_name = self.config.instance_connection_name
+            db_user = self.config.db_user
+            db_password = self.config.db_password
+            db_name = self.config.db_name
+            this_connector = connector  # Use THIS loop's connector only
+
             async def getconn():
+                """Connection factory using this loop's dedicated connector."""
                 conn = await asyncio.wait_for(
-                    connector.connect_async(
-                        self.config.instance_connection_name,
+                    this_connector.connect_async(
+                        instance_name,
                         "asyncpg",
-                        user=self.config.db_user,
-                        password=self.config.db_password,
-                        db=self.config.db_name,
+                        user=db_user,
+                        password=db_password,
+                        db=db_name,
                         ip_type=ip_type,
                     ),
                     timeout=CLOUD_SQL_CONNECT_TIMEOUT
@@ -240,23 +269,27 @@ class DatabaseManager:
                 "postgresql+asyncpg://",
                 async_creator=getconn,
                 poolclass=AsyncAdaptedQueuePool,
-                pool_size=self.config.pool_size,
+                pool_size=pool_size,
                 max_overflow=self.config.max_overflow,
                 pool_timeout=self.config.pool_timeout,
                 pool_recycle=self.config.pool_recycle,
                 echo=self.config.echo_sql,
             )
 
-            return engine, connector
+            return engine
 
         except ImportError as e:
             logger.warning(
                 f"Cloud SQL connector not available ({e}), falling back to direct connection"
             )
-            return self._create_direct_engine(), None
+            return self._create_direct_engine(pool_size)
 
-    def _create_direct_engine(self) -> AsyncEngine:
-        """Create engine with direct connection URL."""
+    def _create_direct_engine(self, pool_size: int) -> AsyncEngine:
+        """Create engine with direct connection URL.
+
+        Args:
+            pool_size: Connection pool size for this engine
+        """
         # Mask password in log (show first 2 chars only)
         safe_url = self.config.database_url
         if "@" in safe_url and ":" in safe_url:
@@ -269,11 +302,11 @@ class DatabaseManager:
             except Exception:
                 safe_url = "[URL masked]"
 
-        logger.info(f"Creating direct database connection: {safe_url}")
+        logger.info(f"Creating direct database connection: {safe_url} (pool_size={pool_size})")
         return create_async_engine(
             self.config.database_url,
             poolclass=AsyncAdaptedQueuePool,
-            pool_size=self.config.pool_size,
+            pool_size=pool_size,
             max_overflow=self.config.max_overflow,
             pool_timeout=self.config.pool_timeout,
             pool_recycle=self.config.pool_recycle,
@@ -406,37 +439,53 @@ class DatabaseManager:
         logger.info("Database tables dropped")
 
     async def close(self):
-        """Close engines and connectors for the CURRENT event loop only."""
+        """Close session factory for the CURRENT event loop only.
+
+        Note: The shared engine is NOT closed here. Use close_all() to close
+        the shared engine when shutting down the application.
+        """
         loop_id = self._get_loop_id()
 
-        # Close connector for current loop
-        if loop_id in self._connectors and self._connectors[loop_id]:
-            try:
-                connector = self._connectors[loop_id]
-                # Use close_async() for proper async cleanup of aiohttp sessions
-                if hasattr(connector, 'close_async'):
-                    await connector.close_async()
-                else:
-                    connector.close()
-            except Exception as e:
-                logger.debug(f"Error closing connector for loop {loop_id}: {e}")
-            finally:
-                del self._connectors[loop_id]
-
-        # Close engine for current loop
-        if loop_id in self._engines:
-            try:
-                await self._engines[loop_id].dispose()
-            except Exception as e:
-                logger.debug(f"Error disposing engine for loop {loop_id}: {e}")
-            finally:
-                del self._engines[loop_id]
-
-        # Remove session factory for current loop
+        # Remove session factory for current loop (engine is shared, don't close it)
         if loop_id in self._session_factories:
             del self._session_factories[loop_id]
 
-        logger.info("All database connections closed")
+        # Remove backwards-compat engine reference
+        if loop_id in self._engines:
+            del self._engines[loop_id]
+
+        logger.debug(f"Session factory closed for loop {loop_id}")
+
+    async def close_shared_engine(self):
+        """Close all per-loop engines and connectors. Call this on application shutdown."""
+        self._shutdown = True
+
+        # Close all per-loop engines
+        for loop_id, engine in list(self._engines.items()):
+            try:
+                await engine.dispose()
+                logger.debug(f"Disposed engine for loop {loop_id}")
+            except Exception as e:
+                logger.debug(f"Error disposing engine for loop {loop_id}: {e}")
+        self._engines.clear()
+
+        # Close all per-loop connectors
+        for loop_id, connector in list(self._connectors.items()):
+            if connector is not None:
+                try:
+                    if hasattr(connector, 'close_async'):
+                        await connector.close_async()
+                    else:
+                        connector.close()
+                    logger.debug(f"Closed connector for loop {loop_id}")
+                except Exception as e:
+                    logger.debug(f"Error closing connector for loop {loop_id}: {e}")
+        self._connectors.clear()
+
+        # Clear all session factories
+        self._session_factories.clear()
+
+        logger.info("All database engines closed")
 
     def close_sync(self, loop_id: Optional[int] = None):
         """
@@ -508,35 +557,17 @@ class DatabaseManager:
 
     async def close_all(self):
         """
-        Close ALL engines and connectors across ALL event loops.
+        Close the shared engine and all session factories.
 
-        Use this at application shutdown to ensure all background threads
-        and their Cloud SQL connectors are properly cleaned up.
+        Use this at application shutdown to ensure Cloud SQL connector
+        is properly cleaned up.
         """
-        # Prevent any new connections from being created
-        self._shutdown = True
+        # Close the shared engine (handles connector too)
+        await self.close_shared_engine()
 
-        # Synchronously close ALL connectors to stop background refresh tasks
-        # This must be sync because we can't await in other event loops
-        for loop_id, connector in list(self._connectors.items()):
-            if connector:
-                try:
-                    connector.close()  # Sync close stops refresh tasks immediately
-                except Exception as e:
-                    logger.debug(f"Error closing connector for loop {loop_id}: {e}")
+        # Clear backwards-compat connectors
         self._connectors.clear()
 
-        # Dispose current loop's engine (we can only await in current loop)
-        current_loop_id = self._get_loop_id()
-        if current_loop_id in self._engines:
-            try:
-                await self._engines[current_loop_id].dispose()
-            except Exception as e:
-                logger.debug(f"Error disposing engine: {e}")
-
-        # Clear all resources
-        self._engines.clear()
-        self._session_factories.clear()
         self._initialized = False
 
         logger.info("All database connections closed")

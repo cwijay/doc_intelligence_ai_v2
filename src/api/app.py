@@ -22,6 +22,7 @@ from .routers import (
     usage_router,
     extraction_router,
     content_router,
+    bulk_router,
 )
 
 logger = logging.getLogger(__name__)
@@ -70,6 +71,22 @@ OPENAPI_TAGS = [
     {
         "name": "Content",
         "description": "Load pre-parsed document content from storage",
+    },
+    {
+        "name": "Bulk Upload",
+        "description": "Direct bulk file upload - preferred method for uploading multiple files at once",
+    },
+    {
+        "name": "Bulk Folders",
+        "description": "Manage bulk processing folders and generate signed URLs for direct GCS upload (legacy)",
+    },
+    {
+        "name": "Bulk Jobs",
+        "description": "Submit and monitor bulk document processing jobs with progress tracking",
+    },
+    {
+        "name": "Bulk Webhook",
+        "description": "Cloud Function webhook for auto-triggering bulk processing on document upload (legacy)",
     },
 ]
 
@@ -187,6 +204,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Usage queue initialization failed: {e}")
 
+    # Start bulk job processing queue
+    try:
+        from src.bulk.queue import start_bulk_queue
+        start_bulk_queue()
+        logger.info("Bulk job queue started")
+    except Exception as e:
+        logger.warning(f"Bulk queue initialization failed: {e}")
+
     # Initialize agents at startup (fail-fast if any agent fails)
     from .dependencies import initialize_agents
     await initialize_agents()
@@ -233,7 +258,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Usage queue shutdown error: {e}")
 
-    # 4. Shutdown audit queue (wait for pending events to be written)
+    # 4. Shutdown bulk job queue (wait for pending jobs)
+    try:
+        from src.bulk.queue import stop_bulk_queue
+        stop_bulk_queue(wait=True)
+        logger.info("Bulk job queue shutdown complete")
+    except Exception as e:
+        logger.warning(f"Bulk queue shutdown error: {e}")
+
+    # 5. Shutdown audit queue (wait for pending events to be written)
     try:
         from src.agents.core.audit_queue import get_audit_queue
         get_audit_queue().shutdown(wait=True, timeout=10.0)
@@ -241,7 +274,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Audit queue shutdown error: {e}")
 
-    # 5. Close database connections after queues are done
+    # 6. Close database connections after queues are done
     try:
         from src.db.connection import db
         await db.close_all()
@@ -412,6 +445,11 @@ def create_app() -> FastAPI:
         content_router,
         prefix=f"{api_prefix}/content",
         tags=["Content"],
+    )
+
+    app.include_router(
+        bulk_router,
+        prefix=f"{api_prefix}/bulk",
     )
 
     return app

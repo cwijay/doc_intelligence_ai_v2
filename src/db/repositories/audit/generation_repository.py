@@ -73,7 +73,22 @@ async def save_document_generation(
             created_at=datetime.utcnow(),
         )
         session.add(generation)
-        await session.flush()
+
+        # Explicitly flush to catch constraint errors early
+        try:
+            await session.flush()
+        except Exception as e:
+            # Handle foreign key constraint error (organization doesn't exist)
+            error_str = str(e).lower()
+            if "foreign key" in error_str or "fk_" in error_str or "organization_id" in error_str:
+                logger.warning(
+                    f"Skipping generation save for {document_name} - organization_id '{organization_id}' "
+                    f"not found in organizations table"
+                )
+                await session.rollback()
+                return None
+            # Re-raise other errors
+            raise
 
         gen_id = str(generation.id)
         logger.debug(f"Saved document generation for {document_name}: {gen_id} org={organization_id}")

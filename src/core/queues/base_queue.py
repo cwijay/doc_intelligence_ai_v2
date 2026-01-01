@@ -115,6 +115,9 @@ class BackgroundQueue(Generic[T], ThreadSafeSingleton, ABC):
 
     async def _process_events(self) -> None:
         """Process events from queue until shutdown."""
+        # Initialize database connection for this loop once
+        await self._init_db_for_loop()
+
         while not self._shutdown_event.is_set():
             try:
                 # Non-blocking get with timeout
@@ -129,15 +132,51 @@ class BackgroundQueue(Generic[T], ThreadSafeSingleton, ABC):
                 try:
                     await self._process_event(event)
                 except Exception as e:
-                    logger.warning(
-                        f"Failed to process {self._get_queue_name()} event: {e}"
-                    )
+                    error_str = str(e).lower()
+                    # Check if connection error - try to reinitialize
+                    if "connection" in error_str and ("closed" in error_str or "lost" in error_str):
+                        logger.warning(
+                            f"{self._get_queue_name()} connection lost, reinitializing..."
+                        )
+                        await self._reinit_db_connection()
+                        # Retry once after reinit
+                        try:
+                            await self._process_event(event)
+                        except Exception as retry_e:
+                            logger.warning(
+                                f"Failed to process {self._get_queue_name()} event after retry: {retry_e}"
+                            )
+                    else:
+                        logger.warning(
+                            f"Failed to process {self._get_queue_name()} event: {e}"
+                        )
 
             except queue.Empty:
                 continue
             except Exception as e:
                 if not self._shutdown_event.is_set():
                     logger.error(f"Error in {self._get_queue_name()} loop: {e}")
+
+    async def _init_db_for_loop(self) -> None:
+        """Initialize database session factory for this event loop."""
+        try:
+            from src.db.connection import db
+            await db.get_engine_async()
+            logger.debug(f"{self._get_queue_name()} database initialized for loop")
+        except Exception as e:
+            logger.warning(f"Failed to initialize {self._get_queue_name()} database: {e}")
+
+    async def _reinit_db_connection(self) -> None:
+        """Reinitialize database connection after failure."""
+        try:
+            from src.db.connection import db
+            # Close current session factory for this loop
+            await db.close()
+            # Reinitialize
+            await db.get_engine_async()
+            logger.info(f"{self._get_queue_name()} database connection reinitialized")
+        except Exception as e:
+            logger.warning(f"Failed to reinitialize {self._get_queue_name()} database: {e}")
 
     async def _cleanup_db(self) -> None:
         """Cleanup database connections for this event loop."""

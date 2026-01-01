@@ -43,6 +43,10 @@ class ToolSelectionManager:
         if config.enable_tool_selection:
             self._init_components(api_key)
 
+    # Tools that are ALWAYS required for content generation (cannot be filtered out)
+    # These are passed to LLMToolSelector via always_include parameter
+    REQUIRED_GENERATION_TOOLS = ['document_loader', 'content_persist']
+
     def _init_components(self, api_key: str):
         """Initialize query classifier and tool selector."""
         try:
@@ -50,21 +54,24 @@ class ToolSelectionManager:
             self.query_classifier = QueryClassifier(
                 use_llm_fallback=True,
                 llm_model=self.config.tool_selector_model,
-                llm_provider="google_genai",
+                llm_provider="openai",
                 api_key=api_key
             )
 
-            # Initialize LLM-based tool selector
+            # Initialize LLM-based tool selector with always_include
+            # This aligns with LangChain's LLMToolSelectorMiddleware pattern
             self.tool_selector = LLMToolSelector(
                 model=self.config.tool_selector_model,
-                provider="google_genai",
+                provider="openai",
                 max_tools=self.config.tool_selector_max_tools,
+                always_include=self.REQUIRED_GENERATION_TOOLS,
                 api_key=api_key
             )
 
             logger.info(
                 f"Tool selection enabled: classifier + selector "
-                f"(model={self.config.tool_selector_model}, max_tools={self.config.tool_selector_max_tools})"
+                f"(model={self.config.tool_selector_model}, max_tools={self.config.tool_selector_max_tools}, "
+                f"always_include={self.REQUIRED_GENERATION_TOOLS})"
             )
 
         except Exception as e:
@@ -83,7 +90,8 @@ class ToolSelectionManager:
 
         Uses two-stage filtering:
         1. QueryClassifier determines intent (RAG vs Generation)
-        2. LLMToolSelector narrows down within the category
+        2. LLMToolSelector with structured output selects the right generator
+           (always_include tools like loader/persist are automatically included)
 
         Args:
             query: User's query string
@@ -104,7 +112,27 @@ class ToolSelectionManager:
             # Map intent to tool subsets
             candidate_tools = self._get_tools_for_intent(intent)
 
-            # Stage 2: Use LLMToolSelector to further narrow if we have many tools
+            # Stage 2: For content generation, use LLMToolSelector with structured output
+            # The selector handles always_include automatically (document_loader, content_persist)
+            if intent == QueryIntent.CONTENT_GENERATION and self.tool_selector:
+                # LLMToolSelector with always_include will:
+                # 1. Always include document_loader and content_persist
+                # 2. Use structured output to select exactly 1 generator
+                selected = self.tool_selector.select_tools(
+                    query,
+                    candidate_tools,
+                    context=None,
+                    force_selection=True,
+                    select_count=1  # Select exactly 1 generator (always_include doesn't count)
+                )
+
+                logger.info(
+                    f"Tool selection: {intent.value} -> {len(candidate_tools)} candidates -> "
+                    f"{len(selected)} selected: {[t.name for t in selected]}"
+                )
+                return selected
+
+            # For other intents, use standard narrowing if too many tools
             if self.tool_selector and len(candidate_tools) > self.config.tool_selector_max_tools:
                 selected = self.tool_selector.select_tools(query, candidate_tools, context=None)
                 logger.info(

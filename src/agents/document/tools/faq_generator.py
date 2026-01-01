@@ -3,11 +3,11 @@
 import json
 import logging
 import time
-from typing import Optional, Type
+from typing import Any, Optional, Type
 
 from langchain_core.tools import BaseTool
 from langchain_core.callbacks import CallbackManagerForToolRun
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.chat_models import init_chat_model
 from pydantic import BaseModel, Field
 
 from ..config import DocumentAgentConfig
@@ -22,21 +22,25 @@ class FAQGeneratorTool(BaseTool):
     """Tool to generate FAQs from document content using LLM."""
 
     name: str = "faq_generator"
-    description: str = """Generate frequently asked questions and answers from document content.
-    Takes document content and number of FAQs to generate.
-    Returns a list of question-answer pairs."""
+    description: str = """Generate FAQs (Frequently Asked Questions) from document content.
+    Use this tool ONLY when asked to create FAQs or common questions users might ask.
+    DO NOT use for comprehension questions, quizzes, or summaries.
+    Returns FAQ-style question-answer pairs about the document."""
     args_schema: Type[BaseModel] = FAQGeneratorInput
 
     config: DocumentAgentConfig = Field(default_factory=DocumentAgentConfig)
-    llm: Optional[ChatGoogleGenerativeAI] = None
+    llm: Optional[Any] = None
 
-    def _get_llm(self) -> ChatGoogleGenerativeAI:
+    def _get_llm(self) -> Any:
         """Get or create LLM instance."""
         if self.llm is None:
-            self.llm = ChatGoogleGenerativeAI(
-                model=self.config.gemini_model,
-                google_api_key=self.config.google_api_key,
-                temperature=self.config.temperature
+            self.llm = init_chat_model(
+                model=self.config.openai_model,
+                model_provider="openai",
+                temperature=self.config.temperature,
+                api_key=self.config.openai_api_key,
+                use_responses_api=True,  # Required for gpt-5-nano
+                timeout=300,  # 5 minutes for complex generation tasks
             )
         return self.llm
 
@@ -56,33 +60,36 @@ class FAQGeneratorTool(BaseTool):
 
         # Check cache before generating
         try:
-            from src.db.repositories.audit_repository import find_cached_generation, log_event
+            from src.db.repositories.audit_repository import find_cached_generation
+            from src.agents.core.audit_queue import enqueue_audit_event
 
             async def check_cache():
-                cached = await find_cached_generation(
+                return await find_cached_generation(
                     document_name=document_name,
                     generation_type='faqs',
-                    model=self.config.gemini_model,
+                    model=self.config.openai_model,
                     content_hash=content_hash,
                     organization_id=organization_id
                 )
-                if cached:
-                    await log_event(
-                        event_type='generation_cache_hit',
-                        file_name=document_name,
-                        organization_id=organization_id,
-                        details={
-                            'generation_type': 'faqs',
-                            'generation_id': str(cached['id']),
-                            'content_hash': content_hash
-                        }
-                    )
-                return cached
 
             cached = run_async(check_cache())
             if cached and cached.get('content', {}).get('faqs'):
                 cache_duration_ms = elapsed_ms(start_time)
                 logger.info(f"Cache hit for FAQs: {document_name} ({cache_duration_ms:.1f}ms)")
+
+                # Log cache hit via audit queue (non-blocking)
+                enqueue_audit_event(
+                    event_type='generation_cache_hit',
+                    file_name=document_name,
+                    organization_id=organization_id,
+                    document_hash=content_hash,
+                    details={
+                        'generation_type': 'faqs',
+                        'generation_id': str(cached['id']),
+                        'content_hash': content_hash
+                    }
+                )
+
                 return json.dumps({
                     "success": True,
                     "faqs": cached['content']['faqs'],
@@ -92,19 +99,18 @@ class FAQGeneratorTool(BaseTool):
                     "content_hash": content_hash
                 })
 
-            # Log generation start
-            async def log_start():
-                await log_event(
-                    event_type='generation_started',
-                    file_name=document_name,
-                    organization_id=organization_id,
-                    details={
-                        'generation_type': 'faqs',
-                        'content_hash': content_hash,
-                        'num_faqs': num_faqs
-                    }
-                )
-            run_async(log_start())
+            # Log generation start via audit queue (non-blocking)
+            enqueue_audit_event(
+                event_type='generation_started',
+                file_name=document_name,
+                organization_id=organization_id,
+                document_hash=content_hash,
+                details={
+                    'generation_type': 'faqs',
+                    'content_hash': content_hash,
+                    'num_faqs': num_faqs
+                }
+            )
 
         except ImportError:
             logger.debug("Audit module not available, skipping cache check")
@@ -149,23 +155,22 @@ JSON Response:"""
             duration_ms = elapsed_ms(start_time)
             logger.info(f"Generated {len(faqs)} FAQs in {duration_ms:.1f}ms")
 
-            # Log generation complete
+            # Log generation complete via audit queue (non-blocking)
             try:
-                from src.db.repositories.audit_repository import log_event
+                from src.agents.core.audit_queue import enqueue_audit_event
 
-                async def log_complete():
-                    await log_event(
-                        event_type='generation_completed',
-                        file_name=document_name,
-                        organization_id=organization_id,
-                        details={
-                            'generation_type': 'faqs',
-                            'content_hash': content_hash,
-                            'count': len(faqs),
-                            'processing_time_ms': duration_ms
-                        }
-                    )
-                run_async(log_complete())
+                enqueue_audit_event(
+                    event_type='generation_completed',
+                    file_name=document_name,
+                    organization_id=organization_id,
+                    document_hash=content_hash,
+                    details={
+                        'generation_type': 'faqs',
+                        'content_hash': content_hash,
+                        'count': len(faqs),
+                        'processing_time_ms': duration_ms
+                    }
+                )
             except Exception as e:
                 logger.debug(f"Failed to log generation complete: {e}")
 

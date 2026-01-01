@@ -8,11 +8,11 @@ import json
 import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Optional, Type, Tuple
+from typing import Any, Optional, Type, Tuple
 
 from langchain_core.tools import BaseTool
 from langchain_core.callbacks import CallbackManagerForToolRun
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain.chat_models import init_chat_model
 from pydantic import BaseModel, Field
 
 from ..config import ExtractorAgentConfig
@@ -50,17 +50,18 @@ class FieldAnalyzerTool(BaseTool):
     args_schema: Type[BaseModel] = FieldAnalyzerInput
 
     config: ExtractorAgentConfig = Field(default_factory=ExtractorAgentConfig)
-    llm: Optional[ChatGoogleGenerativeAI] = None
+    llm: Optional[Any] = None
 
-    def _get_llm(self) -> ChatGoogleGenerativeAI:
-        """Get or create LLM instance (Gemini Pro)."""
+    def _get_llm(self):
+        """Get or create LLM instance (OpenAI)."""
         if self.llm is None:
-            self.llm = ChatGoogleGenerativeAI(
-                model=self.config.gemini_model,
-                google_api_key=self.config.google_api_key,
-                temperature=self.config.temperature
+            self.llm = init_chat_model(
+                model=self.config.openai_model,
+                model_provider="openai",
+                temperature=self.config.temperature,
+                api_key=self.config.openai_api_key,
             )
-            logger.info(f"FieldAnalyzer using Gemini: {self.config.gemini_model}")
+            logger.info(f"FieldAnalyzer using OpenAI: {self.config.openai_model}")
         return self.llm
 
     def _build_header_prompt(self, content: str, type_hint: str) -> str:
@@ -205,16 +206,29 @@ Document content:
 
             duration_ms = elapsed_ms(start_time)
 
-            # Merge results
-            header_fields = header_result.model_dump().get("fields", [])
-            line_item_fields = line_item_result.model_dump().get("fields", [])
+            # Handle None results from structured output
+            if header_result is None:
+                logger.warning("Header analysis returned None, using empty result")
+                header_fields = []
+                document_type = "unknown"
+                header_has_line_items = False
+            else:
+                header_fields = header_result.model_dump().get("fields", [])
+                document_type = header_result.document_type or "unknown"
+                header_has_line_items = header_result.has_line_items
+
+            if line_item_result is None:
+                logger.warning("Line item analysis returned None, using empty result")
+                line_item_fields = []
+            else:
+                line_item_fields = line_item_result.model_dump().get("fields", [])
 
             # Ensure line item fields have correct location
             for field in line_item_fields:
                 field["location"] = "line_item"
 
             total_fields = len(header_fields) + len(line_item_fields)
-            has_line_items = header_result.has_line_items or len(line_item_fields) > 0
+            has_line_items = header_has_line_items or len(line_item_fields) > 0
 
             logger.info(
                 f"Field analysis complete: {total_fields} fields "
@@ -226,7 +240,7 @@ Document content:
             return json.dumps({
                 "success": True,
                 "document_name": document_name,
-                "document_type": header_result.document_type or "unknown",
+                "document_type": document_type,
                 "fields": header_fields,
                 "has_line_items": has_line_items,
                 "line_item_fields": line_item_fields if line_item_fields else None,

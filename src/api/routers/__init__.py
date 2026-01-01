@@ -10,6 +10,7 @@ from .health import router as health_router
 from .usage import router as usage_router
 from .extraction import router as extraction_router
 from .content import router as content_router
+from .bulk import router as bulk_router
 
 __all__ = [
     "documents_router",
@@ -22,4 +23,5 @@ __all__ = [
     "usage_router",
     "extraction_router",
     "content_router",
+    "bulk_router",
 ]

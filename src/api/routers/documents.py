@@ -178,6 +178,7 @@ async def summarize_document(
         processing_time = elapsed_ms(start_time)
 
         if result:
+            logger.info(f"Summarize returning: success=True, summary_len={len(result)}, preview={result[:100]}...")
             return SummarizeResponse(
                 success=True,
                 summary=result,

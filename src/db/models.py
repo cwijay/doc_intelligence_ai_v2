@@ -27,6 +27,10 @@ Usage tracking models:
 
 RAG cache models:
 - RAGQueryCacheModel: Semantic caching for RAG queries with pgvector
+
+Bulk processing models:
+- BulkJobModel: Bulk document processing job tracking
+- BulkJobDocumentModel: Per-document status within bulk jobs
 """
 
 from biz2bricks_core import (
@@ -62,6 +66,11 @@ from biz2bricks_core import (
     RAGQueryCacheModel,
     RAGQueryCache,
     PGVECTOR_AVAILABLE,
+    # Bulk processing models
+    BulkJobModel,
+    BulkJobDocumentModel,
+    BulkJob,
+    BulkJobDocument,
 )
 
 # Backwards-compatible aliases for existing code
@@ -119,4 +128,9 @@ __all__ = [
     "TokenUsageRecord",
     "ResourceUsageRecord",
     "UsageAggregation",
+    # Bulk processing models
+    "BulkJobModel",
+    "BulkJobDocumentModel",
+    "BulkJob",
+    "BulkJobDocument",
 ]
