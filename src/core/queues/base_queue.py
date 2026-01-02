@@ -1,6 +1,7 @@
 """Background queue base class with dedicated event loop.
 
 Provides common infrastructure for async queues running in background threads.
+Supports concurrent event processing with configurable parallelism.
 """
 
 import asyncio
@@ -9,7 +10,7 @@ import logging
 import queue
 import threading
 from abc import ABC, abstractmethod
-from typing import Generic, Optional, TypeVar
+from typing import Generic, Optional, Set, TypeVar
 
 from src.core.patterns import ThreadSafeSingleton
 
@@ -17,6 +18,9 @@ logger = logging.getLogger(__name__)
 
 # Event type parameter
 T = TypeVar('T')
+
+# Default max concurrent events to process
+DEFAULT_MAX_CONCURRENT = 1
 
 
 class BackgroundQueue(Generic[T], ThreadSafeSingleton, ABC):
@@ -54,6 +58,7 @@ class BackgroundQueue(Generic[T], ThreadSafeSingleton, ABC):
         self._loop: Optional[asyncio.AbstractEventLoop] = None
         self._shutdown_event = threading.Event()
         self._started = False
+        self._pending_tasks: Set[asyncio.Task] = set()
 
         # Register cleanup on interpreter shutdown
         atexit.register(self.shutdown)
@@ -78,6 +83,17 @@ class BackgroundQueue(Generic[T], ThreadSafeSingleton, ABC):
             Any exception - will be caught and logged
         """
         pass
+
+    def _get_max_concurrent(self) -> int:
+        """Return max concurrent events to process.
+
+        Override in subclasses to enable parallel processing.
+        Default is 1 (sequential processing for backwards compatibility).
+
+        Returns:
+            Maximum number of events to process concurrently
+        """
+        return DEFAULT_MAX_CONCURRENT
 
     def start(self) -> None:
         """Start the background processing thread."""
@@ -114,27 +130,33 @@ class BackgroundQueue(Generic[T], ThreadSafeSingleton, ABC):
             logger.info(f"{self._get_queue_name()} loop stopped")
 
     async def _process_events(self) -> None:
-        """Process events from queue until shutdown."""
+        """Process events from queue until shutdown.
+
+        Supports concurrent event processing controlled by _get_max_concurrent().
+        Default is sequential (max_concurrent=1) for backwards compatibility.
+        """
         # Initialize database connection for this loop once
         await self._init_db_for_loop()
 
-        while not self._shutdown_event.is_set():
-            try:
-                # Non-blocking get with timeout
-                event = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: self._queue.get(timeout=1.0)
-                )
+        max_concurrent = self._get_max_concurrent()
+        semaphore = asyncio.Semaphore(max_concurrent)
 
-                if event is None:
-                    # Poison pill - shutdown signal
-                    break
+        if max_concurrent > 1:
+            logger.info(
+                f"{self._get_queue_name()} running with max_concurrent={max_concurrent}"
+            )
 
+        async def process_with_error_handling(event: T) -> None:
+            """Process a single event with error handling and retry logic."""
+            async with semaphore:
                 try:
                     await self._process_event(event)
                 except Exception as e:
                     error_str = str(e).lower()
                     # Check if connection error - try to reinitialize
-                    if "connection" in error_str and ("closed" in error_str or "lost" in error_str):
+                    if "connection" in error_str and (
+                        "closed" in error_str or "lost" in error_str
+                    ):
                         logger.warning(
                             f"{self._get_queue_name()} connection lost, reinitializing..."
                         )
@@ -151,11 +173,35 @@ class BackgroundQueue(Generic[T], ThreadSafeSingleton, ABC):
                             f"Failed to process {self._get_queue_name()} event: {e}"
                         )
 
+        while not self._shutdown_event.is_set():
+            try:
+                # Non-blocking get with shorter timeout for responsiveness
+                event = await asyncio.get_event_loop().run_in_executor(
+                    None, lambda: self._queue.get(timeout=0.5)
+                )
+
+                if event is None:
+                    # Poison pill - shutdown signal
+                    break
+
+                # Create task for concurrent processing
+                task = asyncio.create_task(process_with_error_handling(event))
+                self._pending_tasks.add(task)
+                task.add_done_callback(self._pending_tasks.discard)
+
             except queue.Empty:
                 continue
             except Exception as e:
                 if not self._shutdown_event.is_set():
                     logger.error(f"Error in {self._get_queue_name()} loop: {e}")
+
+        # Wait for all pending tasks to complete on shutdown
+        if self._pending_tasks:
+            logger.info(
+                f"{self._get_queue_name()} waiting for {len(self._pending_tasks)} pending tasks..."
+            )
+            await asyncio.gather(*self._pending_tasks, return_exceptions=True)
+            logger.info(f"{self._get_queue_name()} all pending tasks completed")
 
     async def _init_db_for_loop(self) -> None:
         """Initialize database session factory for this event loop."""

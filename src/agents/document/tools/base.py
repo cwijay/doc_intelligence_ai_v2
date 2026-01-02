@@ -14,6 +14,7 @@ from typing import Optional, List
 from pydantic import BaseModel, Field
 
 from src.utils.async_utils import run_async
+from src.utils.gcs_utils import is_gcs_path, parse_gcs_uri
 
 logger = logging.getLogger(__name__)
 
@@ -26,12 +27,19 @@ def derive_org_and_folder(parsed_file_path: str) -> tuple:
     """
     Extract org_name and folder_name from parsed_file_path.
 
-    Example: "Acme corp/parsed/invoices/Sample1.md" -> ("Acme corp", "invoices")
+    Handles both relative paths and full GCS URIs:
+    - Relative: "Acme corp/parsed/invoices/Sample1.md" -> ("Acme corp", "invoices")
+    - GCS URI: "gs://bucket/Acme corp/parsed/invoices/Sample1.md" -> ("Acme corp", "invoices")
     """
     if not parsed_file_path or 'parsed' not in parsed_file_path:
         return "", ""
 
-    parts = parsed_file_path.split('/')
+    # Normalize: strip GCS prefix if present (gs://bucket/path -> path)
+    path = parsed_file_path
+    if is_gcs_path(path):
+        _, path = parse_gcs_uri(path)  # Extract blob path (org/parsed/folder/doc.md)
+
+    parts = path.split('/')
     try:
         parsed_idx = parts.index('parsed')
         org_name = '/'.join(parts[:parsed_idx])

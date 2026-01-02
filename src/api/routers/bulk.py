@@ -575,6 +575,15 @@ async def cancel_bulk_job(
     if not job_dict or job_dict["organization_id"] != org_id:
         raise HTTPException(status_code=404, detail="Job not found")
 
+    # Idempotent: if already cancelled, return success
+    if job_dict["status"] == "cancelled":
+        return CancelJobResponse(
+            success=True,
+            job_id=job_id,
+            message="Job is already cancelled",
+        )
+
+    # Cannot cancel completed or failed jobs
     if job_dict["status"] not in ["pending", "processing"]:
         raise HTTPException(
             status_code=400,

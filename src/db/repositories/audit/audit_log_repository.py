@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 
 from sqlalchemy import select, and_, desc
+from sqlalchemy.exc import IntegrityError
 
 from ...models import AuditLog
 from ...connection import db
@@ -86,9 +87,13 @@ async def log_event(
         if entity_type is None:
             entity_type = "DOCUMENT"
 
-        # Default entity_id to document_hash or a fallback
+        # Default entity_id to file_name or a fallback
+        # Note: entity_id is VARCHAR(36), document_hash is 64 chars (SHA-256)
         if entity_id is None:
-            entity_id = document_hash or file_name or "unknown"
+            entity_id = file_name or "unknown"
+            # Truncate to 36 chars if still too long
+            if len(entity_id) > 36:
+                entity_id = entity_id[:36]
 
         entry = AuditLog(
             organization_id=organization_id,
@@ -107,17 +112,33 @@ async def log_event(
         # Explicitly flush to catch constraint errors early
         try:
             await session.flush()
-        except Exception as e:
-            # Handle foreign key constraint error (organization doesn't exist)
-            error_str = str(e).lower()
-            if "foreign key" in error_str or "fk_" in error_str or "organization_id" in error_str:
+        except IntegrityError as e:
+            # Only IntegrityError indicates constraint violations
+            error_str = str(e.orig).lower() if hasattr(e, 'orig') else str(e).lower()
+
+            # Check for actual FK constraint violation patterns
+            is_fk_violation = (
+                "foreign key" in error_str or
+                "fk_" in error_str or
+                "violates foreign key constraint" in error_str
+            )
+
+            if is_fk_violation:
                 logger.warning(
                     f"Skipping audit log for {event_type} - organization_id '{organization_id}' "
                     f"not found in organizations table (file: {file_name})"
                 )
                 await session.rollback()
                 return
-            # Re-raise other errors
+
+            # Log and re-raise other integrity errors
+            logger.error(f"Integrity error logging audit event {event_type}: {e}")
+            await session.rollback()
+            raise
+        except Exception as e:
+            # Log unexpected errors with full details
+            logger.error(f"Unexpected error logging audit event {event_type}: {e}")
+            await session.rollback()
             raise
 
 

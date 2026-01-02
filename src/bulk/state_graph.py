@@ -226,7 +226,11 @@ async def index_node(state: DocumentState) -> DocumentState:
 
 
 async def generate_node(state: DocumentState) -> DocumentState:
-    """Generate content (summary, FAQs, questions) for the document."""
+    """Generate content (summary, FAQs, questions) for the document.
+
+    Uses direct tool invocation for deterministic generation.
+    Runs all requested generators in parallel for performance.
+    """
     if state.get("error"):
         return state
 
@@ -261,42 +265,164 @@ async def generate_node(state: DocumentState) -> DocumentState:
 
         config = get_bulk_config()
 
-        # Import DocumentAgent here to avoid circular imports
-        from src.agents.document.core import DocumentAgent
-        from src.agents.document.schemas import GenerationOptions
-
-        agent = DocumentAgent()
-
-        # Create generation options
-        gen_options = GenerationOptions(
-            generate_summary=options.generate_summary,
-            generate_faqs=options.generate_faqs,
-            generate_questions=options.generate_questions,
-            num_faqs=options.num_faqs,
-            num_questions=options.num_questions,
-            summary_max_words=options.summary_max_words,
+        # Import tools directly to bypass agent tool selection
+        from src.agents.document.config import DocumentAgentConfig
+        from src.agents.document.tools import (
+            SummaryGeneratorTool,
+            FAQGeneratorTool,
+            QuestionGeneratorTool,
+            ContentPersistTool,
         )
 
-        # Generate content
+        # Create tools with shared config
+        agent_config = DocumentAgentConfig()
+        summary_tool = SummaryGeneratorTool(config=agent_config)
+        faq_tool = FAQGeneratorTool(config=agent_config)
+        question_tool = QuestionGeneratorTool(config=agent_config)
+        persist_tool = ContentPersistTool(config=agent_config)
+
+        # Get document content (already loaded in parse_node)
+        content = state.get("parsed_content", "")
+        if not content:
+            # Fall back to loading from GCS if not in state
+            from src.storage import get_storage
+            storage = get_storage()
+            content = await storage.read(state["parsed_path"], use_prefix=False)
+
+        # Get document name
         filename = state["original_path"].split("/")[-1]
         base_name = filename.rsplit(".", 1)[0]
 
-        result = await asyncio.wait_for(
-            agent.generate_all(
-                document_name=base_name,
-                parsed_file_path=state["parsed_path"],
-                options=gen_options,
-                organization_id=state["org_id"],
+        # Run generators in parallel using asyncio.gather
+        loop = asyncio.get_running_loop()
+
+        async def run_summary():
+            if not options.generate_summary:
+                return None
+            result = await loop.run_in_executor(
+                None,
+                lambda: summary_tool._run(
+                    content=content,
+                    document_name=base_name,
+                    max_words=options.summary_max_words,
+                    organization_id=state["org_id"],
+                )
+            )
+            return result
+
+        async def run_faqs():
+            if not options.generate_faqs:
+                return None
+            result = await loop.run_in_executor(
+                None,
+                lambda: faq_tool._run(
+                    content=content,
+                    document_name=base_name,
+                    num_faqs=options.num_faqs,
+                    organization_id=state["org_id"],
+                )
+            )
+            return result
+
+        async def run_questions():
+            if not options.generate_questions:
+                return None
+            result = await loop.run_in_executor(
+                None,
+                lambda: question_tool._run(
+                    content=content,
+                    document_name=base_name,
+                    num_questions=options.num_questions,
+                    organization_id=state["org_id"],
+                )
+            )
+            return result
+
+        # Run all generators in parallel with timeout
+        import json as json_module
+        results = await asyncio.wait_for(
+            asyncio.gather(
+                run_summary(),
+                run_faqs(),
+                run_questions(),
+                return_exceptions=True,
             ),
             timeout=config.generation_timeout_seconds,
         )
 
-        generation_time = int((time.time() - start_time) * 1000)
+        summary_result, faqs_result, questions_result = results
 
-        # Extract results
-        summary = result.summary if result else None
-        faqs = [faq.model_dump() for faq in result.faqs] if result and result.faqs else None
-        questions = [q.model_dump() for q in result.questions] if result and result.questions else None
+        # Parse results (tools return JSON strings)
+        summary = None
+        faqs = None
+        questions = None
+        errors = []
+
+        if summary_result:
+            if isinstance(summary_result, Exception):
+                errors.append(f"Summary: {summary_result}")
+            else:
+                try:
+                    parsed = json_module.loads(summary_result)
+                    if parsed.get("success"):
+                        summary = parsed.get("summary")
+                    else:
+                        errors.append(f"Summary: {parsed.get('error')}")
+                except json_module.JSONDecodeError as e:
+                    errors.append(f"Summary parse error: {e}")
+
+        if faqs_result:
+            if isinstance(faqs_result, Exception):
+                errors.append(f"FAQs: {faqs_result}")
+            else:
+                try:
+                    parsed = json_module.loads(faqs_result)
+                    if parsed.get("success"):
+                        faqs = parsed.get("faqs")
+                    else:
+                        errors.append(f"FAQs: {parsed.get('error')}")
+                except json_module.JSONDecodeError as e:
+                    errors.append(f"FAQs parse error: {e}")
+
+        if questions_result:
+            if isinstance(questions_result, Exception):
+                errors.append(f"Questions: {questions_result}")
+            else:
+                try:
+                    parsed = json_module.loads(questions_result)
+                    if parsed.get("success"):
+                        questions = parsed.get("questions")
+                    else:
+                        errors.append(f"Questions: {parsed.get('error')}")
+                except json_module.JSONDecodeError as e:
+                    errors.append(f"Questions parse error: {e}")
+
+        # Log any partial errors but don't fail the whole generation
+        if errors:
+            logger.warning(f"Some generation tasks had errors: {errors}")
+
+        # Persist generated content to GCS
+        if summary or faqs or questions:
+            persist_input = {
+                "document_name": base_name,
+                "parsed_file_path": state["parsed_path"],
+                "organization_id": state["org_id"],
+            }
+            if summary:
+                persist_input["summary"] = summary
+            if faqs:
+                # ContentPersistTool expects JSON string, not list
+                persist_input["faqs"] = json_module.dumps(faqs)
+            if questions:
+                # ContentPersistTool expects JSON string, not list
+                persist_input["questions"] = json_module.dumps(questions)
+
+            await loop.run_in_executor(
+                None,
+                lambda: persist_tool._run(**persist_input)
+            )
+
+        generation_time = int((time.time() - start_time) * 1000)
 
         # Estimate token usage (rough estimate)
         token_usage = 0
@@ -307,7 +433,12 @@ async def generate_node(state: DocumentState) -> DocumentState:
         if questions:
             token_usage += len(questions) * 100
 
-        logger.info(f"Generated content in {generation_time}ms")
+        logger.info(
+            f"Generated content in {generation_time}ms: "
+            f"summary={'yes' if summary else 'no'}, "
+            f"faqs={len(faqs) if faqs else 0}, "
+            f"questions={len(questions) if questions else 0}"
+        )
 
         return {
             **state,

@@ -13,8 +13,9 @@ This document describes the async programming patterns and low-latency design ch
 5. [Connection Pooling](#5-connection-pooling)
 6. [Background Queues](#6-background-queues)
 7. [Rate Limiting](#7-rate-limiting)
-8. [Lifecycle Management](#8-lifecycle-management)
-9. [Performance Impact Summary](#9-performance-impact-summary)
+8. [Connection Pre-warming](#8-connection-pre-warming)
+9. [Lifecycle Management](#9-lifecycle-management)
+10. [Performance Impact Summary](#10-performance-impact-summary)
 
 ---
 
@@ -61,16 +62,16 @@ This document describes the async programming patterns and low-latency design ch
 +-----------------------------------------------------------------------------------+
 |                           BACKGROUND WORKERS                                       |
 |                                                                                   |
-|  +------------------+                    +------------------+                     |
-|  |   Audit Queue    |                    |   Usage Queue    |                     |
-|  | (dedicated loop) |                    | (dedicated loop) |                     |
-|  +--------+---------+                    +--------+---------+                     |
-|           |                                       |                               |
-|           v                                       v                               |
-|  +--------+---------+                    +--------+---------+                     |
-|  |   PostgreSQL     |<------------------>|   PostgreSQL     |                     |
-|  | (async pooled)   |                    | (async pooled)   |                     |
-|  +------------------+                    +------------------+                     |
+|  +----------------+    +----------------+    +--------------------+               |
+|  |  Audit Queue   |    |  Usage Queue   |    |  Bulk Job Queue    |               |
+|  | (concurrent:1) |    | (concurrent:1) |    | (concurrent:N)     |               |
+|  +-------+--------+    +-------+--------+    +---------+----------+               |
+|          |                     |                       |                          |
+|          v                     v                       v                          |
+|  +----------------+    +----------------+    +--------------------+               |
+|  |  PostgreSQL    |    |  PostgreSQL    |    |    PostgreSQL      |               |
+|  | (pool_size:2)  |    | (pool_size:2)  |    |   (pool_size:2)    |               |
+|  +----------------+    +----------------+    +--------------------+               |
 +-----------------------------------------------------------------------------------+
 ```
 
@@ -117,6 +118,22 @@ This document describes the async programming patterns and low-latency design ch
 | Agent    | 10 threads   | `AGENT_EXECUTOR_POOL_SIZE` | Heavy LLM operations |
 | I/O      | 20 threads   | `IO_EXECUTOR_POOL_SIZE` | GCS, filesystem |
 | Query    | 10 threads   | `QUERY_EXECUTOR_POOL_SIZE` | DuckDB, SQL |
+
+### Monitoring
+
+The ExecutorRegistry provides a `get_stats()` method for observability:
+
+```python
+from src.core.executors import get_executors
+
+stats = get_executors().get_stats()
+# Returns:
+# {
+#     "agent_pool": {"max_workers": 10, "thread_prefix": "agent-"},
+#     "io_pool": {"max_workers": 20, "thread_prefix": "io-"},
+#     "query_pool": {"max_workers": 10, "thread_prefix": "query-"}
+# }
+```
 
 ### Why Separate Pools?
 
@@ -281,10 +298,33 @@ async def session() -> AsyncGenerator[AsyncSession, None]:
 |-------|------|-----|------|------|
 | Session Response | LRU | Session lifetime | 10/session | `session_manager.py` |
 | Quota | TTL | 60s | Unlimited | `quota_checker.py` |
-| File/DataFrame | LRU | Unlimited | 50 files | `core.py` |
+| File/DataFrame | LRU | Unlimited | 50 files | `cache.py` |
 | GCS Content | Persistent | Unlimited | GCS storage | `gcs_cache.py` |
 | Tier Config | TTL | 1 hour | 10 tiers | `subscription_manager.py` |
 | Store Metadata | TTL | 5 minutes | Unlimited | `gemini_file_store.py` |
+
+### File Cache Statistics
+
+**File:** `src/agents/sheets/cache.py`
+
+The `FileCache` class tracks hit/miss statistics for observability:
+
+```python
+from src.agents.sheets.cache import FileCache
+
+cache = FileCache(max_size=50)
+
+# After some usage...
+stats = cache.get_stats()
+# Returns:
+# {
+#     "size": 35,              # Current cached files
+#     "max_size": 50,          # Maximum capacity
+#     "hits": 142,             # Cache hits
+#     "misses": 28,            # Cache misses
+#     "hit_rate_percent": 83.5 # Hit rate percentage
+# }
+```
 
 ---
 
@@ -294,34 +334,69 @@ async def session() -> AsyncGenerator[AsyncSession, None]:
 
 **File:** `src/db/connection.py`
 
+The DatabaseManager implements per-event-loop engine management to avoid "Future attached to different loop" errors when using background threads.
+
+**Key Features:**
+- Singleton pattern with per-loop resource tracking
+- Differentiated pool sizes for main vs background loops
+- Cloud SQL Connector with automatic fallback to direct connection
+- 30-second connection timeout with graceful fallback
+
 ```
 +------------------------------------------------------------------+
 |                    DatabaseManager                                |
 |                      (Singleton)                                  |
 +------------------------------------------------------------------+
 |                                                                  |
-|  Per-Event-Loop Engine Management:                               |
+|  Per-Event-Loop Resource Tracking:                               |
+|  _connectors: Dict[loop_id, Connector]      # Cloud SQL          |
 |  _engines: Dict[loop_id, AsyncEngine]                            |
 |  _session_factories: Dict[loop_id, async_sessionmaker]           |
+|  _main_loop_id: int                          # First loop seen   |
 |                                                                  |
-|  +------------------------+                                       |
-|  |   AsyncAdaptedQueuePool |                                      |
-|  |   - pool_size: 5        |                                      |
-|  |   - max_overflow: 10    |                                      |
-|  |   - pool_timeout: 30s   |                                      |
-|  |   - pool_recycle: 30min |                                      |
-|  +------------------------+                                       |
-|              |                                                    |
-|              v                                                    |
-|  +----------+----------+----------+----------+----------+         |
-|  | Conn 1   | Conn 2   | Conn 3   | Conn 4   | Conn 5   |         |
-|  | (idle)   | (in use) | (idle)   | (in use) | (idle)   |         |
-|  +----------+----------+----------+----------+----------+         |
-|                         +                                         |
-|              +----------+----------+                              |
-|              | Overflow connections (up to 10)                   |
-|              +----------+----------+                              |
 +------------------------------------------------------------------+
+
+Pool Size Differentiation:
++------------------------------------------------------------------+
+|                                                                  |
+|  MAIN LOOP (API requests):        BACKGROUND LOOPS (queues):     |
+|  +------------------------+       +------------------------+      |
+|  |   AsyncAdaptedQueuePool|       |   AsyncAdaptedQueuePool|      |
+|  |   - pool_size: 3       |       |   - pool_size: 2       |      |
+|  |   - max_overflow: 5    |       |   - max_overflow: 5    |      |
+|  |   - pool_timeout: 30s  |       |   - pool_timeout: 30s  |      |
+|  |   - pool_recycle: 30m  |       |   - pool_recycle: 30m  |      |
+|  +------------------------+       +------------------------+      |
+|              |                               |                    |
+|              v                               v                    |
+|  +-----+-----+-----+             +-----+-----+                    |
+|  |C1   |C2   |C3   |             |C1   |C2   |                    |
+|  +-----+-----+-----+             +-----+-----+                    |
+|              +                         +                          |
+|  +-----+-----+-----+-----+-----+  +-----+-----+-----+-----+-----+ |
+|  | Overflow (up to 5)        |  | Overflow (up to 5)        |   |
+|  +---------------------------+  +---------------------------+   |
+|                                                                  |
++------------------------------------------------------------------+
+```
+
+### Pool Statistics
+
+The DatabaseManager provides `get_pool_stats()` for monitoring:
+
+```python
+from src.db.connection import db
+
+stats = db.get_pool_stats()
+# Returns:
+# {
+#     "pools_count": 3,  # Number of event loops with engines
+#     "shutdown_mode": False,
+#     "pools": {
+#         "140234567890": {"size": 3, "checked_out": 1, "overflow": 0, "checked_in": 2},
+#         "140234567891": {"size": 2, "checked_out": 0, "overflow": 0, "checked_in": 2},
+#     }
+# }
 ```
 
 ### DuckDB Connection Pool
@@ -358,35 +433,86 @@ async def session() -> AsyncGenerator[AsyncSession, None]:
 
 ## 6. Background Queues
 
-### Architecture
+### Base Queue Architecture
+
+**File:** `src/core/queues/base_queue.py`
+
+All background queues extend the `BackgroundQueue[T]` abstract base class, which provides:
+- Thread-safe singleton pattern
+- Dedicated background thread with persistent event loop
+- Configurable concurrent event processing (via semaphore)
+- Database connection lifecycle management
+- Graceful shutdown with pending task completion
 
 ```
 +------------------------------------------------------------------+
 |                     MAIN EVENT LOOP                               |
 |                    (API Requests)                                 |
 +------------------------------------------------------------------+
-       |                                      |
-       | enqueue_audit_event()                | enqueue_usage_event()
-       | (non-blocking)                       | (non-blocking)
-       v                                      v
-+------------------+                  +------------------+
-| Queue.Queue      |                  | Queue.Queue      |
-| (max_size: 1000) |                  | (max_size: 1000) |
-+--------+---------+                  +--------+---------+
-         |                                     |
-         | (thread boundary)                   | (thread boundary)
-         v                                     v
-+------------------+                  +------------------+
-| Audit Thread     |                  | Usage Thread     |
-| - Own event loop |                  | - Own event loop |
-| - Own DB session |                  | - Own DB session |
-+--------+---------+                  +--------+---------+
-         |                                     |
-         v                                     v
-+------------------+                  +------------------+
-|   PostgreSQL     |                  |   PostgreSQL     |
-| (async session)  |                  | (async session)  |
-+------------------+                  +------------------+
+       |                        |                        |
+       | enqueue()              | enqueue()              | enqueue()
+       | (non-blocking)         | (non-blocking)         | (non-blocking)
+       v                        v                        v
++----------------+      +----------------+      +------------------+
+| Audit Queue    |      | Usage Queue    |      | Bulk Job Queue   |
+| (max: 1000)    |      | (max: 1000)    |      | (max: 1000)      |
++-------+--------+      +-------+--------+      +--------+---------+
+        |                       |                        |
+        | (thread boundary)     | (thread boundary)      | (thread boundary)
+        v                       v                        v
++----------------+      +----------------+      +------------------+
+| Audit Thread   |      | Usage Thread   |      | Bulk Thread      |
+| concurrent: 1  |      | concurrent: 1  |      | concurrent: N    |
+| - Own loop     |      | - Own loop     |      | - Own loop       |
+| - Own DB pool  |      | - Own DB pool  |      | - Own DB pool    |
++-------+--------+      +-------+--------+      +--------+---------+
+        |                       |                        |
+        v                       v                        v
++----------------+      +----------------+      +------------------+
+|  PostgreSQL    |      |  PostgreSQL    |      |   PostgreSQL     |
+| (pool_size: 2) |      | (pool_size: 2) |      |  (pool_size: 2)  |
++----------------+      +----------------+      +------------------+
+```
+
+### Queue Types
+
+| Queue | File | Max Concurrent | Events |
+|-------|------|----------------|--------|
+| Audit | `src/agents/core/audit_queue.py` | 1 (sequential) | generation_save |
+| Usage | `src/core/usage/usage_queue.py` | 1 (sequential) | token, resource |
+| Bulk Job | `src/bulk/queue.py` | Configurable | start, process_document, complete, cancel |
+
+### Concurrent Event Processing
+
+Queues support configurable parallelism via `_get_max_concurrent()`:
+
+```python
+class BulkJobQueue(BackgroundQueue[BulkJobEvent]):
+    def _get_max_concurrent(self) -> int:
+        """Return max concurrent document processing tasks."""
+        from .config import get_bulk_config
+        return get_bulk_config().concurrent_documents  # e.g., 5
+```
+
+```
+Semaphore-Controlled Processing:
+
+Event Queue                           Worker Thread
+    |                                      |
+[E1][E2][E3][E4][E5]...                   |
+    |                                      |
+    +------------------------------------->| semaphore = Semaphore(N)
+                                           |
+                          +----------------+----------------+
+                          |                |                |
+                          v                v                v
+                    [Task E1]        [Task E2]        [Task E3]
+                     (async)          (async)          (async)
+                          |                |                |
+                          +----------------+----------------+
+                                           |
+                                           v
+                               [All tasks complete]
 ```
 
 ### Event Flow
@@ -394,18 +520,41 @@ async def session() -> AsyncGenerator[AsyncSession, None]:
 ```
 API Request Thread                   Background Worker Thread
        |                                      |
-       | AuditEvent(                          |
-       |   type="query",                      |
-       |   details={...}                      |
+       | BulkJobEvent(                        |
+       |   action="process_document",         |
+       |   job_id="abc123",                   |
+       |   document_id="doc456"               |
        | )                                    |
        |                                      |
-       | queue.put(event)  ------------------>| queue.get(timeout=1.0)
+       | queue.enqueue(event)  -------------->| queue.get(timeout=0.5)
        |                                      |
-       | return response   (non-blocking)     | await save_to_db(event)
-       |                                      |
+       | return response   (non-blocking)     | async with semaphore:
+       |                                      |     await _process_event(event)
        v                                      v
   [Response sent]                      [Event persisted]
   (0ms overhead)                       (async in background)
+```
+
+### Database Connection Lifecycle
+
+Each queue manages its own database connection:
+
+```python
+async def _process_events(self) -> None:
+    # Initialize DB on loop startup (once)
+    await self._init_db_for_loop()
+
+    while not shutdown:
+        event = await get_event()
+        try:
+            await self._process_event(event)
+        except ConnectionError:
+            # Auto-reconnect on connection loss
+            await self._reinit_db_connection()
+            await self._process_event(event)  # Retry once
+
+    # Cleanup on shutdown
+    await self._cleanup_db()
 ```
 
 ### Graceful Shutdown
@@ -414,24 +563,29 @@ API Request Thread                   Background Worker Thread
 Shutdown Signal
        |
        v
-+------------------+
-| Send poison pill |---> queue.put(None)
-+------------------+
++---------------------+
+| Set shutdown_event  |---> threading.Event.set()
++---------------------+
        |
        v
-+------------------+
-| Wait for drain   |---> thread.join(timeout=30)
-+------------------+
++---------------------+
+| Send poison pill    |---> queue.put(None)
++---------------------+
        |
        v
-+------------------+
-| Close DB session |---> await session.close()
-+------------------+
++---------------------+
+| Wait pending tasks  |---> await asyncio.gather(*pending_tasks)
++---------------------+
        |
        v
-+------------------+
-| Stop event loop  |---> loop.stop()
-+------------------+
++---------------------+
+| Close DB connection |---> await _cleanup_db()
++---------------------+
+       |
+       v
++---------------------+
+| Join thread         |---> thread.join(timeout=5.0)
++---------------------+
 ```
 
 ---
@@ -497,7 +651,53 @@ def is_allowed(self, session_id: str) -> bool:
 
 ---
 
-## 8. Lifecycle Management
+## 8. Connection Pre-warming
+
+**File:** `src/api/app.py`
+
+Cloud SQL connector initialization takes ~1.2 seconds for the first connection. Pre-warming during startup eliminates this latency for the first real request.
+
+### Implementation
+
+```python
+async def _prewarm_executor_db_connections():
+    """Pre-warm database connections for executor thread pools."""
+    executors = get_executors()
+    loop = asyncio.get_running_loop()
+
+    def run_init():
+        """Sync wrapper for async init in executor thread."""
+        thread_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(thread_loop)
+        try:
+            thread_loop.run_until_complete(db.get_engine_async())
+        finally:
+            thread_loop.close()
+
+    # Warm up multiple executor threads (default: 3)
+    num_threads = min(3, executors.agent_executor._max_workers)
+    futures = [
+        loop.run_in_executor(executors.agent_executor, run_init)
+        for _ in range(num_threads)
+    ]
+
+    # Wait with 30-second timeout (non-blocking if startup is slow)
+    await asyncio.wait_for(
+        asyncio.gather(*futures, return_exceptions=True),
+        timeout=30.0
+    )
+```
+
+### Impact
+
+| Scenario | First Request Latency |
+|----------|----------------------|
+| Without pre-warming | +1.2s (Cloud SQL connector init) |
+| With pre-warming | ~0ms (already initialized) |
+
+---
+
+## 9. Lifecycle Management
 
 ### Startup Sequence
 
@@ -507,27 +707,53 @@ def is_allowed(self, session_id: str) -> bool:
 +------------------------------------------------------------------+
                               |
                               v
-+------------------+  +------------------+  +------------------+
-| 1. Init DB Pool  |->| 2. Start Queues  |->| 3. Init Agents   |
-| - Create engine  |  | - Audit thread   |  | - LLM clients    |
-| - Session factory|  | - Usage thread   |  | - Tools          |
-| - Test connection|  | - Start loops    |  | - Middleware     |
-+------------------+  +------------------+  +------------------+
++------------------------------------------------------------------+
+| 1. Initialize Database Connection Pool                            |
+|    - Create engine for main event loop                           |
+|    - Session factory initialization                               |
+|    - Cloud SQL Connector or direct connection                     |
++------------------------------------------------------------------+
+                              |
+                              v
++------------------------------------------------------------------+
+| 2. Start Background Queues                                        |
+|    - Audit queue (dedicated thread + event loop)                 |
+|    - Usage queue (dedicated thread + event loop)                 |
+|    - Bulk job queue (dedicated thread + event loop)              |
++------------------------------------------------------------------+
+                              |
+                              v
++------------------------------------------------------------------+
+| 3. Pre-warm Executor DB Connections                               |
+|    - Initialize DB in 3 agent executor threads                   |
+|    - Eliminates ~1.2s latency on first background task           |
+|    - 30s timeout (non-blocking if slow)                          |
++------------------------------------------------------------------+
+                              |
+                              v
++------------------------------------------------------------------+
+| 4. Initialize Agents                                              |
+|    - Document Agent (LLM clients, tools, middleware)             |
+|    - Sheets Agent (DuckDB pool, file cache)                      |
++------------------------------------------------------------------+
+                              |
+                              v
++------------------------------------------------------------------+
+| 5. Start Periodic Cleanup Task                                    |
+|    - asyncio.create_task(_periodic_cleanup())                    |
+|    - Runs every 5 minutes (CLEANUP_INTERVAL_SECONDS)             |
+|    - Cleans expired sessions and rate limiter entries            |
++------------------------------------------------------------------+
                               |
                               v
                +------------------+
-               | 4. Start Cleanup |
-               | - asyncio.task   |
-               | - 5 min interval |
-               +------------------+
-                              |
-                              v
-               +------------------+
-               | 5. Ready to Serve|
+               | 6. Ready to Serve|
                +------------------+
 ```
 
 ### Shutdown Sequence
+
+**Order matters:** Agents may enqueue final audit/usage logs, so queues must shut down after agents.
 
 ```
 +------------------------------------------------------------------+
@@ -535,24 +761,59 @@ def is_allowed(self, session_id: str) -> bool:
 +------------------------------------------------------------------+
                               |
                               v
-+------------------+  +------------------+  +------------------+
-| 1. Cancel Tasks  |->| 2. Shutdown     |->| 3. Drain Queues  |
-| - Cleanup task   |  |    Agents       |  | - Audit queue    |
-|                  |  | - Clear caches  |  | - Usage queue    |
-|                  |  | - Close DuckDB  |  | - Wait 30s max   |
-+------------------+  +------------------+  +------------------+
++------------------------------------------------------------------+
+| 0. Cancel Periodic Cleanup Task                                   |
+|    - _cleanup_task.cancel()                                       |
+|    - await _cleanup_task (catch CancelledError)                  |
++------------------------------------------------------------------+
                               |
                               v
-+------------------+  +------------------+
-| 4. Shutdown      |->| 5. Close DB     |
-|    Executors     |  | - All pools     |
-| - Wait for tasks |  | - All engines   |
-+------------------+  +------------------+
++------------------------------------------------------------------+
+| 1. Shutdown Agents                                                |
+|    - Document Agent (may enqueue final audit logs)               |
+|    - Sheets Agent (clear caches, close DuckDB)                   |
++------------------------------------------------------------------+
+                              |
+                              v
++------------------------------------------------------------------+
+| 2. Shutdown Executor Pools                                        |
+|    - shutdown_executors(wait=True)                               |
+|    - Wait for all pending futures to complete                    |
++------------------------------------------------------------------+
+                              |
+                              v
++------------------------------------------------------------------+
+| 3. Shutdown Usage Queue                                           |
+|    - shutdown(wait=True, timeout=10.0)                           |
+|    - Wait for pending token usage records                        |
++------------------------------------------------------------------+
+                              |
+                              v
++------------------------------------------------------------------+
+| 4. Shutdown Bulk Job Queue                                        |
+|    - stop_bulk_queue(wait=True)                                  |
+|    - Wait for pending bulk processing jobs                       |
++------------------------------------------------------------------+
+                              |
+                              v
++------------------------------------------------------------------+
+| 5. Shutdown Audit Queue                                           |
+|    - shutdown(wait=True, timeout=10.0)                           |
+|    - Wait for pending audit events                               |
++------------------------------------------------------------------+
+                              |
+                              v
++------------------------------------------------------------------+
+| 6. Close Database Connections                                     |
+|    - db.close_all()                                               |
+|    - Dispose all per-loop engines                                |
+|    - Close all Cloud SQL connectors                              |
++------------------------------------------------------------------+
 ```
 
 ---
 
-## 9. Performance Impact Summary
+## 10. Performance Impact Summary
 
 ### Latency Improvements
 
@@ -564,6 +825,7 @@ def is_allowed(self, session_id: str) -> bool:
 | No response cache | Full LLM call | ~0ms (cached) | 1000x+ faster |
 | Sequential DB lookups | N * 10ms | max(N * 10ms) | N times faster |
 | Sync audit logging | +50ms/request | +0ms/request | Eliminated |
+| Cold DB connections | +1.2s first call | ~0ms (pre-warmed) | Eliminated |
 
 ### Throughput Improvements
 
@@ -572,6 +834,7 @@ def is_allowed(self, session_id: str) -> bool:
 | Agent invocations | 1 concurrent | 10 concurrent | 10x |
 | GCS operations | 1 concurrent | 20 concurrent | 20x |
 | SQL queries | 1 concurrent | 10 concurrent | 10x |
+| Bulk document processing | 1 sequential | N concurrent | N times faster |
 | Overall requests | ~10 RPS | 100+ RPS | 10x+ |
 
 ### Resource Efficiency
@@ -593,9 +856,13 @@ def is_allowed(self, session_id: str) -> bool:
 | Async Utilities | `src/utils/async_utils.py` |
 | Database Connection | `src/db/connection.py` |
 | GCS Cache | `src/agents/document/gcs_cache.py` |
+| File Cache | `src/agents/sheets/cache.py` |
 | Session Manager | `src/agents/core/session_manager.py` |
 | Rate Limiter | `src/agents/core/rate_limiter.py` |
-| Background Queues | `src/core/queues/base_queue.py` |
+| Background Queue Base | `src/core/queues/base_queue.py` |
+| Audit Queue | `src/agents/core/audit_queue.py` |
+| Usage Queue | `src/core/usage/usage_queue.py` |
+| Bulk Job Queue | `src/bulk/queue.py` |
 | GCS Storage | `src/storage/gcs.py` |
 | App Lifecycle | `src/api/app.py` |
 | Quota Cache | `src/core/usage/quota_checker.py` |
@@ -610,28 +877,32 @@ def is_allowed(self, session_id: str) -> bool:
 
 ```bash
 # Executor Pool Sizes
-AGENT_EXECUTOR_POOL_SIZE=10
-IO_EXECUTOR_POOL_SIZE=20
-QUERY_EXECUTOR_POOL_SIZE=10
+AGENT_EXECUTOR_POOL_SIZE=10       # LLM agent invocations
+IO_EXECUTOR_POOL_SIZE=20          # GCS/file I/O operations
+QUERY_EXECUTOR_POOL_SIZE=10       # DuckDB/SQL queries
 
-# Database Pool
-DB_POOL_SIZE=5
-DB_MAX_OVERFLOW=10
-DB_POOL_TIMEOUT=30
-DB_POOL_RECYCLE=1800
+# Database Pool (per-loop differentiation)
+DB_POOL_SIZE=3                    # Main loop pool size
+DB_BACKGROUND_POOL_SIZE=2         # Background loop pool size
+DB_MAX_OVERFLOW=5                 # Overflow connections
+DB_POOL_TIMEOUT=30                # Connection acquire timeout (seconds)
+DB_POOL_RECYCLE=1800              # Connection recycle time (30 minutes)
 
 # Rate Limiting
-RATE_LIMIT_REQUESTS=10
-RATE_LIMIT_WINDOW_SECONDS=60
+RATE_LIMIT_REQUESTS=10            # Max requests per window
+RATE_LIMIT_WINDOW=60              # Window size (seconds)
 
 # Session
-SESSION_TIMEOUT_MINUTES=30
+SESSION_TIMEOUT_MINUTES=30        # Session inactivity timeout
 
 # Cleanup
-CLEANUP_INTERVAL_SECONDS=300
+CLEANUP_INTERVAL_SECONDS=300      # Periodic cleanup interval (5 minutes)
 
 # Cache TTLs
-QUOTA_CACHE_TTL_SECONDS=60
-TIER_CACHE_TTL_SECONDS=3600
-STORE_CACHE_TTL_SECONDS=300
+QUOTA_CACHE_TTL_SECONDS=60        # Quota check cache TTL
+TIER_CACHE_TTL_SECONDS=3600       # Subscription tier cache TTL (1 hour)
+STORE_CACHE_TTL_SECONDS=300       # File store metadata cache TTL (5 minutes)
+
+# Bulk Processing
+BULK_CONCURRENT_DOCUMENTS=5       # Max concurrent documents in bulk queue
 ```

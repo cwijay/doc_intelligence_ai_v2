@@ -136,6 +136,53 @@ All endpoints return a consistent response format:
 _cleanup_task: asyncio.Task = None
 
 
+async def _prewarm_executor_db_connections():
+    """Pre-warm database connections for executor thread pools.
+
+    Each executor thread creates its own Cloud SQL engine on first use,
+    which takes ~1.2s. Pre-warming during startup eliminates this latency
+    for the first real requests.
+    """
+    from src.core.executors import get_executors
+
+    executors = get_executors()
+    loop = asyncio.get_running_loop()
+
+    async def init_db_in_thread():
+        """Initialize DB connection in executor thread."""
+        from src.db.connection import db
+        await db.get_engine_async()
+
+    def run_init():
+        """Sync wrapper for async init."""
+        thread_loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(thread_loop)
+        try:
+            thread_loop.run_until_complete(init_db_in_thread())
+        finally:
+            thread_loop.close()
+
+    # Pre-warm connections in agent executor threads
+    # Run multiple inits to warm up different threads in the pool
+    num_threads_to_warm = min(3, executors.agent_executor._max_workers)
+    futures = []
+
+    for _ in range(num_threads_to_warm):
+        futures.append(
+            loop.run_in_executor(executors.agent_executor, run_init)
+        )
+
+    # Wait for all pre-warming to complete (with timeout)
+    try:
+        await asyncio.wait_for(
+            asyncio.gather(*futures, return_exceptions=True),
+            timeout=30.0
+        )
+        logger.info(f"Pre-warmed {num_threads_to_warm} DB connections in executor pool")
+    except asyncio.TimeoutError:
+        logger.warning("DB connection pre-warming timed out")
+
+
 async def _periodic_cleanup():
     """Background task to clean up expired sessions and rate limiter entries."""
     from .dependencies import get_document_agent, get_sheets_agent
@@ -211,6 +258,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.info("Bulk job queue started")
     except Exception as e:
         logger.warning(f"Bulk queue initialization failed: {e}")
+
+    # Pre-warm database connections for executor threads
+    try:
+        await _prewarm_executor_db_connections()
+    except Exception as e:
+        logger.warning(f"DB connection pre-warming failed (non-critical): {e}")
 
     # Initialize agents at startup (fail-fast if any agent fails)
     from .dependencies import initialize_agents

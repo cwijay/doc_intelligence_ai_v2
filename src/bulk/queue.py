@@ -24,10 +24,20 @@ class BulkJobQueue(BackgroundQueue[BulkJobEvent]):
     - process_document: Process a single document
     - complete: Finalize a completed job
     - cancel: Cancel a running job
+
+    Supports concurrent document processing controlled by BULK_CONCURRENT_DOCUMENTS.
     """
 
     def _get_queue_name(self) -> str:
         return "bulk-job-queue"
+
+    def _get_max_concurrent(self) -> int:
+        """Return max concurrent document processing tasks.
+
+        Uses the bulk config's concurrent_documents setting.
+        """
+        from .config import get_bulk_config
+        return get_bulk_config().concurrent_documents
 
     async def _process_event(self, event: BulkJobEvent) -> None:
         """Process a bulk job event."""

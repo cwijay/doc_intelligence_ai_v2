@@ -85,6 +85,19 @@ async def parse_and_save(
                     existing_content = await storage.read(cached_path)
                     if existing_content:
                         logger.info(f"Cache hit for parsed document: {cached_path}")
+
+                        # Register document in database (ensure visibility in frontend)
+                        try:
+                            await register_or_update_parsed_document(
+                                storage_path=file_path,
+                                filename=Path(file_path).name,
+                                organization_id=org_id,
+                                parsed_path=cached_path,
+                                folder_id=folder_name,
+                            )
+                        except Exception as db_err:
+                            logger.warning(f"Failed to register cached document in database: {db_err}")
+
                         return ParseResult(
                             success=True,
                             parsed_content=existing_content,

@@ -10,8 +10,9 @@ Orchestrates bulk document processing jobs:
 
 import asyncio
 import logging
+import threading
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 from src.core.patterns import ThreadSafeSingleton
 from src.core.executors import get_executors
@@ -34,6 +35,51 @@ from .state_graph import (
 )
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# JOB STATUS CACHE
+# =============================================================================
+
+# Cache for job status to reduce DB polling load
+# Format: {job_id: (BulkJobInfo, timestamp)}
+_job_status_cache: Dict[str, Tuple[BulkJobInfo, datetime]] = {}
+_job_cache_lock = threading.Lock()
+
+# Cache TTL in seconds (short TTL since job status changes frequently during processing)
+JOB_STATUS_CACHE_TTL_SECONDS = 3
+
+
+def _get_cached_job_status(job_id: str) -> Optional[BulkJobInfo]:
+    """Get job status from cache if not expired."""
+    with _job_cache_lock:
+        if job_id not in _job_status_cache:
+            return None
+        cached_info, cached_at = _job_status_cache[job_id]
+        age_seconds = (datetime.utcnow() - cached_at).total_seconds()
+        if age_seconds > JOB_STATUS_CACHE_TTL_SECONDS:
+            del _job_status_cache[job_id]
+            return None
+        return cached_info
+
+
+def _set_cached_job_status(job_id: str, job_info: BulkJobInfo) -> None:
+    """Set job status in cache."""
+    with _job_cache_lock:
+        _job_status_cache[job_id] = (job_info, datetime.utcnow())
+
+
+def _invalidate_job_cache(job_id: str) -> None:
+    """Invalidate cache for a specific job."""
+    with _job_cache_lock:
+        if job_id in _job_status_cache:
+            del _job_status_cache[job_id]
+
+
+def _clear_job_cache() -> None:
+    """Clear all cached job statuses."""
+    with _job_cache_lock:
+        _job_status_cache.clear()
 
 
 class BulkJobService(ThreadSafeSingleton):
@@ -146,6 +192,7 @@ class BulkJobService(ThreadSafeSingleton):
             status=BulkJobStatus.PROCESSING.value,
             started_at=datetime.utcnow(),
         )
+        _invalidate_job_cache(job_id)
 
         # Get pending documents and queue them
         pending_docs = await bulk_repository.get_pending_documents(
@@ -328,6 +375,7 @@ class BulkJobService(ThreadSafeSingleton):
             status=final_status,
             completed_at=datetime.utcnow(),
         )
+        _invalidate_job_cache(job_id)
 
         logger.info(
             f"Finalized job {job_id}: status={final_status}, "
@@ -359,6 +407,7 @@ class BulkJobService(ThreadSafeSingleton):
             status=BulkJobStatus.CANCELLED.value,
             completed_at=datetime.utcnow(),
         )
+        _invalidate_job_cache(job_id)
 
         # 2. Cancel ALL documents atomically in a single SQL UPDATE
         cancelled_count = await bulk_repository.cancel_all_documents(job_id)
@@ -407,6 +456,7 @@ class BulkJobService(ThreadSafeSingleton):
                     job_id,
                     status=BulkJobStatus.PROCESSING.value,
                 )
+                _invalidate_job_cache(job_id)
 
             # Queue documents for processing
             pending_docs = await bulk_repository.get_pending_documents(
@@ -435,6 +485,9 @@ class BulkJobService(ThreadSafeSingleton):
         """
         Get detailed status of a bulk job.
 
+        Uses in-memory cache with short TTL to reduce database polling load.
+        Cache is invalidated when job status changes.
+
         Args:
             job_id: Job ID
             include_documents: Include document-level details
@@ -442,6 +495,14 @@ class BulkJobService(ThreadSafeSingleton):
         Returns:
             Job info with optional document details
         """
+        # Check cache first (only for requests without documents)
+        # Document-level details change frequently so we don't cache those
+        if not include_documents:
+            cached = _get_cached_job_status(job_id)
+            if cached is not None:
+                return cached
+
+        # Fetch from database
         job_dict = await bulk_repository.get_bulk_job(job_id)
         if not job_dict:
             return None
@@ -453,6 +514,9 @@ class BulkJobService(ThreadSafeSingleton):
             job_info.documents = [
                 DocumentItemInfo.from_dict(d) for d in doc_dicts
             ]
+        else:
+            # Cache the job info (without documents)
+            _set_cached_job_status(job_id, job_info)
 
         return job_info
 
