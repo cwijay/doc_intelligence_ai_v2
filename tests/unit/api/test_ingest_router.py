@@ -142,10 +142,7 @@ class TestParseDocumentEndpoint:
         test_file = tmp_path / "test.pdf"
         test_file.write_bytes(b"%PDF-1.4 test content")
 
-        with patch("src.api.routers.ingest.llama_parse") as mock_parse, \
-             patch("src.api.routers.ingest.check_quota", False), \
-             patch("src.api.routers.ingest.track_resource", False):
-
+        with patch("src.api.routers.ingest.llama_parse") as mock_parse:
             mock_parse.return_value = "# Parsed Content\n\nThis is the parsed text."
 
             response = client.post(
@@ -165,20 +162,19 @@ class TestParseDocumentEndpoint:
 
     def test_parse_document_file_not_found(self, client, headers):
         """Test parsing non-existent file returns error."""
-        with patch("src.api.routers.ingest.check_quota", False):
-            response = client.post(
-                "/api/v1/ingest/parse",
-                headers=headers,
-                json={
-                    "file_path": "/nonexistent/file.pdf",
-                    "folder_name": "test_folder",
-                }
-            )
+        response = client.post(
+            "/api/v1/ingest/parse",
+            headers=headers,
+            json={
+                "file_path": "/nonexistent/file.pdf",
+                "folder_name": "test_folder",
+            }
+        )
 
-            assert response.status_code == 200
-            data = response.json()
-            assert data["success"] is False
-            assert "not found" in data["error"].lower()
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is False
+        assert "not found" in data["error"].lower()
 
     def test_parse_document_gcs_file_success(self, client, headers):
         """Test successful parsing of GCS file."""
@@ -188,8 +184,6 @@ class TestParseDocumentEndpoint:
 
         with patch("src.api.routers.ingest.get_storage", return_value=mock_storage), \
              patch("src.api.routers.ingest.llama_parse") as mock_parse, \
-             patch("src.api.routers.ingest.check_quota", False), \
-             patch("src.api.routers.ingest.track_resource", False), \
              patch("os.unlink"):  # Don't actually delete temp files
 
             mock_parse.return_value = "# GCS Parsed Content"
@@ -213,8 +207,7 @@ class TestParseDocumentEndpoint:
         mock_storage = MagicMock()
         mock_storage.exists = AsyncMock(return_value=False)
 
-        with patch("src.api.routers.ingest.get_storage", return_value=mock_storage), \
-             patch("src.api.routers.ingest.check_quota", False):
+        with patch("src.api.routers.ingest.get_storage", return_value=mock_storage):
 
             response = client.post(
                 "/api/v1/ingest/parse",
@@ -240,8 +233,6 @@ class TestParseDocumentEndpoint:
 
         with patch("src.api.routers.ingest.llama_parse") as mock_parse, \
              patch("src.api.routers.ingest.get_storage", return_value=mock_storage), \
-             patch("src.api.routers.ingest.check_quota", False), \
-             patch("src.api.routers.ingest.track_resource", False), \
              patch("src.api.routers.ingest.register_or_update_parsed_document", new_callable=AsyncMock):
 
             mock_parse.return_value = "# Parsed Content"
@@ -267,8 +258,7 @@ class TestParseDocumentEndpoint:
         mock_storage.exists = AsyncMock(return_value=True)
         mock_storage.read = AsyncMock(return_value="# Cached Content\n\nFrom cache.")
 
-        with patch("src.api.routers.ingest.get_storage", return_value=mock_storage), \
-             patch("src.api.routers.ingest.check_quota", False):
+        with patch("src.api.routers.ingest.get_storage", return_value=mock_storage):
 
             response = client.post(
                 "/api/v1/ingest/parse",
@@ -290,9 +280,7 @@ class TestParseDocumentEndpoint:
         test_file = tmp_path / "empty.pdf"
         test_file.write_bytes(b"%PDF-1.4 empty")
 
-        with patch("src.api.routers.ingest.llama_parse") as mock_parse, \
-             patch("src.api.routers.ingest.check_quota", False), \
-             patch("src.api.routers.ingest.track_resource", False):
+        with patch("src.api.routers.ingest.llama_parse") as mock_parse:
 
             mock_parse.return_value = ""  # Empty content
 
@@ -315,20 +303,25 @@ class TestParseDocumentEndpoint:
         test_file = tmp_path / "test.pdf"
         test_file.write_bytes(b"%PDF-1.4 test")
 
-        mock_quota_result = MagicMock()
-        mock_quota_result.allowed = False
-        mock_quota_result.current_usage = 100
-        mock_quota_result.limit = 50
-        mock_quota_result.upgrade_tier = "pro"
-        mock_quota_result.upgrade_message = "Upgrade to Pro"
-        mock_quota_result.upgrade_url = "/billing/upgrade"
+        # Create a proper QuotaStatus-like object with all required fields
+        from src.core.usage.schemas import QuotaStatus
+        mock_quota_result = QuotaStatus(
+            allowed=False,
+            usage_type="llamaparse_pages",
+            current_usage=100,
+            limit=50,
+            remaining=0,
+            percentage_used=200.0,
+            upgrade_tier="pro",
+            upgrade_message="Upgrade to Pro for higher limits",
+            upgrade_url="/billing/upgrade",
+        )
 
         mock_checker = MagicMock()
         mock_checker.check_quota = AsyncMock(return_value=mock_quota_result)
 
-        # Patch at the module where it's imported inside the function
-        with patch("src.api.routers.ingest.check_quota", True), \
-             patch("src.core.usage.get_quota_checker", return_value=mock_checker):
+        # Override the autouse fixture with quota exceeded
+        with patch("src.core.usage.decorators.get_quota_checker", return_value=mock_checker):
 
             response = client.post(
                 "/api/v1/ingest/parse",
@@ -341,20 +334,19 @@ class TestParseDocumentEndpoint:
 
             assert response.status_code == 402
             data = response.json()
-            # HTTPException detail may be wrapped in error field or returned directly
-            error = data.get("error", {})
-            if isinstance(error, dict):
-                assert error.get("error") == "quota_exceeded"
+            # Response structure: {"success": False, "error": {...quota_details...}}
+            error_data = data.get("error", data.get("detail", {}))
+            if isinstance(error_data, dict):
+                assert error_data.get("error") == "quota_exceeded"
             else:
-                assert data.get("detail", {}).get("error") == "quota_exceeded"
+                assert "quota" in str(error_data).lower()
 
     def test_parse_document_llamaparse_not_available(self, client, headers, tmp_path):
         """Test handling when LlamaParse module not available."""
         test_file = tmp_path / "test.pdf"
         test_file.write_bytes(b"%PDF-1.4 test")
 
-        with patch("src.api.routers.ingest.llama_parse", side_effect=ImportError("LlamaParse not installed")), \
-             patch("src.api.routers.ingest.check_quota", False):
+        with patch("src.api.routers.ingest.llama_parse", side_effect=ImportError("LlamaParse not installed")):
 
             response = client.post(
                 "/api/v1/ingest/parse",

@@ -149,31 +149,52 @@ async def log_event(
 
 @with_db_retry
 async def get_audit_trail(
-    file_name: str,
+    file_name: Optional[str] = None,
     organization_id: Optional[str] = None,
+    event_type: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+    limit: int = 100,
+    offset: int = 0,
 ) -> List[Dict[str, Any]]:
     """
-    Get complete audit trail for a document by name.
+    Get audit trail with flexible filtering and pagination.
 
     Multi-tenancy: Filtered by organization_id when provided.
 
     Args:
-        file_name: Name of the document file
+        file_name: Optional filter by document file name
         organization_id: Organization ID for tenant isolation
+        event_type: Optional filter by event type
+        start_date: Optional filter for events after this date
+        end_date: Optional filter for events before this date
+        limit: Maximum number of results
+        offset: Number of results to skip for pagination
 
     Returns:
         List of audit events ordered by timestamp (newest first)
     """
     async with db.session() as session:
-        where_clauses = [AuditLog.file_name == file_name]
+        where_clauses = []
+        if file_name:
+            where_clauses.append(AuditLog.file_name == file_name)
         if organization_id:
             where_clauses.append(AuditLog.organization_id == organization_id)
+        if event_type:
+            where_clauses.append(AuditLog.event_type == event_type)
+        if start_date:
+            where_clauses.append(AuditLog.created_at >= start_date)
+        if end_date:
+            where_clauses.append(AuditLog.created_at <= end_date)
 
-        stmt = (
-            select(AuditLog)
-            .where(and_(*where_clauses))
-            .order_by(desc(AuditLog.created_at))
-        )
+        # Always filter out NULL event_type records (incomplete/legacy data)
+        where_clauses.append(AuditLog.event_type.isnot(None))
+
+        stmt = select(AuditLog)
+        if where_clauses:
+            stmt = stmt.where(and_(*where_clauses))
+        stmt = stmt.order_by(desc(AuditLog.created_at)).offset(offset).limit(limit)
+
         result = await session.execute(stmt)
         events = result.scalars().all()
 

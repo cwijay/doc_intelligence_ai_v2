@@ -257,7 +257,7 @@ def log_token_usage_async(
         org_id: Organization ID
         user_id: User ID (optional)
         feature: Feature name (e.g., "document_agent", "sheets_agent")
-        model: Model name (e.g., "gemini-2.5-flash", "gpt-4o-mini")
+        model: Model name (e.g., "gemini-2.5-flash", "gpt-5-mini")
         provider: Provider name (e.g., "google", "openai", "anthropic")
         input_tokens: Number of input tokens
         output_tokens: Number of output tokens

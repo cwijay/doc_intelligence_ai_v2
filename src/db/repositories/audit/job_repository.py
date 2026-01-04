@@ -160,25 +160,43 @@ async def fail_job(job_id: str, error: str):
 @with_db_retry
 async def get_processing_history(
     limit: int = 100,
+    offset: int = 0,
     organization_id: Optional[str] = None,
+    status: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Get recent processing jobs.
+    Get recent processing jobs with filtering and pagination.
 
     Multi-tenancy: Filtered by organization_id when provided.
 
     Args:
         limit: Maximum number of jobs to return
+        offset: Number of jobs to skip for pagination
         organization_id: Organization ID for tenant isolation
+        status: Optional status filter (pending, processing, completed, failed)
+        start_date: Optional filter for jobs started after this date
+        end_date: Optional filter for jobs started before this date
 
     Returns:
         List of job dictionaries with id and all fields
     """
     async with db.session() as session:
-        stmt = select(ProcessingJob)
+        where_clauses = []
         if organization_id:
-            stmt = stmt.where(ProcessingJob.organization_id == organization_id)
-        stmt = stmt.order_by(desc(ProcessingJob.started_at)).limit(limit)
+            where_clauses.append(ProcessingJob.organization_id == organization_id)
+        if status:
+            where_clauses.append(ProcessingJob.status == status)
+        if start_date:
+            where_clauses.append(ProcessingJob.started_at >= start_date)
+        if end_date:
+            where_clauses.append(ProcessingJob.started_at <= end_date)
+
+        stmt = select(ProcessingJob)
+        if where_clauses:
+            stmt = stmt.where(and_(*where_clauses))
+        stmt = stmt.order_by(desc(ProcessingJob.started_at)).offset(offset).limit(limit)
 
         result = await session.execute(stmt)
         jobs = result.scalars().all()

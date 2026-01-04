@@ -1,5 +1,6 @@
 """Tests for usage context module."""
 
+import asyncio
 import threading
 import pytest
 from concurrent.futures import ThreadPoolExecutor
@@ -184,3 +185,129 @@ class TestSetAndClearContext:
         """Test that get_current_context returns None when not set."""
         clear_context()  # Ensure clean state
         assert get_current_context() is None
+
+
+class TestAsyncioToThreadContext:
+    """Tests for context propagation with asyncio.to_thread.
+
+    These tests verify that contextvars properly propagates context
+    when using asyncio.to_thread(), which is the recommended pattern
+    for running blocking code in async context (Python 3.9+).
+    """
+
+    @pytest.mark.asyncio
+    async def test_context_propagates_to_thread(self):
+        """Test that context is available in asyncio.to_thread calls.
+
+        asyncio.to_thread() automatically inherits context from the
+        current task, which enables token tracking in executor threads.
+        """
+        def read_context_in_thread():
+            ctx = get_current_context()
+            return ctx.org_id if ctx else None
+
+        with usage_context(org_id="thread-org", feature="test"):
+            result = await asyncio.to_thread(read_context_in_thread)
+
+        # Context should propagate to thread via asyncio.to_thread
+        assert result == "thread-org"
+
+    @pytest.mark.asyncio
+    async def test_context_cleared_after_to_thread_with_context_exit(self):
+        """Test that context is properly cleared when exiting the context manager."""
+        def get_ctx():
+            return get_current_context()
+
+        with usage_context(org_id="temp-org", feature="test"):
+            ctx_in_thread = await asyncio.to_thread(get_ctx)
+            assert ctx_in_thread is not None
+            assert ctx_in_thread.org_id == "temp-org"
+
+        # After context exit, main thread should have no context
+        assert get_current_context() is None
+
+    @pytest.mark.asyncio
+    async def test_nested_contexts_in_to_thread(self):
+        """Test that nested usage contexts work correctly with asyncio.to_thread."""
+        def read_context():
+            ctx = get_current_context()
+            return ctx.org_id if ctx else None
+
+        captured_values = []
+
+        with usage_context(org_id="outer-org", feature="outer"):
+            val1 = await asyncio.to_thread(read_context)
+            captured_values.append(val1)
+
+            with usage_context(org_id="inner-org", feature="inner"):
+                val2 = await asyncio.to_thread(read_context)
+                captured_values.append(val2)
+
+            # After inner context exit, outer should be restored
+            val3 = await asyncio.to_thread(read_context)
+            captured_values.append(val3)
+
+        assert captured_values == ["outer-org", "inner-org", "outer-org"]
+
+
+class TestRunInExecutorWithContext:
+    """Tests for run_in_executor_with_context helper.
+
+    This helper is used by DocumentAgent to run LLM calls in thread pools
+    while preserving the usage context for token tracking.
+    """
+
+    @pytest.mark.asyncio
+    async def test_context_propagates_with_custom_executor(self):
+        """Test that context propagates when using custom executor."""
+        from src.utils.async_utils import run_in_executor_with_context
+
+        executor = ThreadPoolExecutor(max_workers=1)
+
+        def read_context():
+            ctx = get_current_context()
+            return ctx.org_id if ctx else None
+
+        with usage_context(org_id="custom-executor-org", feature="test"):
+            result = await run_in_executor_with_context(
+                executor,
+                read_context
+            )
+
+        executor.shutdown(wait=True)
+        assert result == "custom-executor-org"
+
+    @pytest.mark.asyncio
+    async def test_context_propagates_with_default_executor(self):
+        """Test that context propagates when using default executor (None)."""
+        from src.utils.async_utils import run_in_executor_with_context
+
+        def read_context():
+            ctx = get_current_context()
+            return ctx.org_id if ctx else None
+
+        with usage_context(org_id="default-executor-org", feature="test"):
+            result = await run_in_executor_with_context(None, read_context)
+
+        assert result == "default-executor-org"
+
+    @pytest.mark.asyncio
+    async def test_function_with_args_and_kwargs(self):
+        """Test that function arguments are passed correctly."""
+        from src.utils.async_utils import run_in_executor_with_context
+
+        def func_with_args(a, b, c=None):
+            ctx = get_current_context()
+            org = ctx.org_id if ctx else None
+            return f"{org}:{a}:{b}:{c}"
+
+        with usage_context(org_id="args-test", feature="test"):
+            result = await run_in_executor_with_context(
+                None,
+                func_with_args,
+                "arg1",
+                "arg2",
+                c="kwarg"
+            )
+
+        assert result == "args-test:arg1:arg2:kwarg"

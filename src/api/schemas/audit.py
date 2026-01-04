@@ -42,11 +42,11 @@ class ProcessingJob(BaseModel):
 class DocumentRecord(BaseModel):
     """A document record."""
     organization_id: Optional[str] = Field(default=None, description="Organization ID for multi-tenancy")
-    file_hash: str = Field(..., example="sha256_abc123def456")
-    storage_path: str = Field(..., example="parsed/Sample1.md")
-    filename: str = Field(..., example="Sample1.md")
-    file_size: int = Field(..., example=15234)
-    created_at: datetime
+    file_hash: Optional[str] = Field(default="", example="sha256_abc123def456")
+    storage_path: Optional[str] = Field(default="", example="parsed/Sample1.md")
+    filename: Optional[str] = Field(default="", example="Sample1.md")
+    file_size: Optional[int] = Field(default=0, example=15234)
+    created_at: Optional[datetime] = None
 
 
 class DocumentGeneration(BaseModel):
@@ -70,8 +70,8 @@ class AuditEvent(BaseModel):
     """An audit trail event."""
     id: str = Field(..., example="evt_abc123")
     organization_id: Optional[str] = Field(default=None, description="Organization ID for multi-tenancy")
-    created_at: datetime = Field(..., description="When the event was created")
-    event_type: str = Field(..., example="generation_completed")
+    created_at: Optional[datetime] = Field(default=None, description="When the event was created")
+    event_type: Optional[str] = Field(default="unknown", example="generation_completed")
     document_hash: Optional[str] = Field(default=None, example="sha256_abc123def456")
     file_name: Optional[str] = Field(default=None, example="Sample1.md")
     job_id: Optional[str] = Field(default=None, example="job_abc123")
@@ -166,4 +166,37 @@ class DashboardResponse(BaseModel):
     stats: Optional[DashboardStats] = None
     recent_jobs: List[ProcessingJob] = Field(default_factory=list)
     recent_generations: List[DocumentGeneration] = Field(default_factory=list)
+    error: Optional[str] = None
+
+
+# =============================================================================
+# Activity Timeline
+# =============================================================================
+
+
+class ActivityTimelineItem(BaseModel):
+    """A single activity item for the timeline."""
+    id: str = Field(..., example="evt_abc123")
+    timestamp: Optional[datetime] = Field(default=None, description="When the activity occurred")
+    timestamp_ago: Optional[str] = Field(default="unknown", description="Relative time", example="5 minutes ago")
+    event_type: Optional[str] = Field(default="unknown", description="Type of activity", example="generation_completed")
+    title: Optional[str] = Field(default="Activity", description="Display title", example="Summary Generated")
+    description: Optional[str] = Field(default=None, example="Generated summary for Sample1.md")
+    file_name: Optional[str] = Field(default=None, example="Sample1.md")
+    document_hash: Optional[str] = Field(default=None, example="sha256_abc123")
+    status: Optional[str] = Field(default=None, example="completed")
+    status_color: Optional[str] = Field(default=None, description="Suggested UI color", example="green")
+    icon: Optional[str] = Field(default=None, description="Suggested icon name", example="file-text")
+
+
+class ActivityTimelineResponse(BaseModel):
+    """Response for activity timeline endpoint."""
+    success: bool = Field(..., example=True)
+    activities: List[ActivityTimelineItem] = Field(default_factory=list)
+    total: int = Field(default=0, example=150)
+    limit: int = Field(..., example=50)
+    offset: int = Field(..., example=0)
+    has_more: bool = Field(default=False, description="Whether more results are available")
+    start_date: Optional[datetime] = Field(default=None, description="Filter start date used")
+    end_date: Optional[datetime] = Field(default=None, description="Filter end date used")
     error: Optional[str] = None

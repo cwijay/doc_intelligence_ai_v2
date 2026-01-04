@@ -190,14 +190,70 @@ def extract_from_langchain_response(response: Any) -> TokenUsage:
         TokenUsage
     """
     try:
+        # DEBUG logging for token extraction diagnostics
+        logger.debug(f"[TokenExtractor] Response type: {type(response).__name__}")
+
         # Get llm_output
         llm_output = getattr(response, 'llm_output', None)
+        logger.debug(f"[TokenExtractor] llm_output: {llm_output}")
+
         if not llm_output:
+            # Check if there's generation info in the response
+            generations = getattr(response, 'generations', None)
+            if generations:
+                logger.debug(f"[TokenExtractor] Found {len(generations)} generation lists")
+                for i, gen_list in enumerate(generations):
+                    for j, gen in enumerate(gen_list):
+                        gen_info = getattr(gen, 'generation_info', None)
+                        logger.debug(f"[TokenExtractor] generations[{i}][{j}].generation_info: {gen_info}")
+                        # Check for message with response_metadata
+                        message = getattr(gen, 'message', None)
+                        if message:
+                            resp_meta = getattr(message, 'response_metadata', None)
+                            usage_meta = getattr(message, 'usage_metadata', None)
+                            logger.debug(f"[TokenExtractor] message.response_metadata: {resp_meta}")
+                            logger.debug(f"[TokenExtractor] message.usage_metadata: {usage_meta}")
+                            # Try to extract from response_metadata
+                            if resp_meta and 'token_usage' in resp_meta:
+                                token_usage = resp_meta['token_usage']
+                                return TokenUsage(
+                                    input_tokens=token_usage.get('prompt_tokens', 0),
+                                    output_tokens=token_usage.get('completion_tokens', 0),
+                                    total_tokens=token_usage.get('total_tokens', 0),
+                                    cached_tokens=token_usage.get('cached_tokens', 0),
+                                    provider=resp_meta.get('model_provider', 'openai'),
+                                    model=resp_meta.get('model_name'),
+                                )
+                            # Try to extract from usage_metadata
+                            if usage_meta:
+                                input_tokens = getattr(usage_meta, 'input_tokens', 0) or usage_meta.get('input_tokens', 0) if isinstance(usage_meta, dict) else 0
+                                output_tokens = getattr(usage_meta, 'output_tokens', 0) or usage_meta.get('output_tokens', 0) if isinstance(usage_meta, dict) else 0
+                                total_tokens = getattr(usage_meta, 'total_tokens', 0) or usage_meta.get('total_tokens', 0) if isinstance(usage_meta, dict) else 0
+                                if hasattr(usage_meta, 'input_tokens'):
+                                    input_tokens = usage_meta.input_tokens
+                                    output_tokens = usage_meta.output_tokens
+                                    total_tokens = usage_meta.total_tokens
+                                if total_tokens > 0:
+                                    # Extract model from response_metadata
+                                    model_name = None
+                                    provider = "openai"
+                                    if resp_meta:
+                                        model_name = resp_meta.get('model') or resp_meta.get('model_name')
+                                        provider = resp_meta.get('model_provider', 'openai')
+                                    return TokenUsage(
+                                        input_tokens=input_tokens,
+                                        output_tokens=output_tokens,
+                                        total_tokens=total_tokens,
+                                        provider=provider,
+                                        model=model_name,
+                                    )
+            logger.debug("[TokenExtractor] No llm_output found, returning empty TokenUsage")
             return TokenUsage()
 
         # Check for token_usage in llm_output
         token_usage = llm_output.get('token_usage')
         if token_usage:
+            logger.debug(f"[TokenExtractor] Found token_usage: {token_usage}")
             return TokenUsage(
                 input_tokens=token_usage.get('prompt_tokens', 0),
                 output_tokens=token_usage.get('completion_tokens', 0),
@@ -210,6 +266,7 @@ def extract_from_langchain_response(response: Any) -> TokenUsage:
         # Check for usage_metadata (Gemini via LangChain)
         usage_metadata = llm_output.get('usage_metadata')
         if usage_metadata:
+            logger.debug(f"[TokenExtractor] Found usage_metadata: {usage_metadata}")
             return TokenUsage(
                 input_tokens=usage_metadata.get('prompt_token_count', 0),
                 output_tokens=usage_metadata.get('candidates_token_count', 0),
@@ -219,6 +276,7 @@ def extract_from_langchain_response(response: Any) -> TokenUsage:
                 model=llm_output.get('model_name'),
             )
 
+        logger.debug(f"[TokenExtractor] No token_usage or usage_metadata in llm_output keys: {list(llm_output.keys())}")
         return TokenUsage()
 
     except Exception as e:

@@ -8,6 +8,7 @@ from typing import Optional
 from pydantic import Field, field_validator
 
 from src.agents.core.base_config import BaseAgentConfig
+from src.utils.env_utils import parse_bool_env, parse_int_env, parse_float_env
 
 
 class ExtractorAgentConfig(BaseAgentConfig):
@@ -28,27 +29,27 @@ class ExtractorAgentConfig(BaseAgentConfig):
         description="OpenAI API key for extraction"
     )
 
-    # Primary LLM: GPT-5-nano (fast, cheap, reliable)
+    # Primary LLM: GPT-5-mini (balanced cost and quality)
     openai_model: str = Field(
-        default_factory=lambda: os.getenv("EXTRACTOR_AGENT_MODEL", "gpt-5-nano"),
+        default_factory=lambda: os.getenv("EXTRACTOR_AGENT_MODEL", "gpt-5-mini"),
         description="OpenAI model for extraction (primary)"
     )
 
-    # Fallback LLM: GPT-4o-mini (reliable fallback)
+    # Fallback LLM: GPT-5.2 (powerful fallback)
     openai_fallback_model: str = Field(
-        default_factory=lambda: os.getenv("EXTRACTOR_FALLBACK_MODEL", "gpt-4o-mini"),
+        default_factory=lambda: os.getenv("EXTRACTOR_FALLBACK_MODEL", "gpt-5.2-2025-12-11"),
         description="OpenAI model for fallback extraction"
     )
 
     # Override temperature with extraction-specific default (lower for structured output)
     temperature: float = Field(
-        default_factory=lambda: float(os.getenv("EXTRACTOR_AGENT_TEMPERATURE", "0.2")),
+        default_factory=lambda: parse_float_env("EXTRACTOR_AGENT_TEMPERATURE", 0.2),
         description="Temperature for LLM responses (lower for more deterministic extraction)"
     )
 
     # Extraction Settings
     max_fields_to_analyze: int = Field(
-        default_factory=lambda: int(os.getenv("EXTRACTOR_MAX_FIELDS", "50")),
+        default_factory=lambda: parse_int_env("EXTRACTOR_MAX_FIELDS", 50),
         description="Maximum number of fields to analyze in a document"
     )
 
@@ -60,12 +61,12 @@ class ExtractorAgentConfig(BaseAgentConfig):
         return v
 
     max_schema_fields: int = Field(
-        default_factory=lambda: int(os.getenv("EXTRACTOR_MAX_SCHEMA_FIELDS", "100")),
+        default_factory=lambda: parse_int_env("EXTRACTOR_MAX_SCHEMA_FIELDS", 100),
         description="Maximum fields allowed in a schema"
     )
 
     extraction_timeout_seconds: int = Field(
-        default_factory=lambda: int(os.getenv("EXTRACTOR_TIMEOUT_SECONDS", "120")),
+        default_factory=lambda: parse_int_env("EXTRACTOR_TIMEOUT_SECONDS", 120),
         description="Timeout for extraction operations"
     )
 
@@ -95,53 +96,37 @@ class ExtractorAgentConfig(BaseAgentConfig):
 
     # Persistence
     persist_to_database: bool = Field(
-        default_factory=lambda: os.getenv("EXTRACTOR_PERSIST", "true").lower() == "true",
+        default_factory=lambda: parse_bool_env("EXTRACTOR_PERSIST", True),
         description="Whether to persist extracted data to database"
     )
 
     # Middleware Configuration (extraction-specific)
     enable_middleware: bool = Field(
-        default_factory=lambda: os.getenv("ENABLE_MIDDLEWARE", "true").lower() == "true",
+        default_factory=lambda: parse_bool_env("ENABLE_MIDDLEWARE", True),
         description="Enable LangChain middleware stack"
     )
 
     model_retry_max_attempts: int = Field(
-        default_factory=lambda: int(os.getenv("MODEL_RETRY_MAX_ATTEMPTS", "3")),
+        default_factory=lambda: parse_int_env("MODEL_RETRY_MAX_ATTEMPTS", 3),
         description="Maximum retry attempts for model calls"
     )
 
     tool_retry_max_attempts: int = Field(
-        default_factory=lambda: int(os.getenv("TOOL_RETRY_MAX_ATTEMPTS", "2")),
+        default_factory=lambda: parse_int_env("TOOL_RETRY_MAX_ATTEMPTS", 2),
         description="Maximum retry attempts for tool calls"
     )
 
     model_call_limit: int = Field(
-        default_factory=lambda: int(os.getenv("MODEL_CALL_LIMIT", "15")),
+        default_factory=lambda: parse_int_env("MODEL_CALL_LIMIT", 15),
         description="Maximum model calls per run"
     )
 
     tool_call_limit: int = Field(
-        default_factory=lambda: int(os.getenv("TOOL_CALL_LIMIT", "10")),
+        default_factory=lambda: parse_int_env("TOOL_CALL_LIMIT", 10),
         description="Maximum tool calls per run"
     )
 
-    enable_pii_detection: bool = Field(
-        default_factory=lambda: os.getenv("ENABLE_PII_DETECTION", "true").lower() == "true",
-        description="Enable PII detection middleware"
-    )
-
-    pii_strategy: str = Field(
-        default_factory=lambda: os.getenv("PII_STRATEGY", "redact"),
-        description="PII handling strategy: redact, mask, hash, or block"
-    )
-
-    @field_validator('pii_strategy')
-    @classmethod
-    def validate_pii_strategy(cls, v: str) -> str:
-        valid = ['redact', 'mask', 'hash', 'block']
-        if v.lower() not in valid:
-            raise ValueError(f"pii_strategy must be one of: {valid}")
-        return v.lower()
+    # Note: enable_pii_detection and pii_strategy are inherited from BaseAgentConfig
 
     class Config:
         env_prefix = "EXTRACTOR_AGENT_"

@@ -217,25 +217,43 @@ async def get_generations_by_document(
 @with_db_retry
 async def get_recent_generations(
     limit: int = 50,
+    offset: int = 0,
     organization_id: Optional[str] = None,
+    generation_type: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
 ) -> List[Dict[str, Any]]:
     """
-    Get recent document generations across all documents.
+    Get recent document generations across all documents with filtering and pagination.
 
     Multi-tenancy: Filtered by organization_id when provided.
 
     Args:
         limit: Maximum number of results
+        offset: Number of results to skip for pagination
         organization_id: Organization ID for tenant isolation
+        generation_type: Optional filter by type (summary, faqs, questions, all)
+        start_date: Optional filter for generations after this date
+        end_date: Optional filter for generations before this date
 
     Returns:
         List of generation records ordered by creation time (newest first)
     """
     async with db.session() as session:
-        stmt = select(DocumentGeneration)
+        where_clauses = []
         if organization_id:
-            stmt = stmt.where(DocumentGeneration.organization_id == organization_id)
-        stmt = stmt.order_by(desc(DocumentGeneration.created_at)).limit(limit)
+            where_clauses.append(DocumentGeneration.organization_id == organization_id)
+        if generation_type:
+            where_clauses.append(DocumentGeneration.generation_type == generation_type)
+        if start_date:
+            where_clauses.append(DocumentGeneration.created_at >= start_date)
+        if end_date:
+            where_clauses.append(DocumentGeneration.created_at <= end_date)
+
+        stmt = select(DocumentGeneration)
+        if where_clauses:
+            stmt = stmt.where(and_(*where_clauses))
+        stmt = stmt.order_by(desc(DocumentGeneration.created_at)).offset(offset).limit(limit)
 
         result = await session.execute(stmt)
         generations = result.scalars().all()

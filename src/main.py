@@ -45,10 +45,11 @@ logger.info("API documentation available at /docs and /redoc")
 
 if __name__ == "__main__":
     import uvicorn
+    from src.utils.env_utils import parse_bool_env, parse_int_env
 
     host = os.getenv("API_HOST", "0.0.0.0")
-    port = int(os.getenv("API_PORT", "8001"))
-    reload = os.getenv("DEBUG", "false").lower() == "true"
+    port = parse_int_env("API_PORT", 8001)
+    reload = parse_bool_env("DEBUG", False)
 
     logger.info(f"Starting server on {host}:{port}")
 

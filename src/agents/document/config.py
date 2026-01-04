@@ -43,7 +43,7 @@ class DocumentAgentConfig(BaseAgentConfig):
     )
 
     openai_model: str = Field(
-        default_factory=lambda: os.getenv("DOCUMENT_AGENT_MODEL", "gpt-5-nano"),
+        default_factory=lambda: os.getenv("DOCUMENT_AGENT_MODEL", "gpt-5-mini"),
         description="OpenAI model to use"
     )
 
@@ -148,23 +148,7 @@ class DocumentAgentConfig(BaseAgentConfig):
         description="Maximum tool calls per run"
     )
 
-    enable_pii_detection: bool = Field(
-        default_factory=lambda: parse_bool_env("ENABLE_PII_DETECTION", True),
-        description="Enable PII detection middleware"
-    )
-
-    pii_strategy: str = Field(
-        default_factory=lambda: os.getenv("PII_STRATEGY", "redact"),
-        description="PII handling strategy: redact, mask, hash, or block"
-    )
-
-    @field_validator('pii_strategy')
-    @classmethod
-    def validate_pii_strategy(cls, v: str) -> str:
-        valid = ['redact', 'mask', 'hash', 'block']
-        if v.lower() not in valid:
-            raise ValueError(f"pii_strategy must be one of: {valid}")
-        return v.lower()
+    # Note: enable_pii_detection and pii_strategy are inherited from BaseAgentConfig
 
     # Tool Selection Configuration (document-specific)
     enable_tool_selection: bool = Field(
@@ -173,8 +157,8 @@ class DocumentAgentConfig(BaseAgentConfig):
     )
 
     tool_selector_model: str = Field(
-        default_factory=lambda: os.getenv("TOOL_SELECTOR_MODEL", "gpt-5.2-2025-12-11"),
-        description="Model for tool selection (gpt-5.2 for better accuracy)"
+        default_factory=lambda: os.getenv("TOOL_SELECTOR_MODEL", "gpt-5-mini"),
+        description="Model for tool selection (gpt-5-mini for cost efficiency)"
     )
 
     tool_selector_max_tools: int = Field(

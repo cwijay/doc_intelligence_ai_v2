@@ -8,14 +8,14 @@ from dataclasses import dataclass
 from typing import Dict, Optional
 
 
-# Pricing per million tokens (as of 2024)
+# Pricing per million tokens (as of 2025)
 MODEL_PRICING: Dict[str, Dict[str, float]] = {
     # OpenAI models
     "gpt-5.1-codex-mini": {"input": 0.03, "output": 0.06},  # $0.03/1M in, $0.06/1M out
+    "gpt-5-mini": {"input": 0.25, "output": 2.00},  # $0.25/1M in, $2.00/1M out
+    "gpt-5-nano": {"input": 0.05, "output": 0.40},  # $0.05/1M in, $0.40/1M out
+    "gpt-5.2": {"input": 1.75, "output": 14.00},  # $1.75/1M in, $14.00/1M out
     "gpt-4o": {"input": 2.50, "output": 10.00},
-    "gpt-4o-mini": {"input": 0.15, "output": 0.60},
-    "gpt-4-turbo": {"input": 10.00, "output": 30.00},
-    "gpt-3.5-turbo": {"input": 0.50, "output": 1.50},
 
     # Gemini models
     "gemini-3-flash-preview": {"input": 0.075, "output": 0.30},

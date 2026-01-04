@@ -44,7 +44,7 @@ class DataExtractorTool(BaseTool):
     fallback_llm: Optional[Any] = None
 
     def _get_llm(self):
-        """Get or create primary LLM instance (gpt-5-nano)."""
+        """Get or create primary LLM instance (gpt-5-mini)."""
         if self.llm is None:
             self.llm = init_chat_model(
                 model=self.config.openai_model,
@@ -56,7 +56,7 @@ class DataExtractorTool(BaseTool):
         return self.llm
 
     def _get_fallback_llm(self):
-        """Get or create fallback LLM instance (gpt-4o-mini)."""
+        """Get or create fallback LLM instance (gpt-5.2)."""
         if self.fallback_llm is None:
             self.fallback_llm = init_chat_model(
                 model=self.config.openai_fallback_model,

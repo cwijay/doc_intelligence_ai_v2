@@ -53,7 +53,7 @@ DEFAULT_TIERS = [
         "tier": "free",
         "display_name": "Free",
         "description": "Free tier for individual users and small teams. Perfect for trying out Document Intelligence.",
-        "monthly_token_limit": 50_000,
+        "monthly_token_limit": 8_000_000,  # $10 @ gpt-5-mini blended rate
         "monthly_llamaparse_pages": 50,
         "monthly_file_search_queries": 100,
         "storage_gb_limit": Decimal("1.0"),
@@ -77,7 +77,7 @@ DEFAULT_TIERS = [
         "tier": "pro",
         "display_name": "Pro",
         "description": "Pro tier for growing teams. 10x the limits of Free with priority support.",
-        "monthly_token_limit": 500_000,
+        "monthly_token_limit": 40_000_000,  # $50 @ gpt-5-mini blended rate
         "monthly_llamaparse_pages": 500,
         "monthly_file_search_queries": 1000,
         "storage_gb_limit": Decimal("10.0"),
@@ -103,7 +103,7 @@ DEFAULT_TIERS = [
         "tier": "enterprise",
         "display_name": "Enterprise",
         "description": "Enterprise tier for large organizations. Custom limits available on request.",
-        "monthly_token_limit": 5_000_000,
+        "monthly_token_limit": 150_000_000,  # $200 @ gpt-5-mini blended rate
         "monthly_llamaparse_pages": 5000,
         "monthly_file_search_queries": 10000,
         "storage_gb_limit": Decimal("100.0"),
@@ -377,10 +377,10 @@ Examples:
     python scripts/seed_tiers.py --list    # List current tiers
     python scripts/seed_tiers.py --reset   # Delete and re-seed tiers
 
-Default Tiers:
-    Free       - 50,000 tokens/mo, 50 pages, 100 queries, 1 GB storage
-    Pro        - 500,000 tokens/mo, 500 pages, 1,000 queries, 10 GB storage ($29/mo)
-    Enterprise - 5,000,000 tokens/mo, 5,000 pages, 10,000 queries, 100 GB storage ($199/mo)
+Default Tiers (based on gpt-5-mini blended rate of $1.125/1M tokens):
+    Free       - 8,000,000 tokens/mo ($10 value), 50 pages, 100 queries, 1 GB storage
+    Pro        - 40,000,000 tokens/mo ($50 value), 500 pages, 1,000 queries, 10 GB ($29/mo)
+    Enterprise - 150,000,000 tokens/mo ($200 value), 5,000 pages, 10,000 queries, 100 GB ($199/mo)
         """
     )
 

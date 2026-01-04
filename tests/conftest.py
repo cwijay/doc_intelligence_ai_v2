@@ -133,6 +133,50 @@ def gcs_storage(mock_storage_client, mock_bucket, mock_gcs_env):
 
 
 # =============================================================================
+# Organization Mock Fixtures
+# =============================================================================
+
+TEST_ORG_ID = "test-org-123"
+TEST_ORG_UUID = "00000000-0000-0000-0000-000000000001"
+
+
+@pytest.fixture
+def mock_organization():
+    """Create a mock organization object."""
+    org = MagicMock()
+    org.id = TEST_ORG_UUID
+    org.name = TEST_ORG_ID
+    return org
+
+
+@pytest.fixture(autouse=True)
+def mock_org_lookup(mock_organization):
+    """Auto-mock organization lookup for all API tests."""
+    with patch("src.api.dependencies.lookup_organization", new_callable=AsyncMock) as mock_lookup:
+        mock_lookup.return_value = mock_organization
+        yield mock_lookup
+
+
+@pytest.fixture(autouse=True)
+def mock_quota_checker():
+    """Auto-mock quota checker to allow all requests in tests."""
+    mock_status = MagicMock()
+    mock_status.allowed = True
+    mock_status.current_usage = 0
+    mock_status.limit = 1000000
+    mock_status.percentage_used = 0.0
+    mock_status.upgrade_tier = None
+    mock_status.upgrade_message = None
+    mock_status.upgrade_url = None
+
+    with patch("src.core.usage.decorators.get_quota_checker") as mock_checker:
+        checker_instance = MagicMock()
+        checker_instance.check_quota = AsyncMock(return_value=mock_status)
+        mock_checker.return_value = checker_instance
+        yield mock_checker
+
+
+# =============================================================================
 # Async Mock Helpers
 # =============================================================================
 

@@ -90,3 +90,53 @@ async def run_sync_in_executor(func, *args, **kwargs):
     if kwargs:
         func = functools.partial(func, **kwargs)
     return await loop.run_in_executor(None, func, *args)
+
+
+async def run_in_executor_with_context(executor, func, *args, **kwargs):
+    """
+    Run a synchronous function in a thread pool executor with context propagation.
+
+    This function copies the current contextvars context before submitting
+    to the executor, ensuring that context variables (like usage_context)
+    are available in the executor thread.
+
+    This is essential for token tracking in LangChain agents that run in
+    thread pool executors.
+
+    Args:
+        executor: The ThreadPoolExecutor to use (or None for default)
+        func: The synchronous function to run
+        *args: Positional arguments to pass to the function
+        **kwargs: Keyword arguments to pass to the function
+
+    Returns:
+        The result of the function
+
+    Example:
+        >>> from src.core.usage.context import usage_context, get_current_context
+        >>> def check_context():
+        ...     ctx = get_current_context()
+        ...     return ctx.org_id if ctx else None
+        >>>
+        >>> async def main():
+        ...     with usage_context(org_id="test-org", feature="test"):
+        ...         # Context propagates to executor thread
+        ...         result = await run_in_executor_with_context(None, check_context)
+        ...         print(result)  # Prints: test-org
+    """
+    import functools
+    from contextvars import copy_context
+
+    # Capture current context before submitting to executor
+    ctx = copy_context()
+
+    # Prepare the function with kwargs if any
+    if kwargs:
+        func = functools.partial(func, **kwargs)
+
+    # Create a wrapper that runs the function in the copied context
+    def run_with_context():
+        return ctx.run(func, *args)
+
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(executor, run_with_context)

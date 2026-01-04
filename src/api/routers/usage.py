@@ -187,6 +187,26 @@ async def get_usage_summary(
             delta = summary.billing_period_end - datetime.utcnow()
             days_remaining = max(0, delta.days)
 
+        # Fetch feature breakdown for current billing period
+        breakdown_data = await service.get_feature_breakdown(
+            org_id=org_id,
+            start_date=summary.billing_period_start,
+            end_date=summary.billing_period_end,
+        )
+
+        # Map breakdown data to response model
+        feature_breakdown = None
+        if breakdown_data:
+            feature_breakdown = [
+                UsageBreakdownItem(
+                    name=item.get("name", "unknown"),
+                    tokens_used=item.get("tokens_used", 0),
+                    percentage=item.get("percentage", 0.0),
+                    cost_usd=item.get("cost_usd", 0.0),
+                )
+                for item in breakdown_data
+            ]
+
         return UsageSummaryResponse(
             success=True,
             organization_id=org_id,
@@ -210,7 +230,7 @@ async def get_usage_summary(
             storage_percentage=summary.storage.percentage_used,
             storage_used_gb=summary.storage.used / (1024 ** 3),
             storage_limit_gb=summary.storage.limit / (1024 ** 3),
-            feature_breakdown=None,  # Breakdown fetched separately if needed
+            feature_breakdown=feature_breakdown,
         )
 
     except Exception as e:

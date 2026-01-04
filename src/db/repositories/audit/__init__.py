@@ -47,6 +47,16 @@ from .generation_repository import (
     delete_test_records,
 )
 
+# Statistics operations
+from .stats_repository import (
+    get_dashboard_stats,
+    get_job_by_id,
+    count_jobs,
+    count_documents,
+    count_generations,
+    count_audit_events,
+)
+
 __all__ = [
     # Document operations
     "get_file_hash",
@@ -74,4 +84,11 @@ __all__ = [
     "get_generations_by_document",
     "get_recent_generations",
     "delete_test_records",
+    # Statistics operations
+    "get_dashboard_stats",
+    "get_job_by_id",
+    "count_jobs",
+    "count_documents",
+    "count_generations",
+    "count_audit_events",
 ]

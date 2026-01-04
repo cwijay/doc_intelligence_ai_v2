@@ -8,13 +8,153 @@ import asyncio
 import logging
 import os
 from dataclasses import dataclass
+from enum import Enum
 from functools import lru_cache
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, TypeVar, Generic, Callable, Type
 
 from fastapi import Depends, HTTPException, Header
 from sqlalchemy import select, func
 
 logger = logging.getLogger(__name__)
+
+T = TypeVar('T')
+
+
+# =============================================================================
+# Agent Factory (Thread-safe Singleton Pattern)
+# =============================================================================
+
+class AgentType(str, Enum):
+    """Supported agent types."""
+    DOCUMENT = "document"
+    SHEETS = "sheets"
+    EXTRACTOR = "extractor"
+
+
+class AgentFactory:
+    """
+    Generic factory for creating and managing agent instances.
+
+    Implements thread-safe singleton pattern with lazy initialization.
+    Each agent type is created once and reused across requests.
+
+    Usage:
+        agent = await AgentFactory.get(AgentType.DOCUMENT)
+        agent = await AgentFactory.get(AgentType.SHEETS)
+        agent = await AgentFactory.get(AgentType.EXTRACTOR)
+
+        # Or using convenience functions:
+        agent = await get_document_agent()
+    """
+
+    _instances: Dict[AgentType, Any] = {}
+    _lock: Optional[asyncio.Lock] = None
+
+    @classmethod
+    async def _get_lock(cls) -> asyncio.Lock:
+        """Get or create the async lock (lazily initialized)."""
+        if cls._lock is None:
+            cls._lock = asyncio.Lock()
+        return cls._lock
+
+    @classmethod
+    async def get(cls, agent_type: AgentType) -> Any:
+        """
+        Get or create an agent instance (thread-safe).
+
+        Args:
+            agent_type: The type of agent to get
+
+        Returns:
+            The agent instance
+
+        Raises:
+            ValueError: If agent type is not supported
+        """
+        if agent_type not in cls._instances:
+            lock = await cls._get_lock()
+            async with lock:
+                # Double-check after acquiring lock
+                if agent_type not in cls._instances:
+                    cls._instances[agent_type] = cls._create_agent(agent_type)
+                    logger.info(f"{agent_type.value.title()}Agent initialized")
+
+        return cls._instances[agent_type]
+
+    @classmethod
+    def _create_agent(cls, agent_type: AgentType) -> Any:
+        """
+        Create a new agent instance based on type.
+
+        Args:
+            agent_type: The type of agent to create
+
+        Returns:
+            The new agent instance
+        """
+        if agent_type == AgentType.DOCUMENT:
+            from src.agents.document import DocumentAgent
+            return DocumentAgent()
+
+        elif agent_type == AgentType.SHEETS:
+            from src.agents.sheets import SheetsAgent, SheetsAgentConfig
+            return SheetsAgent(SheetsAgentConfig())
+
+        elif agent_type == AgentType.EXTRACTOR:
+            from src.agents.extractor import ExtractorAgent, ExtractorAgentConfig
+            return ExtractorAgent(ExtractorAgentConfig())
+
+        else:
+            raise ValueError(f"Unknown agent type: {agent_type}")
+
+    @classmethod
+    async def initialize_all(cls) -> None:
+        """
+        Initialize all agents at startup (eager initialization).
+
+        This ensures agents are warm and ready for requests immediately.
+        Called during application startup in the lifespan handler.
+        """
+        logger.info("Initializing all agents at startup...")
+
+        for agent_type in AgentType:
+            try:
+                await cls.get(agent_type)
+            except Exception as e:
+                logger.error(f"Failed to initialize {agent_type.value}Agent: {e}")
+                raise
+
+        logger.info("All agents initialized and ready")
+
+    @classmethod
+    async def shutdown_all(cls) -> None:
+        """
+        Shutdown all agent instances gracefully.
+
+        This should be called during application shutdown to ensure
+        all background tasks are completed and resources are released.
+        """
+        logger.info("Shutting down all agents...")
+
+        for agent_type, agent in list(cls._instances.items()):
+            if agent is not None:
+                try:
+                    agent.shutdown(wait=True)
+                    logger.info(f"{agent_type.value.title()}Agent shutdown complete")
+                except Exception as e:
+                    logger.error(f"Error shutting down {agent_type.value}Agent: {e}")
+
+        cls._instances.clear()
+        logger.info("All agents shutdown complete")
+
+    @classmethod
+    def get_instance(cls, agent_type: AgentType) -> Optional[Any]:
+        """
+        Get an agent instance if it exists (non-async, for shutdown).
+
+        Returns None if the agent hasn't been initialized.
+        """
+        return cls._instances.get(agent_type)
 
 
 # =============================================================================
@@ -163,39 +303,22 @@ async def get_org_context(
 
 
 # =============================================================================
-# Agent Dependencies (Thread-safe Singleton pattern)
+# Agent Dependencies (Convenience functions using AgentFactory)
 # =============================================================================
-
-_document_agent = None
-_sheets_agent = None
-_agent_lock = asyncio.Lock()
-
 
 async def get_document_agent():
     """Get or create DocumentAgent instance (thread-safe)."""
-    global _document_agent
-    if _document_agent is None:
-        async with _agent_lock:
-            # Double-check after acquiring lock
-            if _document_agent is None:
-                from src.agents.document import DocumentAgent
-                _document_agent = DocumentAgent()
-                logger.info("DocumentAgent initialized")
-    return _document_agent
+    return await AgentFactory.get(AgentType.DOCUMENT)
 
 
 async def get_sheets_agent():
     """Get or create SheetsAgent instance (thread-safe)."""
-    global _sheets_agent
-    if _sheets_agent is None:
-        async with _agent_lock:
-            # Double-check after acquiring lock
-            if _sheets_agent is None:
-                from src.agents.sheets import SheetsAgent, SheetsAgentConfig
-                config = SheetsAgentConfig()
-                _sheets_agent = SheetsAgent(config)
-                logger.info("SheetsAgent initialized")
-    return _sheets_agent
+    return await AgentFactory.get(AgentType.SHEETS)
+
+
+async def get_extractor_agent():
+    """Get or create ExtractorAgent instance (thread-safe)."""
+    return await AgentFactory.get(AgentType.EXTRACTOR)
 
 
 async def initialize_agents() -> None:
@@ -208,25 +331,7 @@ async def initialize_agents() -> None:
     Raises:
         Exception: If any agent fails to initialize (fail-fast behavior).
     """
-    global _document_agent, _sheets_agent
-
-    logger.info("Initializing agents at startup...")
-
-    async with _agent_lock:
-        # Initialize DocumentAgent
-        if _document_agent is None:
-            from src.agents.document import DocumentAgent
-            _document_agent = DocumentAgent()
-            logger.info("DocumentAgent initialized at startup")
-
-        # Initialize SheetsAgent
-        if _sheets_agent is None:
-            from src.agents.sheets import SheetsAgent, SheetsAgentConfig
-            config = SheetsAgentConfig()
-            _sheets_agent = SheetsAgent(config)
-            logger.info("SheetsAgent initialized at startup")
-
-    logger.info("All agents initialized and ready")
+    await AgentFactory.initialize_all()
 
 
 async def shutdown_agents():
@@ -236,27 +341,7 @@ async def shutdown_agents():
     This should be called during application shutdown to ensure
     all background tasks are completed and resources are released.
     """
-    global _document_agent, _sheets_agent
-
-    logger.info("Shutting down agents...")
-
-    if _document_agent:
-        try:
-            _document_agent.shutdown(wait=True)
-            logger.info("DocumentAgent shutdown complete")
-        except Exception as e:
-            logger.error(f"Error shutting down DocumentAgent: {e}")
-        _document_agent = None
-
-    if _sheets_agent:
-        try:
-            _sheets_agent.shutdown(wait=True)
-            logger.info("SheetsAgent shutdown complete")
-        except Exception as e:
-            logger.error(f"Error shutting down SheetsAgent: {e}")
-        _sheets_agent = None
-
-    logger.info("All agents shutdown complete")
+    await AgentFactory.shutdown_all()
 
 
 # =============================================================================
@@ -311,7 +396,8 @@ def get_api_key(
     If API_KEY_REQUIRED is set to 'true' in environment, validates the key.
     Otherwise, returns the key for logging purposes.
     """
-    api_key_required = os.getenv("API_KEY_REQUIRED", "false").lower() == "true"
+    from src.utils.env_utils import parse_bool_env
+    api_key_required = parse_bool_env("API_KEY_REQUIRED", False)
     expected_key = os.getenv("API_KEY", "")
 
     if api_key_required:

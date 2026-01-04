@@ -9,7 +9,6 @@ Multi-tenancy: All operations are scoped by organization_id.
 
 import json
 import logging
-import os
 from datetime import datetime
 from typing import Optional, List, Dict, Any
 from uuid import uuid4
@@ -20,13 +19,14 @@ from sqlalchemy.dialects.postgresql import insert
 from ..models import RAGQueryCache, PGVECTOR_AVAILABLE
 from ..connection import db
 from ..utils import with_db_retry
+from src.utils.env_utils import parse_bool_env, parse_int_env, parse_float_env
 
 logger = logging.getLogger(__name__)
 
 # Configuration
-SIMILARITY_THRESHOLD = float(os.getenv("SEMANTIC_CACHE_THRESHOLD", "0.85"))
-CACHE_TTL_HOURS = int(os.getenv("SEMANTIC_CACHE_TTL_HOURS", "24"))
-CACHE_ENABLED = os.getenv("SEMANTIC_CACHE_ENABLED", "true").lower() == "true"
+SIMILARITY_THRESHOLD = parse_float_env("SEMANTIC_CACHE_THRESHOLD", 0.85)
+CACHE_TTL_HOURS = parse_int_env("SEMANTIC_CACHE_TTL_HOURS", 24)
+CACHE_ENABLED = parse_bool_env("SEMANTIC_CACHE_ENABLED", True)
 
 
 def is_cache_enabled() -> bool:

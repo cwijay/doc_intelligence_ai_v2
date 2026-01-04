@@ -16,6 +16,8 @@ from src.constants import (
     DEFAULT_SESSION_TIMEOUT_MINUTES,
     DEFAULT_RATE_LIMIT_REQUESTS,
     DEFAULT_RATE_LIMIT_WINDOW_SECONDS,
+    PII_STRATEGIES,
+    DEFAULT_PII_STRATEGY,
 )
 from src.utils.env_utils import parse_bool_env, parse_int_env
 
@@ -114,6 +116,26 @@ class BaseAgentConfig(BaseModel):
         default_factory=lambda: os.getenv("LOG_LEVEL", "INFO").upper(),
         description="Logging level"
     )
+
+    # PII Detection Configuration (shared across agents)
+    enable_pii_detection: bool = Field(
+        default_factory=lambda: parse_bool_env("ENABLE_PII_DETECTION", True),
+        description="Enable PII detection middleware"
+    )
+
+    pii_strategy: str = Field(
+        default_factory=lambda: os.getenv("PII_STRATEGY", DEFAULT_PII_STRATEGY),
+        description="PII handling strategy: redact, mask, hash, or block"
+    )
+
+    @field_validator('pii_strategy')
+    @classmethod
+    def validate_pii_strategy(cls, v: str) -> str:
+        """Validate PII strategy is one of the allowed values."""
+        normalized = v.lower()
+        if normalized not in PII_STRATEGIES:
+            raise ValueError(f"pii_strategy must be one of: {list(PII_STRATEGIES)}")
+        return normalized
 
     class Config:
         """Pydantic configuration."""

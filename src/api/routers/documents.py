@@ -3,6 +3,7 @@
 Multi-tenancy: All endpoints are scoped by organization_id from request headers.
 """
 
+import asyncio
 import logging
 import os
 import time
@@ -14,13 +15,8 @@ from ..dependencies import get_document_agent, get_org_id
 from ..schemas.common import TokenUsage
 from ..schemas.errors import DOCUMENT_ERROR_RESPONSES
 from src.utils.timer_utils import elapsed_ms
-from ..usage import (
-    check_token_limit_before_processing,
-    check_resource_limit_before_processing,
-    log_resource_usage_async,
-    check_quota,
-    track_resource,
-)
+from src.core.usage import check_quota, track_resource
+from src.core.usage.context import usage_context
 from ..schemas.documents import (
     DocumentProcessRequest,
     DocumentProcessResponse,
@@ -51,6 +47,7 @@ router = APIRouter()
     operation_id="processDocument",
     summary="Process document with flexible query",
 )
+@check_quota(usage_type="tokens", estimated_usage=2000)
 async def process_document(
     request: DocumentProcessRequest,
     agent=Depends(get_document_agent),
@@ -67,9 +64,6 @@ async def process_document(
     **Rate Limit**: 10 requests per 60 seconds per session.
     """
     start_time = time.time()
-
-    # Check token limit before processing
-    await check_token_limit_before_processing(org_id, estimated_tokens=2000)
 
     try:
         from src.agents.document.schemas import DocumentRequest, GenerationOptions
@@ -94,7 +88,9 @@ async def process_document(
         )
 
         # Process with agent
-        response = await agent.process_request(agent_request)
+        # Wrap with usage_context to enable token tracking via callback handler
+        with usage_context(org_id=org_id, feature="document_agent"):
+            response = await agent.process_request(agent_request)
 
         processing_time = elapsed_ms(start_time)
 
@@ -132,6 +128,7 @@ async def process_document(
     operation_id="summarizeDocument",
     summary="Generate document summary",
 )
+@check_quota(usage_type="tokens", estimated_usage=1500)
 async def summarize_document(
     request: SummarizeRequest,
     agent=Depends(get_document_agent),
@@ -168,12 +165,14 @@ async def summarize_document(
                 )
 
         # Not cached or force=true, generate via agent
-        result = await agent.generate_summary(
-            document_name=request.document_name,
-            parsed_file_path=request.parsed_file_path,
-            max_words=request.max_words,
-            organization_id=org_id,
-        )
+        # Wrap with usage_context to enable token tracking via callback handler
+        with usage_context(org_id=org_id, feature="document_agent"):
+            result = await agent.generate_summary(
+                document_name=request.document_name,
+                parsed_file_path=request.parsed_file_path,
+                max_words=request.max_words,
+                organization_id=org_id,
+            )
 
         processing_time = elapsed_ms(start_time)
 
@@ -209,6 +208,7 @@ async def summarize_document(
     operation_id="generateFaqs",
     summary="Generate FAQs from document",
 )
+@check_quota(usage_type="tokens", estimated_usage=2000)
 async def generate_faqs(
     request: FAQsRequest,
     agent=Depends(get_document_agent),
@@ -246,12 +246,14 @@ async def generate_faqs(
                 )
 
         # Not cached or force=true, generate via agent
-        result = await agent.generate_faqs(
-            document_name=request.document_name,
-            parsed_file_path=request.parsed_file_path,
-            num_faqs=request.num_faqs,
-            organization_id=org_id,
-        )
+        # Wrap with usage_context to enable token tracking via callback handler
+        with usage_context(org_id=org_id, feature="document_agent"):
+            result = await agent.generate_faqs(
+                document_name=request.document_name,
+                parsed_file_path=request.parsed_file_path,
+                num_faqs=request.num_faqs,
+                organization_id=org_id,
+            )
 
         processing_time = elapsed_ms(start_time)
 
@@ -287,6 +289,7 @@ async def generate_faqs(
     operation_id="generateQuestions",
     summary="Generate comprehension questions",
 )
+@check_quota(usage_type="tokens", estimated_usage=2500)
 async def generate_questions(
     request: QuestionsRequest,
     agent=Depends(get_document_agent),
@@ -332,12 +335,14 @@ async def generate_questions(
                 )
 
         # Not cached or force=true, generate via agent
-        result = await agent.generate_questions(
-            document_name=request.document_name,
-            parsed_file_path=request.parsed_file_path,
-            num_questions=request.num_questions,
-            organization_id=org_id,
-        )
+        # Wrap with usage_context to enable token tracking via callback handler
+        with usage_context(org_id=org_id, feature="document_agent"):
+            result = await agent.generate_questions(
+                document_name=request.document_name,
+                parsed_file_path=request.parsed_file_path,
+                num_questions=request.num_questions,
+                organization_id=org_id,
+            )
 
         processing_time = elapsed_ms(start_time)
 
@@ -388,6 +393,7 @@ async def generate_questions(
     operation_id="generateAllContent",
     summary="Generate all content types",
 )
+@check_quota(usage_type="tokens", estimated_usage=5000)
 async def generate_all_content(
     request: GenerateAllRequest,
     agent=Depends(get_document_agent),
@@ -453,12 +459,14 @@ async def generate_all_content(
                 summary_max_words=request.options.summary_max_words,
             )
 
-        result = await agent.generate_all(
-            document_name=request.document_name,
-            parsed_file_path=request.parsed_file_path,
-            options=options,
-            organization_id=org_id,
-        )
+        # Wrap with usage_context to enable token tracking via callback handler
+        with usage_context(org_id=org_id, feature="document_agent"):
+            result = await agent.generate_all(
+                document_name=request.document_name,
+                parsed_file_path=request.parsed_file_path,
+                options=options,
+                organization_id=org_id,
+            )
 
         processing_time = elapsed_ms(start_time)
 
@@ -497,6 +505,8 @@ async def generate_all_content(
     operation_id="chatWithDocuments",
     summary="Conversational RAG chat with documents",
 )
+@check_quota(usage_type="file_search_queries", estimated_usage=1)
+@track_resource(resource_type="file_search_queries", amount=1)
 async def chat_with_documents(
     request: RAGChatRequest,
     agent=Depends(get_document_agent),
@@ -522,11 +532,6 @@ async def chat_with_documents(
     """
     start_time = time.time()
 
-    # Check file search query limit before processing
-    await check_resource_limit_before_processing(
-        org_id, resource_type="file_search_queries", estimated_usage=1
-    )
-
     try:
         # Use organization_name from request (required field)
         organization_name = request.organization_name
@@ -540,15 +545,17 @@ async def chat_with_documents(
             logger.info(f"Transformed file_filter: {request.file_filter} -> {effective_file_filter}")
 
         # Use the agent's chat method
-        response = await agent.chat(
-            query=request.query,
-            organization_name=organization_name,
-            session_id=request.session_id,
-            folder_filter=request.folder_filter,
-            file_filter=effective_file_filter,
-            search_mode=request.search_mode,
-            organization_id=org_id,
-        )
+        # Wrap with usage_context to enable token tracking via callback handler
+        with usage_context(org_id=org_id, feature="document_agent"):
+            response = await agent.chat(
+                query=request.query,
+                organization_name=organization_name,
+                session_id=request.session_id,
+                folder_filter=request.folder_filter,
+                file_filter=effective_file_filter,
+                search_mode=request.search_mode,
+                organization_id=org_id,
+            )
 
         processing_time = elapsed_ms(start_time)
 
@@ -565,20 +572,7 @@ async def chat_with_documents(
                 for c in response.citations
             ]
 
-        # Log file search query usage (non-blocking)
-        log_resource_usage_async(
-            org_id=org_id,
-            resource_type="file_search_queries",
-            amount=1,
-            user_id=None,
-            extra_data={
-                "query": request.query[:100] if request.query else None,
-                "search_mode": request.search_mode,
-                "folder_filter": request.folder_filter,
-                "file_filter": request.file_filter,
-                "session_id": request.session_id,
-            },
-        )
+        # Usage tracking handled by @track_resource decorator
 
         return RAGChatResponse(
             success=response.success,

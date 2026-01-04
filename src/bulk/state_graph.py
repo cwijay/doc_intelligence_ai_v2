@@ -23,6 +23,15 @@ from src.services.parse_service import parse_and_save
 from .config import get_bulk_config
 from .schemas import DocumentItemStatus, ProcessingOptions
 
+# Try to import usage tracking (non-blocking, fire-and-forget)
+try:
+    from src.core.usage import enqueue_resource_usage, enqueue_token_usage
+    USAGE_TRACKING_AVAILABLE = True
+except ImportError:
+    USAGE_TRACKING_AVAILABLE = False
+    enqueue_resource_usage = None
+    enqueue_token_usage = None
+
 logger = logging.getLogger(__name__)
 
 
@@ -111,6 +120,23 @@ async def parse_node(state: DocumentState) -> DocumentState:
 
         # Calculate content hash
         content_hash = hashlib.sha256(result.parsed_content.encode()).hexdigest()
+
+        # Track LlamaParse page usage (non-blocking via background queue)
+        if USAGE_TRACKING_AVAILABLE and enqueue_resource_usage and result.estimated_pages > 0:
+            try:
+                enqueue_resource_usage(
+                    org_id=state["org_id"],
+                    resource_type="llamaparse_pages",
+                    amount=result.estimated_pages,
+                    file_name=state["original_path"].split("/")[-1],
+                    metadata={
+                        "bulk_job_id": state["bulk_job_id"],
+                        "folder_name": state["folder_name"],
+                        "parse_time_ms": result.parse_time_ms,
+                    },
+                )
+            except Exception as e:
+                logger.warning(f"Failed to enqueue LlamaParse usage: {e}")
 
         logger.info(f"Parsed document in {result.parse_time_ms}ms: {result.parsed_path}")
 
@@ -231,6 +257,17 @@ async def generate_node(state: DocumentState) -> DocumentState:
     Uses direct tool invocation for deterministic generation.
     Runs all requested generators in parallel for performance.
     """
+    from .generation import (
+        run_generators_parallel,
+        parse_generation_results,
+        persist_generated_content,
+        estimate_token_usage,
+        track_generation_usage,
+        load_document_content,
+        create_generation_tools,
+        GenerationContext,
+    )
+
     if state.get("error"):
         return state
 
@@ -265,187 +302,76 @@ async def generate_node(state: DocumentState) -> DocumentState:
 
         config = get_bulk_config()
 
-        # Import tools directly to bypass agent tool selection
-        from src.agents.document.config import DocumentAgentConfig
-        from src.agents.document.tools import (
-            SummaryGeneratorTool,
-            FAQGeneratorTool,
-            QuestionGeneratorTool,
-            ContentPersistTool,
+        # Load document content
+        content = await load_document_content(
+            state["parsed_path"],
+            state.get("parsed_content")
         )
-
-        # Create tools with shared config
-        agent_config = DocumentAgentConfig()
-        summary_tool = SummaryGeneratorTool(config=agent_config)
-        faq_tool = FAQGeneratorTool(config=agent_config)
-        question_tool = QuestionGeneratorTool(config=agent_config)
-        persist_tool = ContentPersistTool(config=agent_config)
-
-        # Get document content (already loaded in parse_node)
-        content = state.get("parsed_content", "")
-        if not content:
-            # Fall back to loading from GCS if not in state
-            from src.storage import get_storage
-            storage = get_storage()
-            content = await storage.read(state["parsed_path"], use_prefix=False)
 
         # Get document name
         filename = state["original_path"].split("/")[-1]
         base_name = filename.rsplit(".", 1)[0]
 
-        # Run generators in parallel using asyncio.gather
-        loop = asyncio.get_running_loop()
-
-        async def run_summary():
-            if not options.generate_summary:
-                return None
-            result = await loop.run_in_executor(
-                None,
-                lambda: summary_tool._run(
-                    content=content,
-                    document_name=base_name,
-                    max_words=options.summary_max_words,
-                    organization_id=state["org_id"],
-                )
-            )
-            return result
-
-        async def run_faqs():
-            if not options.generate_faqs:
-                return None
-            result = await loop.run_in_executor(
-                None,
-                lambda: faq_tool._run(
-                    content=content,
-                    document_name=base_name,
-                    num_faqs=options.num_faqs,
-                    organization_id=state["org_id"],
-                )
-            )
-            return result
-
-        async def run_questions():
-            if not options.generate_questions:
-                return None
-            result = await loop.run_in_executor(
-                None,
-                lambda: question_tool._run(
-                    content=content,
-                    document_name=base_name,
-                    num_questions=options.num_questions,
-                    organization_id=state["org_id"],
-                )
-            )
-            return result
-
-        # Run all generators in parallel with timeout
-        import json as json_module
-        results = await asyncio.wait_for(
-            asyncio.gather(
-                run_summary(),
-                run_faqs(),
-                run_questions(),
-                return_exceptions=True,
-            ),
-            timeout=config.generation_timeout_seconds,
+        # Run generators in parallel
+        summary_result, faqs_result, questions_result = await run_generators_parallel(
+            content=content,
+            base_name=base_name,
+            org_id=state["org_id"],
+            generate_summary=options.generate_summary,
+            generate_faqs=options.generate_faqs,
+            generate_questions=options.generate_questions,
+            summary_max_words=options.summary_max_words,
+            num_faqs=options.num_faqs,
+            num_questions=options.num_questions,
+            timeout_seconds=config.generation_timeout_seconds,
         )
 
-        summary_result, faqs_result, questions_result = results
-
-        # Parse results (tools return JSON strings)
-        summary = None
-        faqs = None
-        questions = None
-        errors = []
-
-        if summary_result:
-            if isinstance(summary_result, Exception):
-                errors.append(f"Summary: {summary_result}")
-            else:
-                try:
-                    parsed = json_module.loads(summary_result)
-                    if parsed.get("success"):
-                        summary = parsed.get("summary")
-                    else:
-                        errors.append(f"Summary: {parsed.get('error')}")
-                except json_module.JSONDecodeError as e:
-                    errors.append(f"Summary parse error: {e}")
-
-        if faqs_result:
-            if isinstance(faqs_result, Exception):
-                errors.append(f"FAQs: {faqs_result}")
-            else:
-                try:
-                    parsed = json_module.loads(faqs_result)
-                    if parsed.get("success"):
-                        faqs = parsed.get("faqs")
-                    else:
-                        errors.append(f"FAQs: {parsed.get('error')}")
-                except json_module.JSONDecodeError as e:
-                    errors.append(f"FAQs parse error: {e}")
-
-        if questions_result:
-            if isinstance(questions_result, Exception):
-                errors.append(f"Questions: {questions_result}")
-            else:
-                try:
-                    parsed = json_module.loads(questions_result)
-                    if parsed.get("success"):
-                        questions = parsed.get("questions")
-                    else:
-                        errors.append(f"Questions: {parsed.get('error')}")
-                except json_module.JSONDecodeError as e:
-                    errors.append(f"Questions parse error: {e}")
+        # Parse results
+        result = parse_generation_results(summary_result, faqs_result, questions_result)
 
         # Log any partial errors but don't fail the whole generation
-        if errors:
-            logger.warning(f"Some generation tasks had errors: {errors}")
+        if result.errors:
+            logger.warning(f"Some generation tasks had errors: {result.errors}")
+
+        # Create context for persistence and tracking
+        context = GenerationContext(
+            content=content,
+            base_name=base_name,
+            org_id=state["org_id"],
+            bulk_job_id=state["bulk_job_id"],
+            document_id=state["document_id"],
+            parsed_path=state["parsed_path"],
+        )
 
         # Persist generated content to GCS
-        if summary or faqs or questions:
-            persist_input = {
-                "document_name": base_name,
-                "parsed_file_path": state["parsed_path"],
-                "organization_id": state["org_id"],
-            }
-            if summary:
-                persist_input["summary"] = summary
-            if faqs:
-                # ContentPersistTool expects JSON string, not list
-                persist_input["faqs"] = json_module.dumps(faqs)
-            if questions:
-                # ContentPersistTool expects JSON string, not list
-                persist_input["questions"] = json_module.dumps(questions)
-
-            await loop.run_in_executor(
-                None,
-                lambda: persist_tool._run(**persist_input)
-            )
+        await persist_generated_content(result, context)
 
         generation_time = int((time.time() - start_time) * 1000)
 
-        # Estimate token usage (rough estimate)
-        token_usage = 0
-        if summary:
-            token_usage += len(summary.split()) * 2
-        if faqs:
-            token_usage += len(faqs) * 100
-        if questions:
-            token_usage += len(questions) * 100
+        # Track token usage (non-blocking)
+        _, _, _, _, agent_config = create_generation_tools()
+        track_generation_usage(
+            org_id=state["org_id"],
+            context=context,
+            result=result,
+            model=agent_config.openai_model,
+        )
+
+        token_usage = estimate_token_usage(result)
 
         logger.info(
             f"Generated content in {generation_time}ms: "
-            f"summary={'yes' if summary else 'no'}, "
-            f"faqs={len(faqs) if faqs else 0}, "
-            f"questions={len(questions) if questions else 0}"
+            f"summary={'yes' if result.summary else 'no'}, "
+            f"faqs={len(result.faqs) if result.faqs else 0}, "
+            f"questions={len(result.questions) if result.questions else 0}"
         )
 
         return {
             **state,
             "status": DocumentItemStatus.COMPLETED.value,
-            "summary": summary,
-            "faqs": faqs,
-            "questions": questions,
+            "summary": result.summary,
+            "faqs": result.faqs,
+            "questions": result.questions,
             "generation_time_ms": generation_time,
             "token_usage": token_usage,
         }

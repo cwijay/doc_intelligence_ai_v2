@@ -27,6 +27,7 @@ from .config import DocumentAgentConfig
 from .tools import create_document_tools
 from .context import rag_filter_context
 from src.utils.timer_utils import elapsed_ms
+from src.utils.async_utils import run_in_executor_with_context
 
 # Base agent and shared utilities
 from src.agents.core.base_agent import BaseAgent
@@ -503,14 +504,13 @@ class DocumentAgent(BaseAgent):
                 # Add current message
                 messages_to_send.append(message)
 
-                loop = asyncio.get_running_loop()
-                result = await loop.run_in_executor(
+                # Use run_in_executor_with_context to propagate usage context
+                # for token tracking in the callback handler
+                result = await run_in_executor_with_context(
                     get_executors().agent_executor,
-                    functools.partial(
-                        self.agent.invoke,
-                        {"messages": messages_to_send},
-                        config
-                    )
+                    self.agent.invoke,
+                    {"messages": messages_to_send},
+                    config
                 )
             # Create dynamic agent with filtered tools if:
             # - Filters are bound (to ensure bound RAG tool is used), OR
@@ -525,26 +525,24 @@ class DocumentAgent(BaseAgent):
                     checkpointer=self.checkpointer  # Use same checkpointer for filtered agents
                 )
                 logger.debug(f"Executing agent with {len(relevant_tools)} filtered tools")
-                loop = asyncio.get_running_loop()
-                result = await loop.run_in_executor(
+                # Use run_in_executor_with_context to propagate usage context
+                # for token tracking in the callback handler
+                result = await run_in_executor_with_context(
                     get_executors().agent_executor,
-                    functools.partial(
-                        dynamic_agent.invoke,
-                        {"messages": [message]},  # Only current message - checkpointer handles history
-                        config
-                    )
+                    dynamic_agent.invoke,
+                    {"messages": [message]},  # Only current message - checkpointer handles history
+                    config
                 )
             else:
                 # Use default agent with all tools
                 logger.debug("Executing agent with all tools")
-                loop = asyncio.get_running_loop()
-                result = await loop.run_in_executor(
+                # Use run_in_executor_with_context to propagate usage context
+                # for token tracking in the callback handler
+                result = await run_in_executor_with_context(
                     get_executors().agent_executor,
-                    functools.partial(
-                        self.agent.invoke,
-                        {"messages": [message]},  # Only current message - checkpointer handles history
-                        config
-                    )
+                    self.agent.invoke,
+                    {"messages": [message]},  # Only current message - checkpointer handles history
+                    config
                 )
 
             # LangGraph agent returns dict with 'messages' key

@@ -21,13 +21,7 @@ from ..dependencies import get_upload_directory, get_parsed_directory, get_max_u
 from ..schemas.errors import FILE_ERROR_RESPONSES
 from src.utils.timer_utils import elapsed_ms
 from src.utils.gcs_utils import is_gcs_path, extract_gcs_path_parts
-from ..usage import (
-    check_quota,
-    track_resource,
-    check_token_limit_before_processing,
-    check_resource_limit_before_processing,
-    log_resource_usage_async,
-)
+from src.core.usage import check_quota, track_resource, enqueue_resource_usage
 from ..schemas.ingest import (
     ParseRequest,
     ParseResponse,
@@ -143,13 +137,13 @@ async def upload_files(
                 "error": str(e)
             })
 
-    # Log storage usage for successfully uploaded files (non-blocking)
+    # Log storage usage for successfully uploaded files (non-blocking via background queue)
     if total_uploaded_bytes > 0:
-        log_resource_usage_async(
+        enqueue_resource_usage(
             org_id=org_id,
             resource_type="storage_bytes",
             amount=total_uploaded_bytes,
-            extra_data={
+            metadata={
                 "files_uploaded": len(uploaded),
                 "filenames": [f.filename for f in uploaded],
             },
@@ -170,6 +164,7 @@ async def upload_files(
     operation_id="parseDocument",
     summary="Parse document with LlamaParse",
 )
+@check_quota(usage_type="llamaparse_pages", estimated_usage=1)
 async def parse_document(
     request: ParseRequest,
     parsed_dir: str = Depends(get_parsed_directory),
@@ -190,40 +185,6 @@ async def parse_document(
     **Quota**: Consumes LlamaParse pages from your subscription.
     """
     start_time = time.time()
-
-    # Check LlamaParse page quota before processing
-    try:
-        if check_quota:
-            from ..usage import check_token_limit_before_processing
-            from src.core.usage import get_quota_checker
-
-            checker = get_quota_checker()
-            quota_result = await checker.check_quota(
-                org_id=org_id,
-                usage_type="llamaparse_pages",
-                estimated_usage=1,  # Estimate 1 page per parse request
-            )
-            if not quota_result.allowed:
-                from fastapi import HTTPException, status
-                raise HTTPException(
-                    status_code=status.HTTP_402_PAYMENT_REQUIRED,
-                    detail={
-                        "error": "quota_exceeded",
-                        "usage_type": "llamaparse_pages",
-                        "current_usage": quota_result.current_usage,
-                        "limit": quota_result.limit,
-                        "message": f"LlamaParse page limit exceeded. Used: {quota_result.current_usage}/{quota_result.limit}",
-                        "upgrade": {
-                            "tier": quota_result.upgrade_tier,
-                            "message": quota_result.upgrade_message,
-                            "url": quota_result.upgrade_url,
-                        } if quota_result.upgrade_tier else None,
-                    }
-                )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.warning(f"LlamaParse quota check failed, proceeding anyway: {e}")
 
     # Debug: Log incoming request
     logger.info(f"Parse request received: file_path={request.file_path}, folder_name={request.folder_name}, org_id={org_id}")
@@ -389,25 +350,19 @@ async def parse_document(
                 # Continue without failing the whole request
                 output_path = None
 
-        # Track LlamaParse page usage after successful parsing
+        # Track LlamaParse page usage after successful parsing (non-blocking via background queue)
         try:
-            if track_resource:
-                from src.core.usage import get_usage_service
-
-                service = get_usage_service()
-                # Estimate page count based on content length (roughly 3000 chars per page)
-                estimated_pages = max(1, len(parsed_content) // 3000)
-                asyncio.create_task(
-                    service.log_resource_usage(
-                        org_id=org_id,
-                        resource_type="llamaparse_pages",
-                        amount=estimated_pages,
-                        file_name=Path(request.file_path).name,
-                        metadata={"file_path": request.file_path, "folder_name": request.folder_name},
-                    )
-                )
+            # Estimate page count based on content length (roughly 3000 chars per page)
+            estimated_pages = max(1, len(parsed_content) // 3000)
+            enqueue_resource_usage(
+                org_id=org_id,
+                resource_type="llamaparse_pages",
+                amount=estimated_pages,
+                file_name=Path(request.file_path).name,
+                metadata={"file_path": request.file_path, "folder_name": request.folder_name},
+            )
         except Exception as e:
-            logger.warning(f"Failed to log LlamaParse usage: {e}")
+            logger.warning(f"Failed to enqueue LlamaParse usage: {e}")
 
         return ParseResponse(
             success=True,

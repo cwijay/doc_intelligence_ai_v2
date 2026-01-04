@@ -182,6 +182,19 @@ class UsageTrackingService(ThreadSafeSingleton):
             limit=limit,
         )
 
+    async def get_feature_breakdown(
+        self,
+        org_id: str,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+    ) -> List[Dict]:
+        """Get usage breakdown by feature."""
+        return await self._aggregator.get_feature_breakdown(
+            org_id=org_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
 
 # Singleton accessor
 def get_usage_service() -> UsageTrackingService:

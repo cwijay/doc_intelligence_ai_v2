@@ -116,7 +116,7 @@ class ResourceLogger:
 
                 await session.commit()
 
-                logger.debug(
+                logger.info(
                     f"Logged resource usage: org={org_id}, "
                     f"type={resource_type}, amount={amount}"
                 )

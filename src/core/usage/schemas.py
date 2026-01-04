@@ -158,30 +158,63 @@ class ResourceUsageLogRequest(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
 
 
-# Model pricing constants (USD per token)
+# Model pricing constants (USD per token - divide $/1M by 1,000,000)
 MODEL_PRICING = {
-    # OpenAI
-    "gpt-5.1-codex-mini": {
-        "input": Decimal("0.00003"),   # $0.03 per 1M input tokens
-        "output": Decimal("0.00006"),  # $0.06 per 1M output tokens
-    },
+    # OpenAI GPT-4o ($2.50/1M input, $10.00/1M output)
     "gpt-4o": {
-        "input": Decimal("0.0025"),    # $2.50 per 1M input tokens
-        "output": Decimal("0.01"),     # $10.00 per 1M output tokens
+        "input": Decimal("0.0000025"),
+        "output": Decimal("0.00001"),
     },
-    # Google Gemini
+    "gpt-4o-2024-08-06": {
+        "input": Decimal("0.0000025"),
+        "output": Decimal("0.00001"),
+    },
+    # OpenAI GPT-5.1-codex-mini ($0.03/1M input, $0.06/1M output)
+    "gpt-5.1-codex-mini": {
+        "input": Decimal("0.00000003"),
+        "output": Decimal("0.00000006"),
+    },
+    # OpenAI GPT-5.2 ($0.075/1M input, $0.30/1M output)
+    "gpt-5.2": {
+        "input": Decimal("0.000000075"),
+        "output": Decimal("0.0000003"),
+    },
+    "gpt-5.2-2025-12-11": {
+        "input": Decimal("0.000000075"),
+        "output": Decimal("0.0000003"),
+    },
+    # OpenAI GPT-5-mini ($0.25/1M input, $2.00/1M output)
+    "gpt-5-mini": {
+        "input": Decimal("0.00000025"),
+        "output": Decimal("0.000002"),
+    },
+    "gpt-5-mini-2025-08-07": {
+        "input": Decimal("0.00000025"),
+        "output": Decimal("0.000002"),
+    },
+    # OpenAI GPT-5-nano ($0.05/1M input, $0.40/1M output)
+    "gpt-5-nano": {
+        "input": Decimal("0.00000005"),
+        "output": Decimal("0.0000004"),
+    },
+    "gpt-5-nano-2025-08-07": {
+        "input": Decimal("0.00000005"),
+        "output": Decimal("0.0000004"),
+    },
+    # Google Gemini Flash ($0.075/1M input, $0.30/1M output)
     "gemini-3-flash-preview": {
-        "input": Decimal("0.000075"),  # $0.075 per 1M input tokens
-        "output": Decimal("0.0003"),   # $0.30 per 1M output tokens
+        "input": Decimal("0.000000075"),
+        "output": Decimal("0.0000003"),
     },
+    # Google Gemini Pro ($1.25/1M input, $5.00/1M output)
     "gemini-2.5-pro": {
-        "input": Decimal("0.00125"),   # $1.25 per 1M input tokens
-        "output": Decimal("0.005"),    # $5.00 per 1M output tokens
+        "input": Decimal("0.00000125"),
+        "output": Decimal("0.000005"),
     },
-    # Default fallback
+    # Default fallback (use gpt-5-mini pricing)
     "default": {
-        "input": Decimal("0.0001"),
-        "output": Decimal("0.0003"),
+        "input": Decimal("0.00000025"),
+        "output": Decimal("0.000002"),
     },
 }
 

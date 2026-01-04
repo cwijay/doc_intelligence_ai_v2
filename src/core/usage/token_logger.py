@@ -126,7 +126,7 @@ class TokenLogger:
 
                 await session.commit()
 
-                logger.debug(
+                logger.info(
                     f"Logged token usage: org={org_id}, feature={feature}, "
                     f"tokens={usage.total_tokens}, cost=${total_cost:.6f}"
                 )

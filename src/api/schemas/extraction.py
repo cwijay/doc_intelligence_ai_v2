@@ -82,6 +82,10 @@ class AnalyzeFieldsResponse(BaseModel):
     processing_time_ms: float = Field(..., example=1234.56)
     error: Optional[str] = Field(default=None)
     session_id: Optional[str] = Field(default=None)
+    token_usage: Optional["TokenUsageSchema"] = Field(
+        default=None,
+        description="Token usage for this request"
+    )
 
 
 # =============================================================================
@@ -139,6 +143,10 @@ class GenerateSchemaResponse(BaseModel):
     processing_time_ms: float = Field(..., example=234.56)
     error: Optional[str] = Field(default=None)
     session_id: Optional[str] = Field(default=None)
+    token_usage: Optional["TokenUsageSchema"] = Field(
+        default=None,
+        description="Token usage for this request"
+    )
 
 
 # =============================================================================

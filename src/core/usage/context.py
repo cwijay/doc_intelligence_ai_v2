@@ -1,8 +1,11 @@
 """
-Thread-local request context for token tracking.
+Request context for token tracking using contextvars.
 
 Allows the callback handler to access org_id and other request metadata
 even when the LLM was initialized as a singleton without the org_id.
+
+Uses Python's contextvars module which properly propagates context across
+asyncio.loop.run_in_executor() calls, unlike threading.local().
 
 Usage:
     from src.core.usage.context import usage_context
@@ -13,19 +16,20 @@ Usage:
         user_id="user_456",
     ):
         # Any LLM calls here will have access to the context
+        # Even when run in executor threads via asyncio
         result = agent.invoke(...)
 """
 
 import logging
-import threading
+from contextvars import ContextVar, Token
 from contextlib import contextmanager
 from dataclasses import dataclass, field
 from typing import Any, Dict, Optional
 
 logger = logging.getLogger(__name__)
 
-# Thread-local storage for request context
-_context = threading.local()
+# ContextVar for request context - propagates across asyncio executor calls
+_context: ContextVar[Optional["UsageContext"]] = ContextVar("usage_context", default=None)
 
 
 @dataclass
@@ -42,27 +46,32 @@ class UsageContext:
 
 def get_current_context() -> Optional[UsageContext]:
     """
-    Get the current request context (thread-safe).
+    Get the current request context.
+
+    Works across asyncio executor threads when set via usage_context().
 
     Returns:
         UsageContext if set, None otherwise
     """
-    return getattr(_context, "usage_context", None)
+    return _context.get()
 
 
-def set_context(context: UsageContext) -> None:
+def set_context(context: UsageContext) -> Token:
     """
     Set the current request context.
 
     Args:
         context: UsageContext to set
+
+    Returns:
+        Token that can be used to restore previous value
     """
-    _context.usage_context = context
+    return _context.set(context)
 
 
 def clear_context() -> None:
     """Clear the current request context."""
-    _context.usage_context = None
+    _context.set(None)
 
 
 @contextmanager
@@ -77,8 +86,12 @@ def usage_context(
     """
     Context manager for setting usage context during a request.
 
-    This sets up a thread-local context that the TokenTrackingCallbackHandler
-    can access to get the org_id and other metadata for logging.
+    This sets up a context that the TokenTrackingCallbackHandler can access
+    to get the org_id and other metadata for logging.
+
+    Uses contextvars which properly propagates context across
+    asyncio.loop.run_in_executor() calls, enabling token tracking in
+    executor threads.
 
     Args:
         org_id: Organization ID for usage tracking
@@ -103,11 +116,11 @@ def usage_context(
         request_id=request_id,
         metadata=metadata or {},
     )
-    set_context(ctx)
+    token = _context.set(ctx)  # Returns token for restoration
     try:
         yield ctx
     finally:
-        clear_context()
+        _context.reset(token)  # Restores previous value (handles nested contexts)
 
 
 __all__ = [

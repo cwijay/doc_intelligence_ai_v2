@@ -28,6 +28,7 @@ from .exceptions import (
 from .decorators import (
     check_quota,
     track_resource,
+    track_tokens,
 )
 from .callback_handler import TokenTrackingCallbackHandler
 from .context import (
@@ -65,6 +66,7 @@ __all__ = [
     # Decorators
     "check_quota",
     "track_resource",
+    "track_tokens",
     # Callback Handler
     "TokenTrackingCallbackHandler",
     # Context

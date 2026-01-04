@@ -122,3 +122,124 @@ SEARCH_MODE_SEMANTIC = "semantic"
 SEARCH_MODE_KEYWORD = "keyword"
 SEARCH_MODE_HYBRID = "hybrid"
 VALID_SEARCH_MODES = [SEARCH_MODE_SEMANTIC, SEARCH_MODE_KEYWORD, SEARCH_MODE_HYBRID]
+
+
+# =============================================================================
+# Timeout Constants (consolidating scattered timeout values)
+# =============================================================================
+class Timeouts:
+    """Centralized timeout values in seconds."""
+
+    # LLM/Agent execution timeouts
+    LLM_EXECUTION = 300  # 5 minutes - standard LLM call timeout
+    QUESTION_GENERATION = 120  # 2 minutes - question generation
+    SHEETS_REQUEST = 60  # 1 minute - sheets agent request
+
+    # Queue/connection timeouts
+    QUEUE_SHUTDOWN = 10  # Queue shutdown grace period
+    CONNECTION_TEST = 15  # Database connection test
+    PRE_WARM = 30.0  # Pre-warming timeout for DB connections
+
+    # Retry-related timeouts
+    RETRY_MIN_WAIT = 1  # Minimum wait between retries
+    RETRY_MAX_WAIT = 32  # Maximum wait between retries (exponential backoff cap)
+    RETRY_MAX_WAIT_DB = 10  # Database retry max wait
+
+    # Bulk processing timeouts
+    BULK_PARSE = 300  # Document parsing timeout
+    BULK_GENERATION = 300  # Content generation timeout
+    BULK_JOB = 3600  # Overall job timeout (1 hour)
+
+
+# =============================================================================
+# Retry Configuration Constants
+# =============================================================================
+class RetryConfig:
+    """Centralized retry/backoff configuration."""
+
+    MAX_ATTEMPTS = 3  # Default max retry attempts
+    BACKOFF_FACTOR = 2.0  # Exponential backoff multiplier
+    INITIAL_DELAY = 1.0  # Initial delay in seconds
+    MIN_WAIT = 1  # Minimum wait between retries
+    MAX_WAIT = 32  # Maximum wait (backoff cap)
+
+    # Model-specific retries
+    MODEL_MAX_ATTEMPTS = 3
+    TOOL_MAX_ATTEMPTS = 2
+
+    # Bulk processing retries
+    BULK_MAX_RETRIES_PER_DOCUMENT = 3
+    BULK_RETRY_DELAY = 30  # seconds
+
+
+# =============================================================================
+# Cache TTL Constants (consolidating scattered TTL values)
+# =============================================================================
+class CacheTTL:
+    """Centralized cache time-to-live values in seconds."""
+
+    # Short-lived caches
+    JOB_STATUS = 3  # Bulk job status cache
+    STATS = 30  # Statistics cache
+
+    # Medium-lived caches
+    QUOTA = 60  # Quota check cache (1 minute)
+    STORE = 300  # File store cache (5 minutes)
+    SCHEMA = 300  # Schema cache (5 minutes)
+
+    # Long-lived caches
+    SUBSCRIPTION_TIER = 3600  # Tier cache (1 hour)
+
+    # Cache sizes
+    SCHEMA_MAX_SIZE = 50  # Max cached schemas
+    DOCUMENT_CACHE_SIZE = 1000  # LRU cache for documents
+
+
+# =============================================================================
+# Pagination Constants
+# =============================================================================
+class Pagination:
+    """Centralized pagination defaults and limits."""
+
+    DEFAULT_LIMIT = 20
+    DEFAULT_OFFSET = 0
+
+    # Standard limits
+    MAX_LIMIT = 100
+
+    # Large result sets
+    LARGE_DEFAULT_LIMIT = 50
+    LARGE_MAX_LIMIT = 200
+
+    # Minimum
+    MIN_LIMIT = 1
+
+
+# =============================================================================
+# PII Detection Constants
+# =============================================================================
+PII_STRATEGIES = frozenset(['redact', 'mask', 'hash', 'block'])
+DEFAULT_PII_STRATEGY = 'redact'
+
+
+# =============================================================================
+# Queue Configuration
+# =============================================================================
+class QueueConfig:
+    """Centralized queue configuration."""
+
+    MAX_SIZE = 1000
+    GET_TIMEOUT = 0.5
+    SHUTDOWN_TIMEOUT = 5.0
+
+
+# =============================================================================
+# File Upload Configuration
+# =============================================================================
+class FileUpload:
+    """Centralized file upload settings."""
+
+    MAX_WORKERS = 3  # Concurrent file uploads
+    WAIT_TIME = 0.5  # Upload retry wait time
+    MAX_WAIT = 10  # Upload retry max wait
+    SIGNED_URL_EXPIRATION_MINUTES = 60  # Signed URL expiration

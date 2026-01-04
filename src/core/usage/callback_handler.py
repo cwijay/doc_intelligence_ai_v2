@@ -126,7 +126,8 @@ class TokenTrackingCallbackHandler(BaseCallbackHandler):
         """Called when LLM starts generating."""
         self._call_count += 1
         org_id, feature, *_ = self._get_effective_context()
-        logger.debug(f"LLM call {self._call_count} started for {feature} (org={org_id or 'unknown'})")
+        # INFO level to verify callback is being invoked
+        logger.info(f"[TokenCallback] LLM call {self._call_count} started for {feature} (org={org_id or 'unknown'})")
 
     def on_llm_end(self, response: LLMResult, **kwargs: Any) -> None:
         """
@@ -134,9 +135,14 @@ class TokenTrackingCallbackHandler(BaseCallbackHandler):
 
         Extracts actual token usage and enqueues for logging.
         """
+        org_id, feature, *_ = self._get_effective_context()
+        logger.debug(f"[TokenCallback] on_llm_end called for {feature} (org={org_id or 'unknown'})")
+        logger.debug(f"[TokenCallback] llm_output keys: {list(response.llm_output.keys()) if response.llm_output else 'None'}")
+
         try:
             # Extract token usage from LangChain response
             usage = extract_from_langchain_response(response)
+            logger.info(f"[TokenCallback] Extracted tokens: {usage.total_tokens} (in={usage.input_tokens}, out={usage.output_tokens})")
 
             # Try to get model info from response
             llm_output = response.llm_output or {}
@@ -158,12 +164,12 @@ class TokenTrackingCallbackHandler(BaseCallbackHandler):
             # Enqueue for logging if we have actual tokens
             if usage.total_tokens > 0:
                 self._enqueue_usage(usage)
-
-                org_id, feature, *_ = self._get_effective_context()
-                logger.debug(
-                    f"Tracked token usage: org={org_id or 'unknown'}, feature={feature}, "
-                    f"tokens={usage.total_tokens} (in={usage.input_tokens}, out={usage.output_tokens})"
+                logger.info(
+                    f"[TokenCallback] Enqueued token usage: org={org_id or 'unknown'}, feature={feature}, "
+                    f"tokens={usage.total_tokens}"
                 )
+            else:
+                logger.debug(f"[TokenCallback] No tokens to log (total_tokens=0)")
 
         except Exception as e:
             # Never fail the LLM call due to tracking errors

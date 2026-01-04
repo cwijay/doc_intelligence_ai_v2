@@ -23,6 +23,7 @@ from .routers import (
     extraction_router,
     content_router,
     bulk_router,
+    tiers_router,
 )
 
 logger = logging.getLogger(__name__)
@@ -87,6 +88,10 @@ OPENAPI_TAGS = [
     {
         "name": "Bulk Webhook",
         "description": "Cloud Function webhook for auto-triggering bulk processing on document upload (legacy)",
+    },
+    {
+        "name": "Tiers",
+        "description": "Subscription tier information (public, no auth required)",
     },
 ]
 
@@ -398,10 +403,11 @@ def custom_openapi(app: FastAPI) -> Dict[str, Any]:
 
 def create_app() -> FastAPI:
     """Create and configure the FastAPI application."""
+    from src.utils.env_utils import parse_bool_env
 
     # Get configuration from environment
     api_prefix = os.getenv("API_PREFIX", "/api/v1")
-    debug = os.getenv("DEBUG", "false").lower() == "true"
+    debug = parse_bool_env("DEBUG", False)
 
     app = FastAPI(
         title="Document Intelligence AI",
@@ -503,6 +509,12 @@ def create_app() -> FastAPI:
     app.include_router(
         bulk_router,
         prefix=f"{api_prefix}/bulk",
+    )
+
+    app.include_router(
+        tiers_router,
+        prefix=f"{api_prefix}/tiers",
+        tags=["Tiers"],
     )
 
     return app

@@ -17,7 +17,7 @@ from ..dependencies import get_sheets_agent, get_org_id
 from ..schemas.common import TokenUsage
 from ..schemas.errors import FILE_ERROR_RESPONSES, BASE_ERROR_RESPONSES
 from src.utils.timer_utils import elapsed_ms
-from ..usage import check_token_limit_before_processing, check_quota
+from src.core.usage import check_quota
 from ..schemas.sheets import (
     SheetsAnalyzeRequest,
     SheetsAnalyzeResponse,
@@ -39,6 +39,7 @@ router = APIRouter()
     operation_id="analyzeSheets",
     summary="Analyze Excel/CSV files with natural language",
 )
+@check_quota(usage_type="tokens", estimated_usage=1500)
 async def analyze_sheets(
     request: SheetsAnalyzeRequest,
     agent=Depends(get_sheets_agent),
@@ -59,9 +60,6 @@ async def analyze_sheets(
     **Rate Limit**: 10 requests per 60 seconds per session.
     """
     start_time = time.time()
-
-    # Check token limit before processing
-    await check_token_limit_before_processing(org_id, estimated_tokens=1500)
 
     try:
         from src.agents.sheets.schemas import ChatRequest

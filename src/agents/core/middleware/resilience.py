@@ -102,7 +102,7 @@ class ModelFallback:
         self,
         primary_model: str,
         primary_provider: str,
-        fallback_model: str = "gpt-4o-mini",
+        fallback_model: str = "gpt-5.2-2025-12-11",
         fallback_provider: str = "openai",
         api_key: Optional[str] = None
     ):

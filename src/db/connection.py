@@ -24,6 +24,8 @@ from sqlalchemy.ext.asyncio import (
 )
 from sqlalchemy.pool import AsyncAdaptedQueuePool
 
+from src.utils.env_utils import parse_bool_env, parse_int_env
+
 load_dotenv()
 
 logger = logging.getLogger(__name__)
@@ -34,7 +36,7 @@ class DatabaseConfig:
 
     def __init__(self):
         # Database enabled flag - set to false to skip all DB operations
-        self.enabled = os.getenv("DATABASE_ENABLED", "true").lower() == "true"
+        self.enabled = parse_bool_env("DATABASE_ENABLED", True)
 
         # Cloud SQL settings - match .env variable names
         self.instance_connection_name = os.getenv(
@@ -49,17 +51,15 @@ class DatabaseConfig:
 
         # Connection pool settings
         # Main loop gets larger pool for API concurrency
-        self.pool_size = int(os.getenv("DB_POOL_SIZE", "3"))
+        self.pool_size = parse_int_env("DB_POOL_SIZE", 3)
         # Background/executor loops get smaller pool (sequential operations)
-        self.background_pool_size = int(os.getenv("DB_BACKGROUND_POOL_SIZE", "2"))
-        self.max_overflow = int(os.getenv("DB_MAX_OVERFLOW", "5"))
-        self.pool_timeout = int(os.getenv("DB_POOL_TIMEOUT", "30"))
-        self.pool_recycle = int(os.getenv("DB_POOL_RECYCLE", "1800"))  # 30 min
+        self.background_pool_size = parse_int_env("DB_BACKGROUND_POOL_SIZE", 2)
+        self.max_overflow = parse_int_env("DB_MAX_OVERFLOW", 5)
+        self.pool_timeout = parse_int_env("DB_POOL_TIMEOUT", 30)
+        self.pool_recycle = parse_int_env("DB_POOL_RECYCLE", 1800)  # 30 min
 
         # Use Cloud SQL connector or direct connection
-        self.use_cloud_sql_connector = os.getenv(
-            "USE_CLOUD_SQL_CONNECTOR", "true"
-        ).lower() == "true"
+        self.use_cloud_sql_connector = parse_bool_env("USE_CLOUD_SQL_CONNECTOR", True)
 
         # Direct connection URL (for local development or testing)
         self.database_url = os.getenv(
@@ -68,7 +68,7 @@ class DatabaseConfig:
         )
 
         # Debug mode
-        self.echo_sql = os.getenv("DB_ECHO", "false").lower() == "true"
+        self.echo_sql = parse_bool_env("DB_ECHO", False)
 
 
 class DatabaseManager:

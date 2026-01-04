@@ -41,13 +41,13 @@ try:
 except ImportError:
     EXECUTORS_AVAILABLE = False
 
-# Try to import usage service for token tracking
+# Try to import usage context for automatic token tracking
 try:
-    from src.core.usage import get_usage_service
-    from src.core.usage.schemas import TokenUsage as UsageTokenUsage
-    USAGE_SERVICE_AVAILABLE = True
+    from src.core.usage import usage_context
+    USAGE_CONTEXT_AVAILABLE = True
 except ImportError:
-    USAGE_SERVICE_AVAILABLE = False
+    USAGE_CONTEXT_AVAILABLE = False
+    usage_context = None
 
 logger = logging.getLogger(__name__)
 
@@ -218,17 +218,34 @@ class ExtractorAgent(BaseAgent):
                     processing_time_ms=elapsed_ms(start_time)
                 )
 
-            # Execute tool in thread pool
-            result_json = await self._run_tool_async(
-                tool,
-                content=content,
-                document_name=document_name,
-                document_type_hint=document_type_hint,
-                organization_id=organization_id
-            )
+            # Set up usage context for token tracking (non-blocking via callback handler)
+            ctx_manager = None
+            if USAGE_CONTEXT_AVAILABLE and usage_context and organization_id:
+                ctx_manager = usage_context(
+                    org_id=organization_id,
+                    feature="extractor_agent",
+                    session_id=session.session_id,
+                )
+                ctx_manager.__enter__()
+
+            try:
+                # Execute tool in thread pool
+                result_json = await self._run_tool_async(
+                    tool,
+                    content=content,
+                    document_name=document_name,
+                    document_type_hint=document_type_hint,
+                    organization_id=organization_id
+                )
+            finally:
+                if ctx_manager:
+                    ctx_manager.__exit__(None, None, None)
 
             result = json.loads(result_json)
             processing_time = elapsed_ms(start_time)
+
+            # Calculate token usage for this analysis
+            token_usage = self._calculate_token_usage(content, result_json)
 
             if result.get("success"):
                 # Convert to DiscoveredField objects
@@ -257,7 +274,9 @@ class ExtractorAgent(BaseAgent):
                         "has_line_items": result.get("has_line_items", False),
                         "processing_time_ms": processing_time,
                         "parallel_analysis": result.get("parallel_analysis", False),
-                        "session_id": session.session_id
+                        "session_id": session.session_id,
+                        "total_tokens": token_usage.total_tokens,
+                        "estimated_cost_usd": token_usage.estimated_cost_usd
                     }
                 )
 
@@ -269,7 +288,8 @@ class ExtractorAgent(BaseAgent):
                     has_line_items=result.get("has_line_items", False),
                     line_item_fields=line_item_fields,
                     processing_time_ms=processing_time,
-                    session_id=session.session_id
+                    session_id=session.session_id,
+                    token_usage=token_usage
                 )
             else:
                 # Log failure event
@@ -355,23 +375,42 @@ class ExtractorAgent(BaseAgent):
                     processing_time_ms=elapsed_ms(start_time)
                 )
 
-            result_json = await self._run_tool_async(
-                tool,
-                selected_fields=selected_fields,
-                template_name=template_name,
-                document_type=document_type,
-                organization_id=organization_id,
-                save_to_gcs=save_to_gcs
-            )
+            # Set up usage context for token tracking (non-blocking via callback handler)
+            ctx_manager = None
+            if USAGE_CONTEXT_AVAILABLE and usage_context and organization_id:
+                ctx_manager = usage_context(
+                    org_id=organization_id,
+                    feature="extractor_agent",
+                    session_id=session.session_id,
+                )
+                ctx_manager.__enter__()
+
+            try:
+                result_json = await self._run_tool_async(
+                    tool,
+                    selected_fields=selected_fields,
+                    template_name=template_name,
+                    document_type=document_type,
+                    organization_id=organization_id,
+                    save_to_gcs=save_to_gcs
+                )
+            finally:
+                if ctx_manager:
+                    ctx_manager.__exit__(None, None, None)
 
             result = json.loads(result_json)
+
+            # Calculate token usage for schema generation
+            input_text = json.dumps(selected_fields)
+            token_usage = self._calculate_token_usage(input_text, result_json)
 
             if not result.get("success"):
                 return GenerateSchemaResponse(
                     success=False,
                     template_name=template_name,
                     error=result.get("error", "Unknown error"),
-                    processing_time_ms=elapsed_ms(start_time)
+                    processing_time_ms=elapsed_ms(start_time),
+                    token_usage=token_usage
                 )
 
             # Save to GCS from async context (this works correctly)
@@ -433,7 +472,9 @@ class ExtractorAgent(BaseAgent):
                     "saved_to_gcs": bool(gcs_uri),
                     "gcs_uri": gcs_uri,
                     "processing_time_ms": processing_time,
-                    "session_id": session.session_id
+                    "session_id": session.session_id,
+                    "total_tokens": token_usage.total_tokens,
+                    "estimated_cost_usd": token_usage.estimated_cost_usd
                 }
             )
 
@@ -444,7 +485,8 @@ class ExtractorAgent(BaseAgent):
                 schema_definition=result.get("schema"),
                 gcs_uri=gcs_uri,
                 processing_time_ms=processing_time,
-                session_id=session.session_id
+                session_id=session.session_id,
+                token_usage=token_usage
             )
 
         except Exception as e:
@@ -529,34 +571,7 @@ class ExtractorAgent(BaseAgent):
                 # Generate extraction job ID
                 extraction_job_id = str(uuid.uuid4())
 
-                # Log token usage to usage tracking service
-                if USAGE_SERVICE_AVAILABLE and organization_id:
-                    try:
-                        usage_service = get_usage_service()
-                        usage_token = UsageTokenUsage(
-                            input_tokens=token_usage.prompt_tokens,
-                            output_tokens=token_usage.completion_tokens,
-                            total_tokens=token_usage.total_tokens,
-                            provider="openai",
-                            model=self.config.openai_model
-                        )
-                        await usage_service.log_token_usage(
-                            org_id=organization_id,
-                            feature="extractor_agent",
-                            usage=usage_token,
-                            request_id=extraction_job_id,
-                            session_id=session.session_id,
-                            metadata={
-                                "document_name": document_name,
-                                "operation": "extract_data",
-                                "schema_title": result.get("schema_title"),
-                                "fields_extracted": result.get("extracted_field_count", 0)
-                            },
-                            processing_time_ms=int(processing_time)
-                        )
-                        logger.debug(f"Token usage logged: {token_usage.total_tokens} tokens")
-                    except Exception as e:
-                        logger.warning(f"Failed to log token usage: {e}")
+                # Token usage is tracked via @track_tokens decorator on API endpoint
 
                 # Log enhanced audit event
                 self._log_audit_event_async(
