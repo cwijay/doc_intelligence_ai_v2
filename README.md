@@ -66,10 +66,13 @@ AI-powered document analysis system with Excel/CSV analysis and document content
 
 **Agents:**
 - **SheetsAgent** - Excel/CSV analysis with natural language queries (OpenAI gpt-5.1-codex-mini + DuckDB)
-- **DocumentAgent** - Generate summaries, FAQs, and questions from documents (Google Gemini gemini-3-flash-preview)
+- **DocumentAgent** - Generate summaries, FAQs, and questions from documents (OpenAI gpt-5.2)
+- **ExtractorAgent** - Structured data extraction with field analysis and schema-based extraction (OpenAI gpt-5-nano)
 
 **Key Features:**
 - Multi-tenancy with organization isolation
+- **Bulk Processing** - Concurrent document processing with LangGraph state machine orchestration
+- **Structured Extraction** - Field analysis and schema-based data extraction from documents
 - **Gemini File Search** - Multi-tenant semantic search with hybrid modes (semantic/keyword/hybrid)
 - GCS content caching with SHA-256 hash validation
 - Session-based rate limiting and response caching
@@ -278,6 +281,8 @@ Search is now consolidated into `/api/v1/documents/chat` endpoint, providing con
 ### Audit (`/api/v1/audit/`)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/dashboard` | GET | Dashboard statistics with period filter (7d/30d/90d/all) |
+| `/activity` | GET | Activity timeline with recent events |
 | `/jobs` | GET | List processing jobs (paginated) |
 | `/jobs/{job_id}` | GET | Get job details |
 | `/documents` | GET | List processed documents |
@@ -285,11 +290,57 @@ Search is now consolidated into `/api/v1/documents/chat` endpoint, providing con
 | `/generations` | GET | List generated content |
 | `/trail` | GET | Audit trail with filtering |
 
+### Bulk Processing (`/api/v1/bulk/`)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/upload` | POST | Upload multiple files and start bulk processing |
+| `/folders` | POST | Create bulk folder |
+| `/folders` | GET | List org folders (paginated) |
+| `/folders/{folder_id}` | GET | Get folder details |
+| `/folders/{folder_id}` | DELETE | Delete folder |
+| `/jobs` | GET | List bulk jobs (paginated) |
+| `/jobs/{job_id}` | GET | Get job details with progress |
+| `/jobs/{job_id}/cancel` | POST | Cancel bulk job |
+| `/jobs/{document_id}/retry` | POST | Retry failed document |
+
+### Extraction (`/api/v1/extraction/`)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/analyze-fields` | POST | Discover extractable fields in document |
+| `/generate-schema` | POST | Generate extraction template |
+| `/extract` | POST | Extract structured data using schema |
+| `/templates` | GET | List extraction templates |
+| `/templates/{template_name}` | GET | Get template details |
+| `/records` | GET | List extracted records |
+| `/records/{record_id}` | GET | Get extracted record details |
+| `/export` | POST | Export extracted data (CSV, JSON) |
+| `/health` | GET | Extraction service health status |
+
+### Usage (`/api/v1/usage/`)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/summary` | GET | Current period usage summary |
+| `/subscription` | GET | Subscription details and limits |
+| `/limits` | GET | Quota status with warnings |
+| `/history` | GET | Historical usage data |
+| `/breakdown` | GET | Usage breakdown by feature |
+
 ### Sessions (`/api/v1/sessions/`)
 | Endpoint | Method | Description |
 |----------|--------|-------------|
 | `/{session_id}` | GET | Get session info |
 | `/{session_id}` | DELETE | End session and cleanup |
+
+### Tiers (`/api/v1/tiers/`)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/` | GET | List subscription tiers (public, no auth) |
+
+### Content (`/api/v1/content/`)
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/load-parsed` | POST | Load pre-parsed document content from GCS |
+| `/check-exists` | GET | Check if parsed document exists in GCS |
 
 ## Core Features
 
@@ -373,7 +424,8 @@ USE_CLOUD_SQL_CONNECTOR=true
 ### Agent Configuration
 ```
 OPENAI_SHEET_MODEL=gpt-5.1-codex-mini
-DOCUMENT_AGENT_MODEL=gemini-3-flash-preview
+DOCUMENT_AGENT_MODEL=gpt-5.2
+EXTRACTOR_AGENT_MODEL=gpt-5-nano
 RATE_LIMIT_REQUESTS=10
 RATE_LIMIT_WINDOW=60
 SESSION_TIMEOUT_MINUTES=30
@@ -387,8 +439,30 @@ TOOL_RETRY_MAX_ATTEMPTS=2
 ENABLE_PII_DETECTION=true
 PII_STRATEGY=redact
 ENABLE_TOOL_SELECTION=true
-TOOL_SELECTOR_MODEL=gemini-3-flash-preview
+TOOL_SELECTOR_MODEL=gpt-5.2
 TOOL_SELECTOR_MAX_TOOLS=3
+```
+
+### Bulk Processing
+```
+BULK_MAX_DOCUMENTS_PER_FOLDER=10
+BULK_CONCURRENT_DOCUMENTS=3
+BULK_JOB_TIMEOUT_SECONDS=3600
+BULK_WEBHOOK_SECRET=<secret>
+```
+
+### Extractor Agent
+```
+EXTRACTOR_AGENT_MODEL=gpt-5-nano
+EXTRACTOR_MAX_FIELDS=50
+EXTRACTOR_TIMEOUT_SECONDS=120
+```
+
+### Executor Pools
+```
+AGENT_EXECUTOR_POOL_SIZE=10
+IO_EXECUTOR_POOL_SIZE=20
+QUERY_EXECUTOR_POOL_SIZE=10
 ```
 
 ## Project Structure
@@ -411,19 +485,37 @@ src/
 │   ├── routers/          # Route handlers
 │   │   ├── documents.py  # DocumentAgent endpoints
 │   │   ├── sheets.py     # SheetsAgent endpoints
+│   │   ├── extraction/   # ExtractorAgent endpoints (package)
+│   │   │   ├── analyze.py    # Field analysis
+│   │   │   ├── schema.py     # Schema generation
+│   │   │   ├── extract.py    # Data extraction
+│   │   │   ├── records.py    # Record management
+│   │   │   └── export.py     # Export functionality
+│   │   ├── bulk.py       # Bulk processing endpoints
 │   │   ├── rag.py        # Semantic search endpoints
 │   │   ├── ingest.py     # Upload/parse endpoints
-│   │   ├── audit.py      # Audit trail endpoints
-│   │   └── sessions.py   # Session management
+│   │   ├── audit.py      # Audit trail + dashboard endpoints
+│   │   ├── usage.py      # Usage/subscription endpoints
+│   │   ├── sessions.py   # Session management
+│   │   ├── tiers.py      # Subscription tiers (public)
+│   │   └── content.py    # Content loading from GCS
+│   ├── utils/            # API utilities
+│   │   ├── formatting.py # Display formatting helpers
+│   │   ├── decorators.py # Endpoint decorators
+│   │   └── responses.py  # Response builders
 │   └── schemas/          # Pydantic models
 │       ├── errors.py     # Shared error response definitions
 │       ├── common.py     # Shared schemas (TokenUsage, ToolUsage)
 │       ├── validators.py # Shared validators (path, query, options)
 │       ├── documents.py  # Document request/response
 │       ├── sheets.py     # Sheets request/response
+│       ├── extraction.py # Extraction request/response
+│       ├── bulk.py       # Bulk processing request/response
 │       └── rag.py        # RAG request/response
 ├── agents/
 │   ├── core/             # Shared agent infrastructure
+│   │   ├── base_agent.py      # Abstract base for all agents
+│   │   ├── base_config.py     # Shared configuration
 │   │   ├── rate_limiter.py    # Thread-safe rate limiting
 │   │   ├── session_manager.py # Session lifecycle management
 │   │   ├── memory/       # Conversation memory
@@ -434,7 +526,7 @@ src/
 │   │       ├── tool_selector.py     # Tool pre-filtering
 │   │       ├── resilience.py        # Retry logic
 │   │       └── safety.py            # PII detection
-│   ├── document/         # DocumentAgent (Gemini)
+│   ├── document/         # DocumentAgent (OpenAI gpt-5.2)
 │   │   ├── core.py       # Agent implementation (875 lines)
 │   │   ├── config.py     # Agent configuration
 │   │   ├── schemas.py    # Request/response schemas
@@ -450,22 +542,51 @@ src/
 │   │       ├── question_generator.py
 │   │       ├── persist.py          # Save to GCS/DB
 │   │       └── rag_search.py       # Semantic search
+│   ├── extractor/        # ExtractorAgent (OpenAI gpt-5-nano)
+│   │   ├── core.py       # Agent implementation (734 lines)
+│   │   ├── config.py     # Agent configuration
+│   │   ├── schemas.py    # Request/response schemas
+│   │   └── tools/        # Extraction tools
+│   │       ├── base.py             # Shared utilities
+│   │       ├── field_analyzer.py   # Field discovery
+│   │       ├── schema_generator.py # Template generation
+│   │       └── data_extractor.py   # Data extraction
 │   └── sheets/           # SheetsAgent (OpenAI + DuckDB)
 │       ├── core.py       # Agent implementation (686 lines)
 │       ├── config.py     # Agent configuration
 │       ├── cache.py      # FileCache (LRU DataFrame caching)
 │       └── tools.py      # Analysis tools
+├── bulk/                 # Bulk document processing
+│   ├── config.py         # BulkProcessingConfig
+│   ├── schemas.py        # Job/document/event models
+│   ├── service.py        # Main orchestration service
+│   ├── state_graph.py    # LangGraph workflow
+│   ├── generation.py     # Content generation helpers
+│   ├── folder_manager.py # Folder operations
+│   ├── queue.py          # Event queue
+│   └── webhook_handler.py # Cloud Function webhooks
+├── core/                 # Core infrastructure
+│   ├── executors.py      # Thread pool registry
+│   └── usage/            # Usage tracking module
+│       ├── service.py    # UsageTrackingService
+│       ├── quota_checker.py  # Quota enforcement
+│       ├── usage_queue.py    # Background usage tracking
+│       ├── context.py        # Usage context management
+│       └── ...
+├── services/             # Shared services
+│   └── parse_service.py  # Document parsing abstraction
 ├── db/                   # PostgreSQL models & connection
 │   ├── connection.py     # DatabaseManager singleton
 │   ├── models.py         # SQLAlchemy ORM models
 │   └── repositories/     # Data access layer
-│       ├── audit_repository.py  # DEPRECATED: re-exports from audit/
 │       ├── audit/               # Split audit repositories
-│       │   ├── __init__.py          # Re-exports all functions
-│       │   ├── document_repository.py  # Document CRUD
-│       │   ├── job_repository.py       # Job lifecycle
-│       │   ├── audit_log_repository.py # Event logging
-│       │   └── generation_repository.py # Generated content
+│       │   ├── document_repository.py
+│       │   ├── job_repository.py
+│       │   ├── audit_log_repository.py
+│       │   ├── generation_repository.py
+│       │   └── stats_repository.py  # Dashboard statistics
+│       ├── bulk_repository.py   # Bulk job persistence
+│       ├── extraction_repository.py # Extraction persistence
 │       ├── memory_repository.py
 │       └── rag_repository.py
 ├── rag/                  # Document parsing & search
@@ -477,14 +598,19 @@ src/
     ├── gcs.py            # GCSStorage implementation
     └── config.py         # Storage configuration
 
+cloud_functions/
+└── bulk_trigger/         # GCS-triggered bulk processing
+    └── main.py           # Cloud Function entry point
+
 scripts/
-├── db_setup.py                   # Database setup/teardown
-└── migrate_documents_status.py   # Data migration
+├── db_setup.py           # Database setup/teardown
+├── seed_tiers.py         # Seed subscription tiers
+└── migrate_documents_status.py  # Data migration
 
 tests/
-├── conftest.py       # Pytest fixtures
-├── unit/             # Unit tests
-└── integration/      # Integration tests
+├── conftest.py           # Pytest fixtures
+├── unit/                 # Unit tests
+└── integration/          # Integration tests
 
 # GCS Storage (gs://bucket/prefix/)
 parsed/               # Pre-parsed documents (.md)

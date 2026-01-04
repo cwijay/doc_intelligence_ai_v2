@@ -4,14 +4,15 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Document Intelligence AI v3.0 is an AI-powered document analysis system with two main agents:
+Document Intelligence AI v3.0 is an AI-powered document analysis system with three main agents:
 - **SheetsAgent**: Excel/CSV analysis using OpenAI GPT and LangGraph's ReAct agent
 - **DocumentAgent**: Document processing with content generation (summaries, FAQs, questions) using OpenAI GPT and LangChain
+- **ExtractorAgent**: Structured data extraction from documents using OpenAI GPT with field analysis and schema-based extraction
 
 ## Technology Stack
 
 - Python 3.12, LangGraph 1.0.4+, LangChain 1.2.0+
-- LLMs: OpenAI (gpt-5.1-codex-mini for SheetsAgent, gpt-5-nano for DocumentAgent, both with responses API)
+- LLMs: OpenAI (gpt-5.1-codex-mini for SheetsAgent, gpt-5-mini for DocumentAgent, gpt-5-mini for ExtractorAgent)
 - Data: DuckDB (SQL on DataFrames with connection pooling), Pandas, LlamaParse (document parsing with OCR)
 - Storage: Google Cloud Storage (parsed docs, generated content), PostgreSQL (Cloud SQL), SQLAlchemy 2.0 async
 - Web Framework: FastAPI with uvicorn
@@ -88,9 +89,17 @@ DATABASE_URL=postgresql+asyncpg://...  # For local development
 
 # Optional - Agents
 OPENAI_SHEET_MODEL=gpt-5.1-codex-mini
-DOCUMENT_AGENT_MODEL=gpt-5-nano
+DOCUMENT_AGENT_MODEL=gpt-5-mini
 OPENAI_TEMPERATURE=0.1
 DOCUMENT_AGENT_TEMPERATURE=0.3
+
+# Optional - Extractor Agent
+EXTRACTOR_AGENT_MODEL=gpt-5-mini
+EXTRACTOR_FALLBACK_MODEL=gpt-5.2-2025-12-11
+EXTRACTOR_AGENT_TEMPERATURE=0.2
+EXTRACTOR_MAX_FIELDS=50
+EXTRACTOR_MAX_SCHEMA_FIELDS=100
+EXTRACTOR_TIMEOUT_SECONDS=120
 
 # Optional - Rate Limiting & Sessions
 RATE_LIMIT_REQUESTS=10
@@ -114,6 +123,18 @@ LOG_LEVEL=INFO
 DEBUG=false
 CLEANUP_INTERVAL_SECONDS=300
 
+# Optional - Bulk Processing
+BULK_MAX_DOCUMENTS_PER_FOLDER=10
+BULK_MAX_FILE_SIZE_MB=50
+BULK_CONCURRENT_DOCUMENTS=3
+BULK_PARSE_TIMEOUT_SECONDS=300
+BULK_GENERATION_TIMEOUT_SECONDS=300
+BULK_JOB_TIMEOUT_SECONDS=3600
+BULK_MAX_RETRIES_PER_DOCUMENT=3
+BULK_RETRY_DELAY_SECONDS=30
+BULK_WEBHOOK_SECRET=<secret>
+BULK_USE_POSTGRES_CHECKPOINTER=true
+
 # Optional - Executor Pool Sizes
 AGENT_EXECUTOR_POOL_SIZE=10   # Thread pool for LLM agent invocations
 IO_EXECUTOR_POOL_SIZE=20      # Thread pool for GCS/file I/O operations
@@ -129,10 +150,15 @@ QUERY_EXECUTOR_POOL_SIZE=10   # Thread pool for DuckDB/SQL queries
 FastAPI application with routers:
 - `/api/v1/documents` - DocumentAgent endpoints (process, summarize, faqs, questions, generate-all)
 - `/api/v1/sheets` - SheetsAgent endpoints (analyze, preview, health)
+- `/api/v1/extraction` - ExtractorAgent endpoints (analyze-fields, generate-schema, extract, records, export)
+- `/api/v1/bulk` - Bulk processing endpoints (upload, folders, jobs, cancel, retry)
 - `/api/v1/ingest` - Document ingestion (upload, parse, list, delete)
 - `/api/v1/rag` - Semantic search (stores, folders, search, upload)
-- `/api/v1/audit` - Audit logs (jobs, documents, generations, trail)
+- `/api/v1/audit` - Audit logs (dashboard, activity, jobs, documents, generations, trail)
+- `/api/v1/usage` - Usage tracking (summary, subscription, limits, history, breakdown)
 - `/api/v1/sessions` - Session management (get, delete)
+- `/api/v1/tiers` - Subscription tiers (public, no auth required)
+- `/api/v1/content` - Content loading (load-parsed, check-exists)
 - `/health` - Health checks
 
 Entry point: `src/main.py` creates app via `src/api/app.py:create_app()`
@@ -142,6 +168,10 @@ Key files:
 - `middleware.py`: CORS, logging, exception handlers
 - `dependencies.py`: Dependency injection for agents, org context, file directories
 - `usage.py`: Token usage tracking and cost estimation
+- `utils/`: API utility package
+  - `formatting.py`: Display formatting (`format_duration_ms`, `format_time_ago`, `get_status_color`)
+  - `decorators.py`: Endpoint decorators (`with_timing`, `with_error_response`, `log_errors`)
+  - `responses.py`: Response builders (`build_success_response`, `ResponseBuilder`)
 
 ### Agents (`src/agents/`)
 
@@ -174,7 +204,42 @@ Key files:
 - Hybrid tool selection via `ToolSelectionManager` (`tool_selection.py`) with `QueryClassifier` + `LLMToolSelector`
 - Result parsing via `AgentResultParser` (`result_parser.py`) for extracting structured content from tool outputs
 
+**ExtractorAgent** (`src/agents/extractor/core.py`, 734 lines):
+- Structured data extraction from documents using OpenAI gpt-5-nano
+- Three main capabilities:
+  - **Field Analysis**: Discover extractable fields with types and confidence scores
+  - **Schema Generation**: Create reusable extraction templates from selected fields
+  - **Data Extraction**: Extract structured data using JSON schemas
+- Tools in `tools/`:
+  - `base.py`: Shared utilities and base classes
+  - `field_analyzer.py`: Analyzes documents to discover extractable fields
+  - `schema_generator.py`: Generates JSON schemas from selected fields
+  - `data_extractor.py`: Extracts structured data using schemas
+- Inherits from `BaseAgent` for shared session/rate-limiting/memory
+- GCS schema caching with SHA-256 validation
+- Document type detection (invoice, contract, receipt, etc.)
+- Line-item detection for invoice/receipt extraction
+
 ### Core Agent Infrastructure (`src/agents/core/`)
+
+**Base Agent** (`base_agent.py`):
+- Abstract `BaseAgent` class eliminating code duplication across agents
+- Shared functionality:
+  - Session management and rate limiting initialization
+  - Memory initialization (short-term + long-term)
+  - Audit logging setup with `ThreadPoolExecutor`
+  - Token tracking callback factory
+  - Health status reporting framework
+  - Session ending and conversation summary persistence
+  - Graceful resource cleanup via `shutdown()`
+- Inheritors: `SheetsAgent`, `DocumentAgent`, `ExtractorAgent`
+
+**Base Config** (`base_config.py`):
+- Shared configuration inherited by all agent configs
+- Common settings: `temperature`, `timeout_seconds`, `max_retries`
+- Session settings: `session_timeout_minutes`
+- Rate limiting: `rate_limit_requests`, `rate_limit_window_seconds`
+- Memory: `enable_short_term_memory`, `enable_long_term_memory`, `short_term_max_messages`
 
 **Rate Limiting** (`rate_limiter.py`):
 - `RateLimiter` class - Thread-safe sliding window algorithm
@@ -226,8 +291,12 @@ Token tracking, quota enforcement, and subscription management:
 - `quota_checker.py`: `QuotaChecker` with caching for fast limit checks
 - `callback_handler.py`: `TokenTrackingCallbackHandler` for LangChain integration
 - `token_extractors.py`: Extract token counts from OpenAI/Gemini responses
-- `decorators.py`: `@check_quota`, `@track_resource` for endpoint protection
+- `decorators.py`: `@check_quota`, `@track_resource`, `@track_tokens` for endpoint protection
 - `schemas.py`: `TokenUsage`, `QuotaStatus`, `UsageSummary` Pydantic models
+- `context.py`: `UsageContext` context manager for request-scoped usage tracking
+- `usage_queue.py`: Background queue for non-blocking usage tracking
+  - `UsageQueue`: Thread-safe queue with background worker
+  - `enqueue_token_usage()`, `enqueue_resource_usage()`: Non-blocking queue functions
 - `models.py`: SQLAlchemy models for `subscription_tiers`, `organization_subscriptions`, `token_usage_records`
 
 **Subscription Tiers** (Free/Pro/Enterprise):
@@ -235,6 +304,60 @@ Token tracking, quota enforcement, and subscription management:
 - LlamaParse pages: 50 / 500 / 5K monthly
 - File search queries: 100 / 1K / 10K monthly
 - Storage: 1 / 10 / 100 GB
+
+### Bulk Processing Module (`src/bulk/`)
+
+Concurrent document processing with LangGraph state machine orchestration:
+
+- `config.py`: `BulkProcessingConfig` with 25+ settings via `BULK_` prefix env vars
+  - Limits: `max_documents_per_folder` (10), `max_file_size_mb` (50)
+  - Concurrency: `concurrent_documents` (3)
+  - Timeouts: `parse_timeout_seconds` (300), `generation_timeout_seconds` (300), `job_timeout_seconds` (3600)
+  - Retry: `max_retries_per_document` (3), `retry_delay_seconds` (30)
+- `schemas.py`: Domain models for `BulkJob`, `BulkDocumentItem`, `ProcessingEvent`, `ProcessingOptions`
+- `service.py`: `BulkProcessingService` main orchestration
+  - Job creation with quota enforcement
+  - Progress tracking with status caching (3s TTL)
+  - Document retry and job cancellation
+- `state_graph.py`: LangGraph `StateGraph` for workflow
+  - States: parse → index → generate → finalize
+  - PostgreSQL checkpointing for durability
+  - Parallel document processing within concurrency limits
+- `generation.py`: Content generation helpers
+  - `run_generators_parallel()`: Parallel summary/FAQ/question generation
+  - `parse_generation_results()`: Parse JSON results from generation tools
+  - `persist_generated_content()`: Save generated content to GCS
+  - `track_generation_usage()`: Non-blocking usage tracking
+- `folder_manager.py`: `BulkFolderManager` for folder operations
+  - Create folders, generate signed upload URLs
+  - List and manage documents in folders
+- `queue.py`: `ProcessingQueue` for async event handling
+- `webhook_handler.py`: `WebhookHandler` for Cloud Function triggers
+
+**Supported File Types:**
+PDF, DOCX, DOC, PPTX, PPT, XLSX, XLS, CSV, TXT, RTF, HTML, images (JPG, PNG, GIF, BMP, TIFF, WebP)
+
+### Executor Pool Infrastructure (`src/core/executors.py`)
+
+Centralized thread pool management preventing resource starvation:
+
+- `ExecutorRegistry` class managing three dedicated pools:
+  - `agent_executor`: LLM agent invocations (10 threads via `AGENT_EXECUTOR_POOL_SIZE`)
+  - `io_executor`: GCS/file I/O operations (20 threads via `IO_EXECUTOR_POOL_SIZE`)
+  - `query_executor`: DuckDB/SQL queries (10 threads via `QUERY_EXECUTOR_POOL_SIZE`)
+- Separates long-running LLM calls from quick I/O operations
+- Graceful shutdown with optional future cancellation
+
+### Parse Service (`src/services/parse_service.py`)
+
+Shared document parsing abstraction:
+
+- Unified interface for parsing PDFs, images, and documents
+- GCS integration for upload/download of raw and parsed files
+- LlamaParse integration with OCR and handwriting support
+- Cache checking for already-parsed documents
+- Database registration of parsed documents
+- `ParseResult` dataclass with timing and page estimates
 
 ### Database (`src/db/`)
 
@@ -251,6 +374,15 @@ Token tracking, quota enforcement, and subscription management:
     - `job_repository.py`: Job lifecycle (`start_job`, `complete_job`, `fail_job`, `find_cached_result`)
     - `audit_log_repository.py`: Event logging (`log_event`, `get_audit_trail`, `get_document_summary`)
     - `generation_repository.py`: Generated content (`save_document_generation`, `find_cached_generation`)
+    - `stats_repository.py`: Dashboard statistics (`get_dashboard_stats`, `count_jobs`, `count_documents`)
+  - `bulk_repository.py` (929 lines): Bulk job persistence
+    - Job CRUD: `create_bulk_job`, `get_bulk_job`, `update_job_status`
+    - Document items: `add_document_item`, `update_document_status`, `get_documents_by_job`
+    - Progress tracking: `get_job_progress`, `get_pending_documents`
+  - `extraction_repository.py` (777 lines): Extraction data persistence
+    - Jobs: `create_extraction_job`, `get_extraction_job`, `update_extraction_status`
+    - Templates: `save_template`, `get_template`, `list_templates`
+    - Records: `save_extracted_record`, `get_extracted_records`
   - `memory_repository.py`: Long-term memory persistence
   - `rag_repository.py`: File store and folder management
 - `utils.py`: Database utility functions
@@ -310,6 +442,20 @@ Google Cloud Storage integration for parsed documents and generated content.
 **GCS Paths:**
 - Parsed docs: `gs://{GCS_BUCKET}/{GCS_PREFIX}/{PARSED_DIRECTORY}/` (e.g., `gs://biz2bricks-dev-v1-document-store/demo_docs/parsed/`)
 - Generated content: `gs://{GCS_BUCKET}/{GCS_PREFIX}/{GENERATED_DIRECTORY}/` (e.g., `gs://biz2bricks-dev-v1-document-store/demo_docs/generated/`)
+
+### Cloud Functions (`cloud_functions/`)
+
+GCS-triggered serverless functions for bulk processing:
+
+**Bulk Trigger** (`bulk_trigger/main.py`):
+- Cloud Function triggered by GCS object finalization events
+- Monitors configured bucket for new uploads in bulk folders
+- Extracts `org_id` and `folder_name` from GCS path pattern: `{org}/{bulk_prefix}/{folder}/`
+- Sends webhook notifications to main application API
+- Configurable via environment variables:
+  - `API_BASE_URL`: Target API endpoint
+  - `WEBHOOK_SECRET`: Shared authentication secret
+  - `BULK_FOLDER_PREFIX`: Path prefix to monitor (default: "bulk")
 
 ### Utility Modules (`src/utils/`)
 
@@ -434,6 +580,8 @@ VALID_SEARCH_MODES = ["semantic", "keyword", "hybrid"]
 - `DELETE /folders/{folder_id}` - Delete folder
 
 ### Audit (`/api/v1/audit/`)
+- `GET /dashboard` - Dashboard statistics with period filter (7d/30d/90d/all)
+- `GET /activity` - Activity timeline with recent events
 - `GET /jobs` - List processing jobs (paginated)
 - `GET /jobs/{job_id}` - Get job details
 - `GET /documents` - List processed documents
@@ -441,9 +589,41 @@ VALID_SEARCH_MODES = ["semantic", "keyword", "hybrid"]
 - `GET /generations` - List generated content
 - `GET /trail` - Audit trail with filtering
 
+### Bulk Processing (`/api/v1/bulk/`)
+- `POST /upload` - Upload multiple files and start bulk processing
+- `POST /folders` - Create bulk folder
+- `GET /folders` - List org folders (paginated)
+- `GET /folders/{folder_id}` - Get folder details
+- `DELETE /folders/{folder_id}` - Delete folder
+- `POST /folders/{folder_id}/upload-urls` - Generate signed upload URLs (legacy)
+- `GET /jobs` - List bulk jobs (paginated)
+- `GET /jobs/{job_id}` - Get job details with progress
+- `POST /jobs/{job_id}/cancel` - Cancel bulk job (idempotent)
+- `POST /jobs/{document_id}/retry` - Retry failed document
+- `POST /webhook/document-uploaded` - Webhook for Cloud Function triggers
+
+### Extraction (`/api/v1/extraction/`)
+Router refactored into package (`src/api/routers/extraction/`) with submodules:
+- `POST /analyze-fields` - Discover extractable fields with types and confidence scores
+- `POST /generate-schema` - Generate extraction template from selected fields
+- `POST /extract` - Extract structured data using schema
+- `GET /templates` - List extraction templates
+- `GET /templates/{template_name}` - Get template details
+- `GET /records` - List extracted records
+- `GET /records/{record_id}` - Get extracted record details
+- `POST /export` - Export extracted data (CSV, JSON)
+- `GET /health` - Extraction service health status
+
 ### Sessions (`/api/v1/sessions/`)
 - `GET /{session_id}` - Get session info
 - `DELETE /{session_id}` - End session and cleanup
+
+### Tiers (`/api/v1/tiers/`)
+- `GET /` - List subscription tiers (public endpoint, no auth required)
+
+### Content (`/api/v1/content/`)
+- `POST /load-parsed` - Load pre-parsed document content from GCS
+- `GET /check-exists` - Check if parsed document exists in GCS
 
 ### Usage (`/api/v1/usage/`)
 - `GET /summary` - Current period usage summary (tokens, pages, queries, storage)
@@ -454,7 +634,7 @@ VALID_SEARCH_MODES = ["semantic", "keyword", "hybrid"]
 
 ## Agent Configuration
 
-Both agents use Pydantic configs with environment variable defaults:
+All agents use Pydantic configs with environment variable defaults, inheriting from `BaseAgentConfig`:
 
 **SheetsAgentConfig** (`src/agents/sheets/config.py`):
 - `openai_model`: gpt-5.1-codex-mini (via `OPENAI_SHEET_MODEL`)
@@ -464,14 +644,23 @@ Both agents use Pydantic configs with environment variable defaults:
 - `enable_short_term_memory`, `enable_long_term_memory`: true
 
 **DocumentAgentConfig** (`src/agents/document/config.py`):
-- `openai_model`: gpt-5-nano (via `DOCUMENT_AGENT_MODEL`)
+- `openai_model`: gpt-5-mini (via `DOCUMENT_AGENT_MODEL`)
 - `default_num_faqs`: 10, `default_num_questions`: 10, `summary_max_words`: 500
 - `timeout_seconds`: 300s, `session_timeout_minutes`: 30
 - `rate_limit_requests`: 10, `rate_limit_window_seconds`: 60
 - `persist_to_database`: true, `middleware`: MiddlewareConfig
 - `enable_short_term_memory`, `enable_long_term_memory`: true
-- `enable_tool_selection`: true, `tool_selector_model`: gpt-5-nano (via `TOOL_SELECTOR_MODEL`)
+- `enable_tool_selection`: true, `tool_selector_model`: gpt-5-mini (via `TOOL_SELECTOR_MODEL`)
 - `tool_selector_max_tools`: 3 (max tools per query after filtering)
+
+**ExtractorAgentConfig** (`src/agents/extractor/config.py`):
+- `openai_model`: gpt-5-mini (via `EXTRACTOR_AGENT_MODEL`)
+- `openai_fallback_model`: gpt-5.2-2025-12-11 (via `EXTRACTOR_FALLBACK_MODEL`)
+- `temperature`: 0.2 (lower for deterministic extraction)
+- `max_fields_to_analyze`: 50, `max_schema_fields`: 100
+- `extraction_timeout_seconds`: 120
+- `schemas_directory`: schemas, `extracted_directory`: extracted
+- `persist_to_database`: true
 
 ## Usage Examples
 
@@ -541,18 +730,36 @@ agent.shutdown(wait=True)
 | GCS Utilities | `src/utils/gcs_utils.py` | Path parsing and URI building |
 | Timer Utilities | `src/utils/timer_utils.py` | Performance timing helpers |
 | Async Utilities | `src/utils/async_utils.py` | Async/sync interoperability |
+| Base Agent | `src/agents/core/base_agent.py` | Abstract base for all agents |
+| Base Config | `src/agents/core/base_config.py` | Shared agent configuration |
 | Rate Limiting | `src/agents/core/rate_limiter.py` | Per-session sliding window limits |
 | Session Mgmt | `src/agents/core/session_manager.py` | Session lifecycle and caching |
 | GCS Caching | `src/agents/document/gcs_cache.py` | SHA-256 based content caching |
 | Tool Selection | `src/agents/document/tool_selection.py` | ToolSelectionManager + filters |
 | Result Parser | `src/agents/document/result_parser.py` | Agent output parsing |
 | Tool Factory | `src/agents/document/tools/__init__.py` | Document tools creation |
+| Extractor Agent | `src/agents/extractor/core.py` | Structured data extraction |
 | File Cache | `src/agents/sheets/cache.py` | LRU DataFrame caching |
 | DuckDB Pool | `src/agents/sheets/tools.py` | Connection pooling for SQL queries |
 | Middleware Stack | `src/agents/core/middleware/stack.py` | Composable middleware |
+| Executor Pools | `src/core/executors.py` | Thread pool registry |
+| Parse Service | `src/services/parse_service.py` | Shared document parsing |
+| Bulk Service | `src/bulk/service.py` | Bulk job orchestration |
+| Bulk Graph | `src/bulk/state_graph.py` | LangGraph workflow |
 | DB Connection | `src/db/connection.py` | Per-event-loop async sessions |
 | Audit Repositories | `src/db/repositories/audit/` | Split document/job/log/generation repos |
+| Bulk Repository | `src/db/repositories/bulk_repository.py` | Bulk job persistence |
+| Extraction Repository | `src/db/repositories/extraction_repository.py` | Extraction data persistence |
 | RAG Repository | `src/db/repositories/rag_repository.py` | Store/folder management |
+| Stats Repository | `src/db/repositories/audit/stats_repository.py` | Dashboard statistics |
 | Usage Service | `src/core/usage/service.py` | Token/resource tracking |
 | Quota Checker | `src/core/usage/quota_checker.py` | Limit enforcement with caching |
+| Usage Queue | `src/core/usage/usage_queue.py` | Background usage tracking |
+| Bulk Router | `src/api/routers/bulk.py` | Bulk processing endpoints |
+| Extraction Router | `src/api/routers/extraction/` | Extraction API endpoints (package) |
+| Audit Router | `src/api/routers/audit.py` | Dashboard and audit endpoints |
+| Tiers Router | `src/api/routers/tiers.py` | Subscription tiers (public) |
+| Content Router | `src/api/routers/content.py` | Content loading from GCS |
+| API Utils | `src/api/utils/` | Formatting, decorators, responses |
 | Usage Router | `src/api/routers/usage.py` | Usage/subscription endpoints |
+| Bulk Generation | `src/bulk/generation.py` | Content generation helpers |
