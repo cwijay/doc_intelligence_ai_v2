@@ -1,7 +1,6 @@
 """Core Sheets Agent implementation using LangChain 1.2.0."""
 
 import asyncio
-import functools
 import time
 import uuid
 import hashlib
@@ -9,7 +8,7 @@ import logging
 import os
 from typing import Dict, List, Any, Optional
 
-from src.core.executors import get_executors
+from src.agents.core.concurrency import AgentConcurrency
 
 from langchain.chat_models import init_chat_model
 from langchain.agents import create_agent
@@ -529,15 +528,12 @@ class SheetsAgent(BaseAgent):
             agent_to_use = agent if agent is not None else self.agent
 
             logger.debug(f"Executing LangGraph agent with thread_id: {session_id}")
-            loop = asyncio.get_running_loop()
-            result = await loop.run_in_executor(
-                get_executors().agent_executor,
-                functools.partial(
-                    agent_to_use.invoke,
+            # Use native async invocation with semaphore-based concurrency control
+            async with AgentConcurrency.get_semaphore():
+                result = await agent_to_use.ainvoke(
                     {"messages": messages},
                     {"configurable": {"thread_id": session_id}}
                 )
-            )
             logger.debug(f"Agent result type: {type(result)}")
 
             response_text = ""

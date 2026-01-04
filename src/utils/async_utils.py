@@ -39,6 +39,17 @@ def run_async(coro: Coroutine[Any, Any, T]) -> T:
         This function uses nest_asyncio when an event loop is already running.
         This is necessary for environments like Jupyter notebooks or when
         LangChain tools are called from within async contexts.
+
+    Warning:
+        Nested event loops (via nest_asyncio) can cause subtle issues with
+        cancellation, signal handling, and reentrancy under load. For new
+        production code, prefer `run_in_executor_with_context()` which runs
+        blocking code in a dedicated thread pool without nesting the event loop.
+
+        This pattern is acceptable for:
+        - Jupyter notebooks and interactive environments
+        - LangChain tool bridging (sync _run() called from async context)
+        - One-off scripts and testing
     """
     try:
         loop = asyncio.get_event_loop()

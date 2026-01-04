@@ -115,3 +115,24 @@ class DocumentLoaderTool(BaseTool):
             "error": error_msg,
             "searched_paths": [parsed_file_path, str(upload_dir)]
         })
+
+    async def _arun(
+        self,
+        document_name: str,
+        parsed_file_path: str = "",
+        run_manager: Optional[CallbackManagerForToolRun] = None
+    ) -> str:
+        """Load document content asynchronously.
+
+        Uses executor for GCS operations (sync-only SDK).
+        """
+        from src.utils.async_utils import run_in_executor_with_context
+        from src.core.executors import get_executors
+
+        return await run_in_executor_with_context(
+            get_executors().io_executor,
+            self._run,
+            document_name,
+            parsed_file_path,
+            run_manager
+        )

@@ -19,6 +19,7 @@ A comprehensive tutorial on designing low-latency, scalable AI agent architectur
 11. [Rate Limiting](#11-rate-limiting)
 12. [Lifecycle Management](#12-lifecycle-management)
 13. [Performance Benchmarks](#13-performance-benchmarks)
+14. [Known Limitations & Trade-offs](#14-known-limitations--trade-offs)
 
 ---
 
@@ -258,6 +259,27 @@ async def invoke_agent(query: str):
         lambda: agent.invoke({"query": query})
     )
 ```
+
+### When NOT to Use Thread Pools
+
+Thread pools are not always the answer. Use them only when necessary:
+
+**Use threads when:**
+- The SDK/library is **synchronous only** (e.g., LangChain's `.invoke()`)
+- You're calling blocking I/O that has no async alternative
+- You need to isolate CPU-bound work from the event loop
+
+**Prefer native async when:**
+- The SDK provides async methods (e.g., OpenAI's `AsyncOpenAI`, httpx async)
+- You're doing network I/O with async-capable libraries
+- You want lower overhead and better cancellation support
+
+**Current Architecture Note:**
+This system uses native async `agent.ainvoke()` for LLM calls, with semaphore-based concurrency
+control replacing thread pool-based limits. LangChain's compiled agents support both sync `.invoke()`
+and async `.ainvoke()` - we use the async path for lower overhead and better cancellation support.
+
+Thread pools are still used for sync-only SDKs (GCS, DuckDB) via `run_in_executor()`.
 
 ---
 
@@ -1472,6 +1494,35 @@ Timeline for session "abc123":
 │ After call: 9 requests in window
 ```
 
+### Memory Management & Cleanup
+
+The rate limiter's in-memory dictionary could grow unbounded without cleanup. The system handles this with:
+
+1. **Periodic Background Task** (every 5 minutes):
+   ```python
+   async def _periodic_cleanup():
+       while True:
+           await asyncio.sleep(300)  # CLEANUP_INTERVAL_SECONDS
+           doc_agent.rate_limiter.cleanup()
+           sheets_agent.rate_limiter.cleanup()
+   ```
+
+2. **Cleanup Method** removes stale sessions:
+   ```python
+   def cleanup(self) -> int:
+       with self._lock:
+           stale = [sid for sid, reqs in self.requests.items()
+                    if not reqs or max(reqs) < window_start]
+           for sid in stale:
+               del self.requests[sid]
+   ```
+
+3. **Health Check Cleanup**: Each `/health` endpoint call triggers cleanup opportunistically.
+
+4. **Shutdown Cleanup**: `agent.shutdown()` calls cleanup before termination.
+
+**Note:** For multi-instance deployments, consider Redis-based rate limiting for distributed state.
+
 ---
 
 ## 12. Lifecycle Management
@@ -1683,6 +1734,73 @@ STORE_CACHE_TTL_SECONDS=300       # File store metadata cache TTL (5 minutes)
 # Bulk Processing
 BULK_CONCURRENT_DOCUMENTS=5       # Max concurrent documents in bulk queue
 ```
+
+---
+
+## 14. Known Limitations & Trade-offs
+
+Every architecture involves trade-offs. Here are the known limitations of this design:
+
+### 1. Nested Event Loops (nest_asyncio) - Largely Mitigated
+
+**Trade-off:** Some LangChain tools use synchronous `_run()` methods. When called from async contexts, `nest_asyncio` may be used to allow nested event loops.
+
+**Improvement:** Most tools now implement native `_arun()` methods using `await llm.ainvoke()`, eliminating the need for nested event loops in common code paths. Agents use native `agent.ainvoke()` with semaphore-based concurrency.
+
+**Remaining Usage:** `run_async()` is still used in legacy code paths and for sync-only SDKs. The helper includes a warning in its docstring.
+
+**Limitation:** When `nest_asyncio` is used, it can cause subtle issues with:
+- Cancellation propagation
+- Signal handling
+- Reentrancy under high load
+
+**Mitigation:** Prefer implementing `_arun()` for new tools. Use `run_in_executor_with_context()` for sync-only SDK operations.
+
+### 2. In-Memory Rate Limiting
+
+**Trade-off:** Rate limiting uses in-memory dictionaries for simplicity and speed.
+
+**Limitation:**
+- State is not shared across multiple instances
+- Memory could grow if cleanup fails
+
+**Mitigation:**
+- Periodic cleanup every 5 minutes bounds memory growth
+- For horizontal scaling, migrate to Redis-based rate limiting
+
+### 3. DuckDB :memory: Pooling
+
+**Trade-off:** Pooling in-memory DuckDB connections avoids connection creation overhead.
+
+**Limitation:** Each `:memory:` connection is isolated - registered DataFrames don't share state across connections (which is actually desirable for isolation).
+
+**Mitigation:** Connections now properly unregister views before returning to pool to prevent memory accumulation.
+
+### 4. Background Queue Threading
+
+**Trade-off:** Background queues run in dedicated threads with their own event loops for isolation.
+
+**Limitation:** Each queue needs its own database connection pool, increasing total connections.
+
+**Mitigation:**
+- Background pools use smaller sizes (2 vs 3 for main loop)
+- Queues use dedicated I/O executor for polling (not default executor)
+
+### 5. No Distributed Tracing (Yet)
+
+**Trade-off:** Current observability relies on structured logging and `get_stats()` methods.
+
+**Limitation:** No automatic trace propagation across async boundaries and thread pools.
+
+**Future Work:** Add OpenTelemetry integration for distributed tracing.
+
+### 6. Cache Stampede Protection
+
+**Trade-off:** Caches use simple check-then-generate pattern.
+
+**Limitation:** Under high concurrency, multiple requests may simultaneously miss the cache and trigger expensive operations.
+
+**Future Work:** Add per-key locking or probabilistic early refresh to prevent stampedes.
 
 ---
 

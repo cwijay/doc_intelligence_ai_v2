@@ -13,6 +13,7 @@ from abc import ABC, abstractmethod
 from typing import Generic, Optional, Set, TypeVar
 
 from src.core.patterns import ThreadSafeSingleton
+from src.core.executors import get_executors
 
 logger = logging.getLogger(__name__)
 
@@ -176,8 +177,9 @@ class BackgroundQueue(Generic[T], ThreadSafeSingleton, ABC):
         while not self._shutdown_event.is_set():
             try:
                 # Non-blocking get with shorter timeout for responsiveness
+                # Use dedicated I/O executor to avoid contention with default executor
                 event = await asyncio.get_event_loop().run_in_executor(
-                    None, lambda: self._queue.get(timeout=0.5)
+                    get_executors().io_executor, lambda: self._queue.get(timeout=0.5)
                 )
 
                 if event is None:

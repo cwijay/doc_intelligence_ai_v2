@@ -254,3 +254,32 @@ class ContentPersistTool(BaseTool):
         results["processing_time_ms"] = duration_ms
 
         return json.dumps(results)
+
+    async def _arun(
+        self,
+        content: str,
+        parsed_file_path: str = "",
+        summary: Optional[str] = None,
+        faqs: Optional[str] = None,
+        questions: Optional[str] = None,
+        organization_id: Optional[str] = None,
+        run_manager: Optional[CallbackManagerForToolRun] = None
+    ) -> str:
+        """Persist generated content asynchronously.
+
+        Uses executor for GCS operations (sync-only SDK).
+        """
+        from src.utils.async_utils import run_in_executor_with_context
+        from src.core.executors import get_executors
+
+        return await run_in_executor_with_context(
+            get_executors().io_executor,
+            self._run,
+            content,
+            parsed_file_path,
+            summary,
+            faqs,
+            questions,
+            organization_id,
+            run_manager
+        )

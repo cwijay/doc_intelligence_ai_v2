@@ -678,7 +678,10 @@ class ExtractorAgent(BaseAgent):
     # ==========================================================================
 
     async def _run_tool_async(self, tool, **kwargs) -> str:
-        """Run a tool asynchronously in the executor pool.
+        """Run a tool asynchronously.
+
+        Uses native async _arun() if available, otherwise falls back to
+        executor-based execution with concurrency control.
 
         Args:
             tool: The tool to run
@@ -687,14 +690,23 @@ class ExtractorAgent(BaseAgent):
         Returns:
             Tool result as JSON string
         """
+        from src.agents.core.concurrency import AgentConcurrency
+
+        # Prefer native async if tool implements _arun()
+        if hasattr(tool, '_arun') and callable(getattr(tool, '_arun')):
+            async with AgentConcurrency.get_semaphore():
+                return await tool._arun(**kwargs)
+
+        # Fallback to executor for sync-only tools
         if EXECUTORS_AVAILABLE:
             loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                get_executors().agent_executor,
-                functools.partial(tool._run, **kwargs)
-            )
+            async with AgentConcurrency.get_semaphore():
+                return await loop.run_in_executor(
+                    get_executors().agent_executor,
+                    functools.partial(tool._run, **kwargs)
+                )
         else:
-            # Fallback to running in current thread
+            # Last resort: run in current thread
             return tool._run(**kwargs)
 
     def _calculate_token_usage(self, input_text: str, output_text: str) -> TokenUsage:

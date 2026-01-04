@@ -54,9 +54,18 @@ class DuckDBPool:
         """Return a connection to the pool."""
         with self._lock:
             if len(self._pool) < self._max:
-                # Clear any registered tables before returning to pool
                 try:
-                    conn.execute("SELECT 1")  # Test connection is valid
+                    # Clear registered views/tables to prevent memory accumulation
+                    # DuckDB register() creates views that persist until unregistered
+                    views = conn.execute(
+                        "SELECT view_name FROM duckdb_views() WHERE NOT internal"
+                    ).fetchall()
+                    for (view_name,) in views:
+                        try:
+                            conn.unregister(view_name)
+                        except Exception:
+                            pass  # Ignore errors on cleanup
+                    conn.execute("SELECT 1")  # Test connection is still valid
                     self._pool.append(conn)
                 except Exception:
                     try:
