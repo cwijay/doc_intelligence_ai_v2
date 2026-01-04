@@ -1,6 +1,6 @@
 # Building High-Performance Agentic Systems
 
-A comprehensive tutorial on designing low-latency, scalable AI agent architectures using patterns from Document Intelligence AI v3.0.
+A comprehensive tutorial on designing low-latency, scalable AI agent architectures for production LLM applications.
 
 ---
 
