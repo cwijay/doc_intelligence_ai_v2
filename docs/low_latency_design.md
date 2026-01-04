@@ -6,6 +6,7 @@ A comprehensive tutorial on designing low-latency, scalable AI agent architectur
 
 ## Table of Contents
 
+0. [Why Python Concurrency is Challenging](#0-why-python-concurrency-is-challenging)
 1. [Introduction](#1-introduction)
 2. [Architecture Overview](#2-architecture-overview)
 3. [Executor Pool Design](#3-executor-pool-design)
@@ -20,6 +21,97 @@ A comprehensive tutorial on designing low-latency, scalable AI agent architectur
 12. [Lifecycle Management](#12-lifecycle-management)
 13. [Performance Benchmarks](#13-performance-benchmarks)
 14. [Known Limitations & Trade-offs](#14-known-limitations--trade-offs)
+15. [Future: Python 3.14 Free-Threaded Mode](#15-future-python-314-free-threaded-mode)
+
+---
+
+## 0. Why Python Concurrency is Challenging
+
+Before diving into the architecture, it's essential to understand why building
+high-performance Python applications requires careful design.
+
+### The Global Interpreter Lock (GIL)
+
+Python's reference implementation (CPython) uses a **Global Interpreter Lock (GIL)** -
+a mutex that allows only one thread to execute Python bytecode at a time:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     Python Process                                   │
+│  ┌──────────┐   ┌──────────┐   ┌──────────┐                         │
+│  │ Thread 1 │   │ Thread 2 │   │ Thread 3 │                         │
+│  │ (active) │   │ (waiting)│   │ (waiting)│                         │
+│  └────┬─────┘   └────┬─────┘   └────┬─────┘                         │
+│       │              │              │                                │
+│       ▼              ▼              ▼                                │
+│  ┌─────────────────────────────────────────────────────────────┐    │
+│  │                  GIL (only one at a time)                   │    │
+│  └─────────────────────────────────────────────────────────────┘    │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Why does the GIL exist?**
+- Simplifies CPython's memory management (reference counting)
+- Makes C extension integration safer
+- Historical design decision from Python's early days
+
+**The consequence:** Even with multiple threads, Python cannot achieve true
+parallelism for CPU-bound work. Threads take turns, one at a time.
+
+### The I/O-Bound Opportunity
+
+The GIL is released during I/O operations (network calls, file reads, database queries).
+This creates an opportunity:
+
+```
+Thread 1: [Execute] [API Call ─────────────────────] [Execute]
+Thread 2:          [Execute] [DB Query ─────] [Execute]
+Thread 3:                   [Execute] [File I/O ───] [Execute]
+                   ▲        ▲        ▲
+                   │        │        │
+              GIL released during I/O waits
+```
+
+For **I/O-bound workloads** (like LLM API calls), threads can overlap their waiting periods.
+
+### Enter AsyncIO: Cooperative Concurrency
+
+AsyncIO takes a different approach: instead of multiple threads competing for the GIL,
+it uses a **single thread** with **cooperative multitasking**:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                     Event Loop (Single Thread)                       │
+│                                                                       │
+│  Task A: [Run] ──await──> [Suspended]           [Resume] [Done]     │
+│  Task B:       [Run] ──await──> [Suspended]     [Resume] [Done]     │
+│  Task C:             [Run] ──await──> [Suspended] [Resume] [Done]   │
+│                                                                       │
+│  ────────────────────────────────────────────────────────────►       │
+│                           Time                                        │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Why AsyncIO works for our use case:**
+
+1. **No GIL contention**: Single thread means no lock competition
+2. **Efficient I/O handling**: The event loop schedules tasks during waits
+3. **Lower overhead**: No thread creation/context switching costs
+4. **Better cancellation**: Cooperative yield points enable clean cancellation
+5. **Simpler state management**: No locks needed for shared data
+
+### When Threads Are Still Needed
+
+AsyncIO excels for I/O-bound work, but some operations require thread pools:
+
+| Operation Type | Why Threads Needed | Our Solution |
+|---------------|-------------------|--------------|
+| Sync-only SDKs | GCS, DuckDB have no async API | `io_executor`, `query_executor` |
+| CPU-bound work | Would block the event loop | `agent_executor` (with caution) |
+| C extensions | Many don't release the GIL | Executor isolation |
+
+This architecture uses **AsyncIO as the primary concurrency model**, with
+**thread pools for specific blocking operations**.
 
 ---
 
@@ -1801,6 +1893,152 @@ Every architecture involves trade-offs. Here are the known limitations of this d
 **Limitation:** Under high concurrency, multiple requests may simultaneously miss the cache and trigger expensive operations.
 
 **Future Work:** Add per-key locking or probabilistic early refresh to prevent stampedes.
+
+---
+
+## 15. Future: Python 3.14 Free-Threaded Mode
+
+Python 3.14 introduces a significant change to Python's concurrency story:
+optional free-threaded (no-GIL) execution.
+
+### What is Free-Threaded Python?
+
+PEP 703 introduced an optional build of CPython that removes the Global Interpreter Lock:
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                 Free-Threaded Python Process                         │
+│  ┌──────────┐   ┌──────────┐   ┌──────────┐                         │
+│  │ Thread 1 │   │ Thread 2 │   │ Thread 3 │                         │
+│  │ (active) │   │ (active) │   │ (active) │  <- True parallelism!   │
+│  └──────────┘   └──────────┘   └──────────┘                         │
+│                                                                       │
+│  No GIL - threads execute Python bytecode in parallel                │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**Key milestones:**
+- **Python 3.13**: Experimental free-threaded build introduced
+- **Python 3.14**: Free-threading officially supported (no longer experimental)
+- **Python 3.15+**: Expected to become the default in future releases
+
+### Performance Characteristics
+
+| Metric | Python 3.13 Free-Threaded | Python 3.14 Free-Threaded |
+|--------|---------------------------|---------------------------|
+| Single-threaded overhead | ~40% slower | ~5-10% slower |
+| Multi-threaded scaling | Good | Near-linear |
+| Thread-safety | Internal locks in built-ins | Improved internal locks |
+
+Thread-safety is achieved through fine-grained locking in built-in types
+(dict, list, set) rather than the coarse GIL.
+
+### When Free-Threading Helps
+
+Free-threaded Python excels for **CPU-bound parallel workloads**:
+
+```python
+# Before: multiprocessing required for parallelism
+from multiprocessing import Pool
+with Pool(4) as p:
+    results = p.map(cpu_intensive_task, data)
+
+# After (Python 3.14+): true thread parallelism
+from concurrent.futures import ThreadPoolExecutor
+with ThreadPoolExecutor(max_workers=4) as e:
+    results = list(e.map(cpu_intensive_task, data))  # Actually parallel!
+```
+
+**Good use cases:**
+- Data processing and transformation
+- ML model inference (especially with NumPy/PyTorch)
+- Parallel document parsing
+- CPU-intensive text processing
+
+### When AsyncIO is Still Preferred
+
+For **I/O-bound workloads** (our primary use case), AsyncIO remains the better choice:
+
+| Consideration | AsyncIO | Free-Threaded Threads |
+|--------------|---------|----------------------|
+| Overhead per task | Very low (coroutine) | Higher (OS thread) |
+| Memory per task | ~1KB | ~8MB stack |
+| Cancellation | Clean (yield points) | Complex (requires cooperation) |
+| Shared state | No locks needed | Requires careful locking |
+| Backpressure | Natural (semaphores) | Manual coordination |
+| I/O efficiency | Excellent | Good |
+
+**Our LLM agent workload:**
+- 90%+ time spent waiting for API responses (I/O-bound)
+- AsyncIO's cooperative model is ideal
+- Thread pools only for sync SDK operations
+
+### Architecture Implications
+
+Our async-first architecture is well-positioned for either approach:
+
+```
+Current (AsyncIO + Thread Pools):
+┌─────────────────────────────────────────────────────────────────┐
+│  Event Loop (asyncio)                                            │
+│  ├── agent.ainvoke() ──────────────────► LLM API (async HTTP)   │
+│  ├── db.execute() ──────────────────────► PostgreSQL (asyncpg)  │
+│  └── executor.submit() ─┬───────────────► GCS (sync SDK)        │
+│                         └───────────────► DuckDB (sync SDK)     │
+└─────────────────────────────────────────────────────────────────┘
+
+Future (AsyncIO + Free-Threaded Pools):
+┌─────────────────────────────────────────────────────────────────┐
+│  Event Loop (asyncio)                                            │
+│  ├── agent.ainvoke() ──────────────────► LLM API (async HTTP)   │
+│  ├── db.execute() ──────────────────────► PostgreSQL (asyncpg)  │
+│  └── executor.submit() ─┬───────────────► GCS (true parallel!)  │
+│                         ├───────────────► DuckDB (true parallel)│
+│                         └───────────────► CPU processing <- NEW │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Migration opportunities:**
+1. CPU-bound document parsing can use true parallelism
+2. DuckDB queries can run in parallel (currently sequential per connection)
+3. Pandas operations can leverage multiple cores
+
+### Enabling Free-Threaded Mode
+
+```bash
+# Check if running free-threaded build
+python -c "import sys; print(sys._is_gil_enabled())"
+
+# Run with GIL disabled (if supported)
+PYTHON_GIL=0 python app.py
+# or
+python -X gil=0 app.py
+```
+
+**Note:** Some C extensions may not yet support free-threaded mode and will
+automatically re-enable the GIL when imported.
+
+### Timeline and Recommendations
+
+| Version | Status | Recommendation |
+|---------|--------|----------------|
+| Python 3.13 | Experimental | Testing only |
+| Python 3.14 | Supported | Early adoption for new projects |
+| Python 3.15-3.16 | Default option | Evaluate for production |
+| Python 3.17+ | Default | Full adoption |
+
+**For this codebase:**
+1. Continue using AsyncIO for I/O-bound LLM operations
+2. Test free-threaded builds for CPU-intensive processing
+3. Gradually migrate thread pools to free-threaded execution
+4. Monitor library compatibility (GCS, DuckDB, pandas, LangChain)
+
+### Sources
+
+- [Python 3.14 Free-Threading Documentation](https://docs.python.org/3.14/howto/free-threading-python.html)
+- [What's New in Python 3.14](https://docs.python.org/3/whatsnew/3.14.html)
+- [PEP 703 - Making the GIL Optional](https://peps.python.org/pep-0703/)
+- [Python Free-Threading Guide](https://py-free-threading.github.io/)
 
 ---
 
