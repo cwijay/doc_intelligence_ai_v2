@@ -371,6 +371,10 @@ This system uses native async `agent.ainvoke()` for LLM calls, with semaphore-ba
 control replacing thread pool-based limits. LangChain's compiled agents support both sync `.invoke()`
 and async `.ainvoke()` - we use the async path for lower overhead and better cancellation support.
 
+Concurrency is controlled via `AgentConcurrency` class (`src/agents/core/concurrency.py`):
+- Default limit: 10 concurrent agent invocations (configurable via `AGENT_MAX_CONCURRENT`)
+- Uses `asyncio.Semaphore` for bounded concurrency without thread overhead
+
 Thread pools are still used for sync-only SDKs (GCS, DuckDB) via `run_in_executor()`.
 
 ---
@@ -1773,6 +1777,7 @@ IMPORTANT: Shutdown order prevents data loss
 | Component | File |
 |-----------|------|
 | Executor Pools | `src/core/executors.py` |
+| Agent Concurrency | `src/agents/core/concurrency.py` |
 | Async Utilities | `src/utils/async_utils.py` |
 | Database Connection | `src/db/connection.py` |
 | Usage Context | `src/core/usage/context.py` |
@@ -1797,9 +1802,12 @@ IMPORTANT: Shutdown order prevents data loss
 
 ```bash
 # Executor Pool Sizes
-AGENT_EXECUTOR_POOL_SIZE=10       # LLM agent invocations
+AGENT_EXECUTOR_POOL_SIZE=10       # LLM agent invocations (thread pool for sync SDKs)
 IO_EXECUTOR_POOL_SIZE=20          # GCS/file I/O operations
 QUERY_EXECUTOR_POOL_SIZE=10       # DuckDB/SQL queries
+
+# Async Agent Concurrency
+AGENT_MAX_CONCURRENT=10           # Max concurrent agent.ainvoke() calls (semaphore)
 
 # Database Pool (per-loop differentiation)
 DB_POOL_SIZE=3                    # Main loop pool size
@@ -1824,7 +1832,7 @@ TIER_CACHE_TTL_SECONDS=3600       # Subscription tier cache TTL (1 hour)
 STORE_CACHE_TTL_SECONDS=300       # File store metadata cache TTL (5 minutes)
 
 # Bulk Processing
-BULK_CONCURRENT_DOCUMENTS=5       # Max concurrent documents in bulk queue
+BULK_CONCURRENT_DOCUMENTS=3       # Max concurrent documents in bulk queue
 ```
 
 ---
