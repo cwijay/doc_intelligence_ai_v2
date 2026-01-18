@@ -60,7 +60,7 @@ steps:
 
 # Substitution variables (can be overridden via --substitutions flag or trigger config)
 substitutions:
-  _SERVICE_NAME: 'doc-intelligence-ai'
+  _SERVICE_NAME: 'document-intelligence-ai-api-dev'
   _REGION: 'us-central1'
   _MEMORY: '2Gi'
   _CPU: '2'
