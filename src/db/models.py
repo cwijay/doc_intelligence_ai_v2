@@ -31,6 +31,9 @@ RAG cache models:
 Bulk processing models:
 - BulkJobModel: Bulk document processing job tracking
 - BulkJobDocumentModel: Per-document status within bulk jobs
+
+Note: Intelligence report operations use raw SQL in report_repository.py
+(no ORM model defined - table created via migration)
 """
 
 from biz2bricks_core import (

@@ -271,3 +271,88 @@ class QuotaEstimates:
 
     # Sheets
     SHEETS_ANALYZE = 1500
+
+    # Intelligence Reports
+    REPORT_GENERATE = 5000
+    REPORT_INSIGHTS = 2000
+    REPORT_QUICK_ANALYSIS = 1500
+
+
+# =============================================================================
+# Intelligence Report Configuration
+# =============================================================================
+class ReportConfig:
+    """Configuration for Business Intelligence reports."""
+
+    # Report generation limits
+    MAX_DOCUMENTS_PER_REPORT = 100
+    MAX_RECORDS_PER_REPORT = 10000
+    MAX_INSIGHTS = 20
+    DEFAULT_INSIGHTS = 5
+
+    # Timeouts
+    REPORT_TIMEOUT_SECONDS = 300
+    ANALYSIS_TIMEOUT_SECONDS = 120
+    CHART_TIMEOUT_SECONDS = 60
+
+    # Output settings
+    DEFAULT_CHART_DPI = 150
+    MAX_CHART_ITEMS = 10  # Max items in pie/bar charts
+    MAX_TREND_POINTS = 24  # Max months in trend charts
+
+    # Cache settings
+    REPORT_CACHE_HOURS = 24  # Cache reports for 24 hours
+
+    # Processing time estimates (seconds)
+    ESTIMATED_TIME_EXPENSE_SUMMARY = 30
+    ESTIMATED_TIME_VENDOR_ANALYSIS = 25
+    ESTIMATED_TIME_RECONCILIATION = 45
+    ESTIMATED_TIME_TRENDS = 20
+    ESTIMATED_TIME_CASH_FLOW = 35
+    ESTIMATED_TIME_TAX_PREP = 40
+
+
+# =============================================================================
+# Report Types
+# =============================================================================
+REPORT_TYPE_EXPENSE_SUMMARY = "expense_summary"
+REPORT_TYPE_VENDOR_ANALYSIS = "vendor_analysis"
+REPORT_TYPE_INVOICE_RECONCILIATION = "invoice_reconciliation"
+REPORT_TYPE_SPEND_TRENDS = "spend_trends"
+REPORT_TYPE_CASH_FLOW = "cash_flow_projection"
+REPORT_TYPE_TAX_PREPARATION = "tax_preparation"
+
+VALID_REPORT_TYPES = [
+    REPORT_TYPE_EXPENSE_SUMMARY,
+    REPORT_TYPE_VENDOR_ANALYSIS,
+    REPORT_TYPE_INVOICE_RECONCILIATION,
+    REPORT_TYPE_SPEND_TRENDS,
+    REPORT_TYPE_CASH_FLOW,
+    REPORT_TYPE_TAX_PREPARATION,
+]
+
+# =============================================================================
+# Report Status
+# =============================================================================
+REPORT_STATUS_PENDING = "pending"
+REPORT_STATUS_EXTRACTING = "extracting"
+REPORT_STATUS_AGGREGATING = "aggregating"
+REPORT_STATUS_ANALYZING = "analyzing"
+REPORT_STATUS_GENERATING = "generating"
+REPORT_STATUS_COMPLETED = "completed"
+REPORT_STATUS_FAILED = "failed"
+
+# =============================================================================
+# Report Output Formats
+# =============================================================================
+REPORT_FORMAT_PDF = "pdf"
+REPORT_FORMAT_EXCEL = "excel"
+REPORT_FORMAT_JSON = "json"
+REPORT_FORMAT_MARKDOWN = "markdown"
+
+VALID_REPORT_FORMATS = [
+    REPORT_FORMAT_PDF,
+    REPORT_FORMAT_EXCEL,
+    REPORT_FORMAT_JSON,
+    REPORT_FORMAT_MARKDOWN,
+]

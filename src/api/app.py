@@ -24,6 +24,7 @@ from .routers import (
     content_router,
     bulk_router,
     tiers_router,
+    intelligence_router,
 )
 
 logger = logging.getLogger(__name__)
@@ -92,6 +93,14 @@ OPENAPI_TAGS = [
     {
         "name": "Tiers",
         "description": "Subscription tier information (public, no auth required)",
+    },
+    {
+        "name": "Intelligence Reports",
+        "description": "Business Intelligence reports: expense summaries, vendor analysis, invoice reconciliation",
+    },
+    {
+        "name": "Intelligence Analysis",
+        "description": "Quick analysis and dashboard data for business intelligence",
     },
 ]
 
@@ -531,6 +540,11 @@ def create_app() -> FastAPI:
         tiers_router,
         prefix=f"{api_prefix}/tiers",
         tags=["Tiers"],
+    )
+
+    app.include_router(
+        intelligence_router,
+        prefix=f"{api_prefix}/intelligence",
     )
 
     return app

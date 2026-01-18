@@ -12,6 +12,7 @@ from .extraction import router as extraction_router
 from .content import router as content_router
 from .bulk import router as bulk_router
 from .tiers import router as tiers_router
+from .intelligence import router as intelligence_router
 
 __all__ = [
     "documents_router",
@@ -26,4 +27,5 @@ __all__ = [
     "content_router",
     "bulk_router",
     "tiers_router",
+    "intelligence_router",
 ]

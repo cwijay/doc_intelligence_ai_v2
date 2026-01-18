@@ -34,6 +34,8 @@ from .memory_repository import PostgresLongTermMemory
 
 from . import rag_repository
 
+from . import bulk_repository
+
 from .extraction_repository import (
     ensure_extraction_tables_exist,
     save_extracted_record,
@@ -44,6 +46,8 @@ from .extraction_repository import (
     check_table_exists,
     get_organization_name,
 )
+
+from . import report_repository
 
 __all__ = [
     # Audit operations
@@ -67,6 +71,8 @@ __all__ = [
     "PostgresLongTermMemory",
     # RAG
     "rag_repository",
+    # Bulk
+    "bulk_repository",
     # Extraction
     "ensure_extraction_tables_exist",
     "save_extracted_record",
@@ -76,4 +82,6 @@ __all__ = [
     "delete_extracted_record",
     "check_table_exists",
     "get_organization_name",
+    # Reports
+    "report_repository",
 ]
