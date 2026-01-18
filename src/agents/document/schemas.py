@@ -2,6 +2,7 @@
 
 import os
 import uuid
+from dataclasses import dataclass, field as dataclass_field
 from pydantic import BaseModel, Field, field_validator
 from typing import List, Optional, Dict, Any
 from datetime import datetime
@@ -92,9 +93,9 @@ class DocumentRequest(BaseModel):
         description="Organization ID for multi-tenant isolation"
     )
 
-    file_filter: Optional[str] = Field(
+    file_filter: Optional[List[str]] = Field(
         default=None,
-        description="File name filter for RAG cache scoping (single document context)"
+        description="File name(s) filter for RAG cache scoping (supports multiple files)"
     )
 
     folder_filter: Optional[str] = Field(
@@ -203,6 +204,12 @@ class DocumentResponse(BaseModel):
     response_text: Optional[str] = Field(
         None,
         description="The agent's response text (used for RAG chat answers)"
+    )
+
+    # RAG citations (for chat answers) - stored as dicts, converted to Pydantic by API router
+    citations: List[Dict[str, Any]] = Field(
+        default_factory=list,
+        description="Citations from RAG search results"
     )
 
     # Document info
@@ -383,3 +390,27 @@ class RAGChatResponse(BaseModel):
 
     # Error info (if success=False)
     error: Optional[str] = Field(None, description="Error message if search failed")
+
+
+# =============================================================================
+# Direct Generation Schema
+# =============================================================================
+
+@dataclass
+class DirectGenerationResult:
+    """Result from direct tool invocation (bypassing ReAct agent).
+
+    This schema is used when calling generation tools directly for deterministic
+    workflows, avoiding the overhead of ReAct agent decision-making.
+    """
+
+    success: bool
+    summary: Optional[str] = None
+    faqs: Optional[List[Dict[str, str]]] = None  # List of {question, answer} dicts
+    questions: Optional[List[Dict[str, Any]]] = None  # List of {question, expected_answer, difficulty} dicts
+    processing_time_ms: float = 0.0
+    cached: bool = False
+    persisted: bool = False
+    output_file_paths: Optional[Dict[str, str]] = None  # {summary: uri, faqs: uri, questions: uri}
+    content_hash: Optional[str] = None
+    error: Optional[str] = None

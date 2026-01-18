@@ -274,6 +274,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     from .dependencies import initialize_agents
     await initialize_agents()
 
+    # Initialize Gemini File Search client singleton (pre-warm for faster first request)
+    try:
+        from src.rag.gemini_file_store import GeminiClientManager
+        GeminiClientManager.initialize()
+        logger.info("Gemini File Search client pre-warmed")
+    except Exception as e:
+        logger.warning(f"Gemini client initialization failed (will lazy-init on first use): {e}")
+
     # Start periodic cleanup task
     _cleanup_task = asyncio.create_task(_periodic_cleanup())
     logger.info("Started periodic cleanup task")
@@ -300,7 +308,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Agent shutdown error: {e}")
 
-    # 2. Shutdown executor pools (wait for pending tasks)
+    # 2. Shutdown Gemini File Search client
+    try:
+        from src.rag.gemini_file_store import GeminiClientManager
+        GeminiClientManager.shutdown()
+        logger.info("Gemini File Search client shutdown complete")
+    except Exception as e:
+        logger.warning(f"Gemini client shutdown error: {e}")
+
+    # 3. Shutdown executor pools (wait for pending tasks)
     try:
         from src.core.executors import shutdown_executors
         shutdown_executors(wait=True)
@@ -308,7 +324,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Executor pool shutdown error: {e}")
 
-    # 3. Shutdown usage queue (wait for pending events to be written)
+    # 4. Shutdown usage queue (wait for pending events to be written)
     try:
         from src.core.usage import get_usage_queue
         get_usage_queue().shutdown(wait=True, timeout=10.0)
@@ -316,7 +332,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Usage queue shutdown error: {e}")
 
-    # 4. Shutdown bulk job queue (wait for pending jobs)
+    # 5. Shutdown bulk job queue (wait for pending jobs)
     try:
         from src.bulk.queue import stop_bulk_queue
         stop_bulk_queue(wait=True)
@@ -324,7 +340,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Bulk queue shutdown error: {e}")
 
-    # 5. Shutdown audit queue (wait for pending events to be written)
+    # 6. Shutdown audit queue (wait for pending events to be written)
     try:
         from src.agents.core.audit_queue import get_audit_queue
         get_audit_queue().shutdown(wait=True, timeout=10.0)
@@ -332,7 +348,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     except Exception as e:
         logger.warning(f"Audit queue shutdown error: {e}")
 
-    # 6. Close database connections after queues are done
+    # 7. Close database connections after queues are done
     try:
         from src.db.connection import db
         await db.close_all()

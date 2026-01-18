@@ -273,6 +273,7 @@ class DatabaseManager:
                 max_overflow=self.config.max_overflow,
                 pool_timeout=self.config.pool_timeout,
                 pool_recycle=self.config.pool_recycle,
+                pool_pre_ping=True,  # Verify connections before checkout (detects stale connections)
                 echo=self.config.echo_sql,
             )
 
@@ -310,6 +311,7 @@ class DatabaseManager:
             max_overflow=self.config.max_overflow,
             pool_timeout=self.config.pool_timeout,
             pool_recycle=self.config.pool_recycle,
+            pool_pre_ping=True,  # Verify connections before checkout (detects stale connections)
             echo=self.config.echo_sql,
         )
 

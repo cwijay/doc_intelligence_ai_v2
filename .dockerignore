@@ -1,0 +1,99 @@
+# =============================================================================
+# Docker ignore file for Document Intelligence AI v3.0
+# =============================================================================
+
+# Git
+.git
+.gitignore
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv
+venv/
+ENV/
+env/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+.nox/
+coverage.xml
+*.cover
+
+# Environment files (secrets should come from Secret Manager)
+.env
+.env.*
+*.local
+
+# Documentation (keep README for reference)
+docs/
+*.md
+!README.md
+
+# Local development files
+/upload/
+/parsed/
+/generated/
+*.log
+logs/
+
+# Credentials (should never be in image)
+*.pem
+*.key
+credentials.json
+service-account*.json
+*-credentials.json
+
+# Misc
+.DS_Store
+Thumbs.db
+*.db
+*.sqlite3
+
+# Tests (not needed in production)
+tests/
+
+# Claude Code artifacts
+.claude/
+.benchmarks/
+
+# Deployment scripts and configs (not needed in runtime image)
+.cloudbuild/
+deployment/
+*.sh
+!scripts/**/*.sh
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak

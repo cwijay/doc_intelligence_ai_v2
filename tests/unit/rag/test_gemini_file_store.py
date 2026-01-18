@@ -233,7 +233,7 @@ class TestQueryStore:
             mock_client.models.generate_content.assert_called_once()
 
     def test_query_store_with_file_filter(self, mock_store, mock_response):
-        """Test query with file name filter."""
+        """Test query with single file name filter."""
         from src.rag.gemini_file_store import query_store
 
         with patch("src.rag.gemini_file_store.client") as mock_client, \
@@ -244,13 +244,34 @@ class TestQueryStore:
             result = query_store(
                 mock_store,
                 "Find payment terms",
-                file_name_filter="contract.pdf"
+                file_name_filter=["contract.pdf"]
             )
 
             # Verify the filter was passed
             call_args = mock_client.models.generate_content.call_args
             config = call_args.kwargs.get("config")
             assert config is not None
+
+    def test_query_store_with_multiple_file_filter(self, mock_store, mock_response):
+        """Test query with multiple file names filter (OR logic)."""
+        from src.rag.gemini_file_store import query_store
+
+        with patch("src.rag.gemini_file_store.client") as mock_client, \
+             patch("src.rag.gemini_file_store._log_event"):
+
+            mock_client.models.generate_content.return_value = mock_response
+
+            result = query_store(
+                mock_store,
+                "Compare invoices",
+                file_name_filter=["invoice1.pdf", "invoice2.pdf"]
+            )
+
+            # Verify the filter was passed with OR logic
+            call_args = mock_client.models.generate_content.call_args
+            config = call_args.kwargs.get("config")
+            assert config is not None
+            assert result == mock_response
 
     def test_query_store_with_folder_filter(self, mock_store, mock_response):
         """Test query with folder name filter."""
@@ -335,7 +356,7 @@ class TestQueryStore:
             result = query_store(
                 mock_store,
                 "Find payment info",
-                file_name_filter="invoice.pdf",
+                file_name_filter=["invoice.pdf"],
                 folder_name_filter="Invoices",
                 folder_id_filter="folder-123"
             )

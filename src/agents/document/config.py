@@ -43,7 +43,7 @@ class DocumentAgentConfig(BaseAgentConfig):
     )
 
     openai_model: str = Field(
-        default_factory=lambda: os.getenv("DOCUMENT_AGENT_MODEL", "gpt-5-mini"),
+        default_factory=lambda: os.getenv("DOCUMENT_AGENT_MODEL", "gpt-4o-mini"),
         description="OpenAI model to use"
     )
 
@@ -164,6 +164,13 @@ class DocumentAgentConfig(BaseAgentConfig):
     tool_selector_max_tools: int = Field(
         default_factory=lambda: parse_int_env("TOOL_SELECTOR_MAX_TOOLS", 3),
         description="Maximum tools to provide per query after filtering"
+    )
+
+    # Direct Invocation Configuration
+    use_direct_invocation: bool = Field(
+        default_factory=lambda: parse_bool_env("USE_DIRECT_INVOCATION", True),
+        description="Use direct tool invocation (bypass ReAct agent) for generation. "
+                    "Reduces latency from ~71s to ~15-20s for deterministic workflows."
     )
 
     @field_validator('tool_selector_max_tools')

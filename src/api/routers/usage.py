@@ -135,6 +135,7 @@ class UsageHistoryResponse(BaseModel):
     history: List[UsageHistoryItem] = Field(default_factory=list)
     total_tokens: int = 0
     total_cost_usd: float = 0.0
+    feature_breakdown: Optional[List[UsageBreakdownItem]] = None
     error: Optional[str] = None
 
 
@@ -454,6 +455,26 @@ async def get_usage_history(
             total_tokens += item.get("total_tokens", 0)
             total_cost += float(item.get("total_cost_usd", 0.0))
 
+        # Fetch feature breakdown for the requested period
+        breakdown_data = await service.get_feature_breakdown(
+            org_id=org_id,
+            start_date=start_date,
+            end_date=end_date,
+        )
+
+        # Map breakdown data to response model
+        feature_breakdown = None
+        if breakdown_data:
+            feature_breakdown = [
+                UsageBreakdownItem(
+                    name=item.get("name", "unknown"),
+                    tokens_used=item.get("tokens_used", 0),
+                    percentage=item.get("percentage", 0.0),
+                    cost_usd=item.get("cost_usd", 0.0),
+                )
+                for item in breakdown_data
+            ]
+
         return UsageHistoryResponse(
             success=True,
             period=period,
@@ -462,6 +483,7 @@ async def get_usage_history(
             history=history,
             total_tokens=total_tokens,
             total_cost_usd=total_cost,
+            feature_breakdown=feature_breakdown,
         )
 
     except Exception as e:

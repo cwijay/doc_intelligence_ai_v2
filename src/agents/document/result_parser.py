@@ -45,6 +45,7 @@ class AgentResultParser:
         result = {
             "response": response_text,
             "content": None,
+            "citations": [],  # RAG search citations
             "source_path": None,
             "metadata": None,
             "tools_used": [],
@@ -59,6 +60,7 @@ class AgentResultParser:
         summary = None
         faqs = None
         questions = None
+        citations = []
         tools_used = []
 
         # Debug: Log all message types to trace tool output
@@ -100,6 +102,20 @@ class AgentResultParser:
                         ]
                         logger.debug(f"Extracted {len(questions)} questions")
 
+                    if tool_result.get("citations"):
+                        # Store as dicts - will be converted to Pydantic models by API router
+                        citations = [
+                            {
+                                'text': c.get('text', ''),
+                                'file': c.get('file', ''),
+                                'relevance_score': c.get('relevance_score', 0.0),
+                                'folder_name': c.get('folder_name'),
+                            }
+                            for c in tool_result["citations"]
+                            if isinstance(c, dict)
+                        ]
+                        logger.debug(f"Extracted {len(citations)} citations")
+
                     if tool_result.get("source_path"):
                         result['source_path'] = tool_result["source_path"]
 
@@ -117,10 +133,11 @@ class AgentResultParser:
             )
 
         result['tools_used'] = tools_used
+        result['citations'] = citations
 
         # Debug final result
         has_summary = result['content'] and result['content'].summary if result['content'] else False
-        logger.info(f"Parse complete: has_content={result['content'] is not None}, has_summary={has_summary}")
+        logger.info(f"Parse complete: has_content={result['content'] is not None}, has_summary={has_summary}, citations={len(citations)}")
 
         return result
 
@@ -140,6 +157,7 @@ class AgentResultParser:
             "summary": None,
             "faqs": None,
             "questions": None,
+            "citations": None,
             "source_path": None,
         }
 
@@ -179,6 +197,11 @@ class AgentResultParser:
                 # Extract source path from document loader tool
                 if 'source_path' in tool_output:
                     result["source_path"] = tool_output['source_path']
+
+                # Extract citations from rag_search tool
+                if 'citations' in tool_output and tool_output['citations']:
+                    result["citations"] = tool_output['citations']
+                    logger.info(f"ToolMessage '{tool_name}': Extracted {len(result['citations'])} citations")
 
         except (json.JSONDecodeError, TypeError, KeyError) as e:
             logger.debug(f"Could not parse tool output as structured content: {e}")

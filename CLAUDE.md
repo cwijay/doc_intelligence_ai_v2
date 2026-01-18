@@ -12,7 +12,7 @@ Document Intelligence AI v3.0 is an AI-powered document analysis system with thr
 ## Technology Stack
 
 - Python 3.12, LangGraph 1.0.4+, LangChain 1.2.0+
-- LLMs: OpenAI (gpt-5.1-codex-mini for SheetsAgent, gpt-5-mini for DocumentAgent, gpt-5-mini for ExtractorAgent)
+- LLMs: OpenAI (gpt-5.1-codex-mini for SheetsAgent, gpt-4o-mini for DocumentAgent, gpt-5-mini for ExtractorAgent)
 - Data: DuckDB (SQL on DataFrames with connection pooling), Pandas, LlamaParse (document parsing with OCR)
 - Storage: Google Cloud Storage (parsed docs, generated content), PostgreSQL (Cloud SQL), SQLAlchemy 2.0 async
 - Web Framework: FastAPI with uvicorn
@@ -89,7 +89,7 @@ DATABASE_URL=postgresql+asyncpg://...  # For local development
 
 # Optional - Agents
 OPENAI_SHEET_MODEL=gpt-5.1-codex-mini
-DOCUMENT_AGENT_MODEL=gpt-5-mini
+DOCUMENT_AGENT_MODEL=gpt-4o-mini
 OPENAI_TEMPERATURE=0.1
 DOCUMENT_AGENT_TEMPERATURE=0.3
 
@@ -175,7 +175,7 @@ Key files:
 
 ### Agents (`src/agents/`)
 
-**SheetsAgent** (`src/agents/sheets/core.py`, 686 lines):
+**SheetsAgent** (`src/agents/sheets/core.py`, 682 lines):
 - ReAct pattern with `langgraph.prebuilt.create_react_agent`
 - Uses `ChatOpenAI` with `use_responses_api=True` for gpt-5.1-codex-mini compatibility
 - Tools in `tools.py`:
@@ -188,7 +188,7 @@ Key files:
 - SQL injection protection via `validate_sql_query()` and `DANGEROUS_SQL_KEYWORDS`
 - LRU file cache via `FileCache` class (`cache.py`) with 50-file capacity
 
-**DocumentAgent** (`src/agents/document/core.py`, 875 lines):
+**DocumentAgent** (`src/agents/document/core.py`, 1786 lines):
 - Uses `init_chat_model` from `langchain.chat_models` for OpenAI LLM initialization
 - Tools organized as package (`tools/`):
   - `base.py`: Shared utilities (path derivation, content formatting, input schemas)
@@ -204,8 +204,8 @@ Key files:
 - Hybrid tool selection via `ToolSelectionManager` (`tool_selection.py`) with `QueryClassifier` + `LLMToolSelector`
 - Result parsing via `AgentResultParser` (`result_parser.py`) for extracting structured content from tool outputs
 
-**ExtractorAgent** (`src/agents/extractor/core.py`, 734 lines):
-- Structured data extraction from documents using OpenAI gpt-5-nano
+**ExtractorAgent** (`src/agents/extractor/core.py`, 777 lines):
+- Structured data extraction from documents using OpenAI gpt-5-mini
 - Three main capabilities:
   - **Field Analysis**: Discover extractable fields with types and confidence scores
   - **Schema Generation**: Create reusable extraction templates from selected fields
@@ -385,6 +385,7 @@ Shared document parsing abstraction:
     - Records: `save_extracted_record`, `get_extracted_records`
   - `memory_repository.py`: Long-term memory persistence
   - `rag_repository.py`: File store and folder management
+  - `semantic_cache_repository.py`: Semantic cache persistence
 - `utils.py`: Database utility functions
 
 Cloud SQL Connector is used in production with automatic fallback to direct connection if unavailable.
@@ -529,6 +530,14 @@ EVENT_GENERATION_COMPLETED = "generation_completed"
 
 # Search Modes
 VALID_SEARCH_MODES = ["semantic", "keyword", "hybrid"]
+
+# Timeout Classes
+class Timeouts:  # LLM_EXECUTION=300, QUEUE_SHUTDOWN=10, etc.
+class RetryConfig:  # MAX_ATTEMPTS=3, BACKOFF_FACTOR=2.0, etc.
+class CacheTTL:  # JOB_STATUS=3, QUOTA=60, STORE=300, etc.
+class Pagination:  # DEFAULT_LIMIT=20, MAX_LIMIT=100, etc.
+class QueueConfig:  # MAX_SIZE=1000, GET_TIMEOUT=0.5, etc.
+class FileUpload:  # MAX_WORKERS=3, SIGNED_URL_EXPIRATION_MINUTES=60, etc.
 ```
 
 ## Key Patterns
@@ -644,7 +653,7 @@ All agents use Pydantic configs with environment variable defaults, inheriting f
 - `enable_short_term_memory`, `enable_long_term_memory`: true
 
 **DocumentAgentConfig** (`src/agents/document/config.py`):
-- `openai_model`: gpt-5-mini (via `DOCUMENT_AGENT_MODEL`)
+- `openai_model`: gpt-4o-mini (via `DOCUMENT_AGENT_MODEL`)
 - `default_num_faqs`: 10, `default_num_questions`: 10, `summary_max_words`: 500
 - `timeout_seconds`: 300s, `session_timeout_minutes`: 30
 - `rate_limit_requests`: 10, `rate_limit_window_seconds`: 60
@@ -652,6 +661,7 @@ All agents use Pydantic configs with environment variable defaults, inheriting f
 - `enable_short_term_memory`, `enable_long_term_memory`: true
 - `enable_tool_selection`: true, `tool_selector_model`: gpt-5-mini (via `TOOL_SELECTOR_MODEL`)
 - `tool_selector_max_tools`: 3 (max tools per query after filtering)
+- `use_direct_invocation`: true (bypass ReAct agent for deterministic workflows)
 
 **ExtractorAgentConfig** (`src/agents/extractor/config.py`):
 - `openai_model`: gpt-5-mini (via `EXTRACTOR_AGENT_MODEL`)
@@ -711,6 +721,8 @@ agent.shutdown(wait=True)
 - `scripts/seed_tiers.py`: Seed subscription tiers (Free/Pro/Enterprise)
 - `scripts/migrate_orgs_free.py`: Migrate organizations to free tier
 - `scripts/migrate_documents_status.py`: Data migration utility
+- `scripts/clean_all_data.py`: Clean all data utility
+- `scripts/fix_cache_relevance.py`: Cache relevance fixes
 
 **Tests:**
 - `tests/unit/`: Unit tests for agents, API routers, and storage
@@ -751,12 +763,15 @@ agent.shutdown(wait=True)
 | Bulk Repository | `src/db/repositories/bulk_repository.py` | Bulk job persistence |
 | Extraction Repository | `src/db/repositories/extraction_repository.py` | Extraction data persistence |
 | RAG Repository | `src/db/repositories/rag_repository.py` | Store/folder management |
+| Semantic Cache Repo | `src/db/repositories/semantic_cache_repository.py` | Semantic cache persistence |
 | Stats Repository | `src/db/repositories/audit/stats_repository.py` | Dashboard statistics |
 | Usage Service | `src/core/usage/service.py` | Token/resource tracking |
 | Quota Checker | `src/core/usage/quota_checker.py` | Limit enforcement with caching |
 | Usage Queue | `src/core/usage/usage_queue.py` | Background usage tracking |
 | Bulk Router | `src/api/routers/bulk.py` | Bulk processing endpoints |
 | Extraction Router | `src/api/routers/extraction/` | Extraction API endpoints (package) |
+| Extraction Helpers | `src/api/routers/extraction/helpers.py` | Extraction shared helpers |
+| RAG Helpers | `src/api/routers/rag_helpers.py` | RAG utility functions |
 | Audit Router | `src/api/routers/audit.py` | Dashboard and audit endpoints |
 | Tiers Router | `src/api/routers/tiers.py` | Subscription tiers (public) |
 | Content Router | `src/api/routers/content.py` | Content loading from GCS |

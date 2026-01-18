@@ -34,6 +34,24 @@ def is_cache_enabled() -> bool:
     return CACHE_ENABLED and PGVECTOR_AVAILABLE and db.config.enabled
 
 
+def _normalize_file_filter(file_filter: Optional[List[str]]) -> Optional[str]:
+    """
+    Normalize file filter list to a canonical string for cache lookup.
+
+    Sorts the list and joins with comma to ensure consistent cache keys
+    regardless of the order files were selected.
+
+    Args:
+        file_filter: List of file names or None
+
+    Returns:
+        Sorted, comma-separated string (e.g., "a.md,b.md") or None
+    """
+    if not file_filter:
+        return None
+    return ",".join(sorted(file_filter))
+
+
 # =============================================================================
 # CACHE LOOKUP OPERATIONS
 # =============================================================================
@@ -44,7 +62,7 @@ async def find_similar_query(
     org_id: str,
     query_embedding: List[float],
     folder_filter: Optional[str] = None,
-    file_filter: Optional[str] = None,
+    file_filter: Optional[List[str]] = None,
     threshold: Optional[float] = None,
 ) -> Optional[Dict[str, Any]]:
     """
@@ -57,7 +75,7 @@ async def find_similar_query(
         org_id: Organization ID for tenant isolation
         query_embedding: 768-dimensional embedding vector from Gemini
         folder_filter: Optional folder name to scope cache lookup
-        file_filter: Optional file name to scope cache lookup
+        file_filter: Optional list of file names to scope cache lookup
         threshold: Similarity threshold (0-1), defaults to SIMILARITY_THRESHOLD
 
     Returns:
@@ -67,6 +85,9 @@ async def find_similar_query(
         return None
 
     threshold = threshold or SIMILARITY_THRESHOLD
+
+    # Normalize file filter to canonical string for cache lookup
+    normalized_file_filter = _normalize_file_filter(file_filter)
 
     async with db.session() as session:
         if session is None:
@@ -106,7 +127,7 @@ async def find_similar_query(
                     "embedding": embedding_str,
                     "org_id": org_id,
                     "folder_filter": folder_filter,
-                    "file_filter": file_filter,
+                    "file_filter": normalized_file_filter,
                     "threshold": threshold,
                 }
             )
@@ -163,7 +184,7 @@ async def cache_query(
     answer: str,
     citations: Optional[List[Dict[str, Any]]] = None,
     folder_filter: Optional[str] = None,
-    file_filter: Optional[str] = None,
+    file_filter: Optional[List[str]] = None,
     search_mode: str = "hybrid",
 ) -> Optional[str]:
     """
@@ -176,7 +197,7 @@ async def cache_query(
         answer: Generated answer to cache
         citations: List of citation dicts
         folder_filter: Folder filter used in the query
-        file_filter: File filter used in the query
+        file_filter: List of file names used in the query
         search_mode: Search mode used (semantic/keyword/hybrid)
 
     Returns:
@@ -184,6 +205,9 @@ async def cache_query(
     """
     if not is_cache_enabled():
         return None
+
+    # Normalize file filter to canonical string for storage
+    normalized_file_filter = _normalize_file_filter(file_filter)
 
     async with db.session() as session:
         if session is None:
@@ -215,7 +239,7 @@ async def cache_query(
                     "answer": answer,
                     "citations": citations_json,
                     "folder_filter": folder_filter,
-                    "file_filter": file_filter,
+                    "file_filter": normalized_file_filter,
                     "search_mode": search_mode,
                     "created_at": datetime.utcnow(),
                 }

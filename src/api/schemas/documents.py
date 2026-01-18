@@ -1,7 +1,8 @@
 """Document Agent API schemas."""
 
 from datetime import datetime
-from typing import Optional, List, Dict, Any
+from enum import Enum
+from typing import Optional, List, Dict, Any, Union
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -307,10 +308,10 @@ class RAGChatRequest(BaseModel):
         description="Filter search to specific folder",
         example="Legal"
     )
-    file_filter: Optional[str] = Field(
+    file_filter: Optional[Union[str, List[str]]] = Field(
         default=None,
-        description="Filter search to specific file",
-        example="contract.pdf"
+        description="Filter search to specific file(s). Accepts single filename or list of filenames.",
+        examples=["contract.pdf", ["IMG_4693.JPEG", "IMG_4694.JPEG"]]
     )
     search_mode: str = Field(
         default="hybrid",
@@ -379,10 +380,10 @@ class RAGChatResponse(BaseModel):
     )
     query: str = Field(..., description="Original query", example="What are the payment terms?")
     search_mode: str = Field(..., description="Search mode used", example="hybrid")
-    filters: Dict[str, Optional[str]] = Field(
+    filters: Dict[str, Optional[Union[str, List[str]]]] = Field(
         default_factory=dict,
-        description="Applied filters (folder, file)",
-        example={"folder": "Legal", "file": None}
+        description="Applied filters (folder, file). File can be single filename or list of filenames.",
+        example={"folder": "Legal", "file": ["doc1.pdf", "doc2.pdf"]}
     )
     session_id: str = Field(..., description="Session ID for conversation continuity", example="sess_abc123")
     processing_time_ms: float = Field(..., description="Total processing time", example=1245.67)
@@ -391,3 +392,85 @@ class RAGChatResponse(BaseModel):
         description="Response timestamp"
     )
     error: Optional[str] = Field(default=None, description="Error message if search failed")
+
+
+# =============================================================================
+# RAG Chat Streaming Models
+# =============================================================================
+
+class StreamEventType(str, Enum):
+    """Types of streaming events for SSE."""
+    status = "status"
+    token = "token"
+    tool_start = "tool_start"
+    tool_end = "tool_end"
+    citations = "citations"
+    usage = "usage"
+    error = "error"
+    done = "done"
+
+
+class RAGChatStreamRequest(RAGChatRequest):
+    """Request for streaming RAG chat with SSE.
+
+    Extends RAGChatRequest with streaming-specific options.
+    """
+    include_tool_events: bool = Field(
+        default=True,
+        description="Include tool_start/tool_end events in stream"
+    )
+
+
+class StreamEvent(BaseModel):
+    """Base streaming event for SSE."""
+    event: StreamEventType = Field(..., description="Event type")
+    data: Dict[str, Any] = Field(default_factory=dict, description="Event payload")
+    timestamp: str = Field(
+        default_factory=lambda: datetime.now().isoformat(),
+        description="Event timestamp"
+    )
+
+
+class TokenEvent(BaseModel):
+    """Token streaming event - sent for each LLM token."""
+    event: str = Field(default="token", description="Event type")
+    token: str = Field(..., description="The token text")
+    accumulated: str = Field(default="", description="Full accumulated text so far")
+
+
+class ToolEvent(BaseModel):
+    """Tool execution event."""
+    event: str = Field(..., description="Event type: tool_start or tool_end")
+    tool_name: str = Field(..., description="Name of the tool")
+    status: str = Field(default="executing", description="Tool status")
+    duration_ms: Optional[float] = Field(default=None, description="Tool execution duration (for tool_end)")
+    result_summary: Optional[str] = Field(default=None, description="Brief summary of tool result")
+
+
+class CitationsEvent(BaseModel):
+    """Citations event - sent after RAG search completes."""
+    event: str = Field(default="citations", description="Event type")
+    citations: List[RAGCitation] = Field(default_factory=list, description="Source citations")
+
+
+class UsageEvent(BaseModel):
+    """Token usage event - sent at end of stream."""
+    event: str = Field(default="usage", description="Event type")
+    input_tokens: int = Field(default=0, description="Input tokens used")
+    output_tokens: int = Field(default=0, description="Output tokens generated")
+    total_tokens: int = Field(default=0, description="Total tokens")
+
+
+class ErrorEvent(BaseModel):
+    """Error event - sent when an error occurs."""
+    event: str = Field(default="error", description="Event type")
+    error: str = Field(..., description="Error message")
+    recoverable: bool = Field(default=False, description="Whether the error is recoverable")
+
+
+class DoneEvent(BaseModel):
+    """Done event - marks end of stream."""
+    event: str = Field(default="done", description="Event type")
+    session_id: str = Field(..., description="Session ID")
+    processing_time_ms: float = Field(..., description="Total processing time")
+    success: bool = Field(default=True, description="Whether the request succeeded")

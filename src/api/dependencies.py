@@ -177,28 +177,40 @@ async def lookup_organization(identifier: str) -> Optional[Any]:
         from src.db.connection import db
         from src.db.models import OrganizationModel
 
+        logger.info(f"Looking up organization: '{identifier}'")
+
         async with db.session() as session:
             if session is None:
                 # Database disabled - return None (will use header as-is)
-                logger.debug("Database disabled, skipping org lookup")
+                logger.warning(f"Database session is None - database may be disabled. Cannot lookup org: '{identifier}'")
                 return None
 
             # Try by ID first (exact string match - id column is VARCHAR)
+            logger.debug(f"Trying org lookup by ID: '{identifier}'")
             stmt = select(OrganizationModel).where(OrganizationModel.id == identifier)
             result = await session.execute(stmt)
             org = result.scalar_one_or_none()
             if org:
+                logger.info(f"Found organization by ID: '{org.name}' (id={org.id})")
                 return org
 
             # Try by name (case-insensitive)
+            logger.debug(f"Trying org lookup by name (case-insensitive): '{identifier.lower()}'")
             stmt = select(OrganizationModel).where(
                 func.lower(OrganizationModel.name) == identifier.lower()
             )
             result = await session.execute(stmt)
-            return result.scalar_one_or_none()
+            org = result.scalar_one_or_none()
+
+            if org:
+                logger.info(f"Found organization by name: '{org.name}' (id={org.id})")
+            else:
+                logger.warning(f"Organization not found by ID or name: '{identifier}'")
+
+            return org
 
     except Exception as e:
-        logger.warning(f"Organization lookup failed for '{identifier}': {e}")
+        logger.error(f"Organization lookup failed for '{identifier}': {type(e).__name__}: {e}", exc_info=True)
         return None
 
 

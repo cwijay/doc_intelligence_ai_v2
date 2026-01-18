@@ -28,7 +28,7 @@ AI-powered document analysis system with Excel/CSV analysis and document content
                         │                                                 │
                         │  ┌─────────────────┐    ┌─────────────────┐    │
                         │  │  DocumentAgent  │    │   SheetsAgent   │    │
-                        │  │  (Gemini LLM)   │    │  (OpenAI GPT)   │    │
+                        │  │  (OpenAI GPT)   │    │  (OpenAI GPT)   │    │
                         │  │                 │    │                 │    │
                         │  │ Tools:          │    │ Tools:          │    │
                         │  │ -DocLoader      │    │ -SmartAnalysis  │    │
@@ -65,11 +65,13 @@ AI-powered document analysis system with Excel/CSV analysis and document content
 ```
 
 **Agents:**
+
 - **SheetsAgent** - Excel/CSV analysis with natural language queries (OpenAI gpt-5.1-codex-mini + DuckDB)
-- **DocumentAgent** - Generate summaries, FAQs, and questions from documents (OpenAI gpt-5.2)
-- **ExtractorAgent** - Structured data extraction with field analysis and schema-based extraction (OpenAI gpt-5-nano)
+- **DocumentAgent** - Generate summaries, FAQs, and questions from documents (OpenAI gpt-4o-mini)
+- **ExtractorAgent** - Structured data extraction with field analysis and schema-based extraction (OpenAI gpt-5-mini)
 
 **Key Features:**
+
 - Multi-tenancy with organization isolation
 - **Bulk Processing** - Concurrent document processing with LangGraph state machine orchestration
 - **Structured Extraction** - Field analysis and schema-based data extraction from documents
@@ -81,6 +83,7 @@ AI-powered document analysis system with Excel/CSV analysis and document content
 ## Quick Start
 
 ### Prerequisites
+
 - Python 3.12+
 - Google Cloud SDK (for GCS authentication)
 
@@ -186,67 +189,75 @@ RUN_INTEGRATION_TESTS=1 pytest tests/integration/
 ## API Endpoints
 
 ### Health
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/health` | GET | Health check |
+
+| Endpoint    | Method | Description  |
+| ----------- | ------ | ------------ |
+| `/health` | GET    | Health check |
 
 ### Documents (`/api/v1/documents/`)
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/process` | POST | Process document with agent |
-| `/summarize` | POST | Generate summary (with GCS cache) |
-| `/faqs` | POST | Generate FAQs (with GCS cache) |
-| `/questions` | POST | Generate questions (with GCS cache) |
-| `/generate-all` | POST | Generate all content types |
-| `/chat` | POST | Conversational RAG with citations |
+
+| Endpoint          | Method | Description                         |
+| ----------------- | ------ | ----------------------------------- |
+| `/process`      | POST   | Process document with agent         |
+| `/summarize`    | POST   | Generate summary (with GCS cache)   |
+| `/faqs`         | POST   | Generate FAQs (with GCS cache)      |
+| `/questions`    | POST   | Generate questions (with GCS cache) |
+| `/generate-all` | POST   | Generate all content types          |
+| `/chat`         | POST   | Conversational RAG with citations   |
 
 ### Sheets (`/api/v1/sheets/`)
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/analyze` | POST | Analyze Excel/CSV files |
-| `/preview` | POST | Preview file contents |
-| `/health` | GET | Sheets agent health status |
+
+| Endpoint     | Method | Description                |
+| ------------ | ------ | -------------------------- |
+| `/analyze` | POST   | Analyze Excel/CSV files    |
+| `/preview` | POST   | Preview file contents      |
+| `/health`  | GET    | Sheets agent health status |
 
 ### Ingestion (`/api/v1/ingest/`)
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/upload` | POST | Upload files (org-scoped) |
-| `/parse` | POST | Parse documents (PDF, DOCX) |
-| `/files` | GET | List uploaded files |
-| `/files/{file_id}` | GET | Get file details |
-| `/files/{file_id}` | DELETE | Delete file |
+
+| Endpoint             | Method | Description                 |
+| -------------------- | ------ | --------------------------- |
+| `/upload`          | POST   | Upload files (org-scoped)   |
+| `/parse`           | POST   | Parse documents (PDF, DOCX) |
+| `/files`           | GET    | List uploaded files         |
+| `/files/{file_id}` | GET    | Get file details            |
+| `/files/{file_id}` | DELETE | Delete file                 |
 
 ### RAG (`/api/v1/rag/`) - Store Management
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/stores` | POST | Create file search store |
-| `/stores` | GET | List stores |
-| `/stores/{store_id}` | GET | Get store details |
-| `/stores/{store_id}/upload` | POST | Upload document to store |
-| `/stores/{store_id}/files` | GET | List files in store |
-| `/stores/{store_id}` | DELETE | Delete store |
-| `/folders` | POST | Create folder |
-| `/folders` | GET | List folders |
-| `/folders/{folder_id}` | GET | Get folder details |
-| `/folders/{folder_id}` | DELETE | Delete folder |
+
+| Endpoint                      | Method | Description              |
+| ----------------------------- | ------ | ------------------------ |
+| `/stores`                   | POST   | Create file search store |
+| `/stores`                   | GET    | List stores              |
+| `/stores/{store_id}`        | GET    | Get store details        |
+| `/stores/{store_id}/upload` | POST   | Upload document to store |
+| `/stores/{store_id}/files`  | GET    | List files in store      |
+| `/stores/{store_id}`        | DELETE | Delete store             |
+| `/folders`                  | POST   | Create folder            |
+| `/folders`                  | GET    | List folders             |
+| `/folders/{folder_id}`      | GET    | Get folder details       |
+| `/folders/{folder_id}`      | DELETE | Delete folder            |
 
 #### Conversational RAG (via DocumentAgent)
 
 Search is now consolidated into `/api/v1/documents/chat` endpoint, providing conversational RAG with session memory.
 
 **Search Modes:**
+
 - `semantic` - Vector similarity search (default)
 - `keyword` - BM25 keyword matching
 - `hybrid` - Combined semantic + keyword search
 
 **Search Scopes:**
-| Scope | Parameters | Description |
-|-------|------------|-------------|
-| Single File | `file_filter: "invoice.pdf"` | Search within one specific file |
-| Folder | `folder_filter: "Invoices 2024"` | Search all files in a folder |
-| Org-wide | No filters | Search ALL indexed documents in org |
+
+| Scope       | Parameters                         | Description                         |
+| ----------- | ---------------------------------- | ----------------------------------- |
+| Single File | `file_filter: "invoice.pdf"`     | Search within one specific file     |
+| Folder      | `folder_filter: "Invoices 2024"` | Search all files in a folder        |
+| Org-wide    | No filters                         | Search ALL indexed documents in org |
 
 **Request Example** (`POST /api/v1/documents/chat`):
+
 ```json
 {
   "query": "What are the payment terms?",
@@ -260,6 +271,7 @@ Search is now consolidated into `/api/v1/documents/chat` endpoint, providing con
 ```
 
 **Response Example:**
+
 ```json
 {
   "success": true,
@@ -279,82 +291,93 @@ Search is now consolidated into `/api/v1/documents/chat` endpoint, providing con
 ```
 
 ### Audit (`/api/v1/audit/`)
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/dashboard` | GET | Dashboard statistics with period filter (7d/30d/90d/all) |
-| `/activity` | GET | Activity timeline with recent events |
-| `/jobs` | GET | List processing jobs (paginated) |
-| `/jobs/{job_id}` | GET | Get job details |
-| `/documents` | GET | List processed documents |
-| `/documents/{doc_id}` | GET | Get document record |
-| `/generations` | GET | List generated content |
-| `/trail` | GET | Audit trail with filtering |
+
+| Endpoint                | Method | Description                                              |
+| ----------------------- | ------ | -------------------------------------------------------- |
+| `/dashboard`          | GET    | Dashboard statistics with period filter (7d/30d/90d/all) |
+| `/activity`           | GET    | Activity timeline with recent events                     |
+| `/jobs`               | GET    | List processing jobs (paginated)                         |
+| `/jobs/{job_id}`      | GET    | Get job details                                          |
+| `/documents`          | GET    | List processed documents                                 |
+| `/documents/{doc_id}` | GET    | Get document record                                      |
+| `/generations`        | GET    | List generated content                                   |
+| `/trail`              | GET    | Audit trail with filtering                               |
 
 ### Bulk Processing (`/api/v1/bulk/`)
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/upload` | POST | Upload multiple files and start bulk processing |
-| `/folders` | POST | Create bulk folder |
-| `/folders` | GET | List org folders (paginated) |
-| `/folders/{folder_id}` | GET | Get folder details |
-| `/folders/{folder_id}` | DELETE | Delete folder |
-| `/jobs` | GET | List bulk jobs (paginated) |
-| `/jobs/{job_id}` | GET | Get job details with progress |
-| `/jobs/{job_id}/cancel` | POST | Cancel bulk job |
-| `/jobs/{document_id}/retry` | POST | Retry failed document |
+
+| Endpoint                      | Method | Description                                     |
+| ----------------------------- | ------ | ----------------------------------------------- |
+| `/upload`                   | POST   | Upload multiple files and start bulk processing |
+| `/folders`                  | POST   | Create bulk folder                              |
+| `/folders`                  | GET    | List org folders (paginated)                    |
+| `/folders/{folder_id}`      | GET    | Get folder details                              |
+| `/folders/{folder_id}`      | DELETE | Delete folder                                   |
+| `/jobs`                     | GET    | List bulk jobs (paginated)                      |
+| `/jobs/{job_id}`            | GET    | Get job details with progress                   |
+| `/jobs/{job_id}/cancel`     | POST   | Cancel bulk job                                 |
+| `/jobs/{document_id}/retry` | POST   | Retry failed document                           |
 
 ### Extraction (`/api/v1/extraction/`)
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/analyze-fields` | POST | Discover extractable fields in document |
-| `/generate-schema` | POST | Generate extraction template |
-| `/extract` | POST | Extract structured data using schema |
-| `/templates` | GET | List extraction templates |
-| `/templates/{template_name}` | GET | Get template details |
-| `/records` | GET | List extracted records |
-| `/records/{record_id}` | GET | Get extracted record details |
-| `/export` | POST | Export extracted data (CSV, JSON) |
-| `/health` | GET | Extraction service health status |
+
+| Endpoint                       | Method | Description                             |
+| ------------------------------ | ------ | --------------------------------------- |
+| `/analyze-fields`            | POST   | Discover extractable fields in document |
+| `/generate-schema`           | POST   | Generate extraction template            |
+| `/extract`                   | POST   | Extract structured data using schema    |
+| `/templates`                 | GET    | List extraction templates               |
+| `/templates/{template_name}` | GET    | Get template details                    |
+| `/records`                   | GET    | List extracted records                  |
+| `/records/{record_id}`       | GET    | Get extracted record details            |
+| `/export`                    | POST   | Export extracted data (CSV, JSON)       |
+| `/health`                    | GET    | Extraction service health status        |
 
 ### Usage (`/api/v1/usage/`)
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/summary` | GET | Current period usage summary |
-| `/subscription` | GET | Subscription details and limits |
-| `/limits` | GET | Quota status with warnings |
-| `/history` | GET | Historical usage data |
-| `/breakdown` | GET | Usage breakdown by feature |
+
+| Endpoint          | Method | Description                     |
+| ----------------- | ------ | ------------------------------- |
+| `/summary`      | GET    | Current period usage summary    |
+| `/subscription` | GET    | Subscription details and limits |
+| `/limits`       | GET    | Quota status with warnings      |
+| `/history`      | GET    | Historical usage data           |
+| `/breakdown`    | GET    | Usage breakdown by feature      |
 
 ### Sessions (`/api/v1/sessions/`)
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/{session_id}` | GET | Get session info |
+
+| Endpoint          | Method | Description             |
+| ----------------- | ------ | ----------------------- |
+| `/{session_id}` | GET    | Get session info        |
 | `/{session_id}` | DELETE | End session and cleanup |
 
 ### Tiers (`/api/v1/tiers/`)
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/` | GET | List subscription tiers (public, no auth) |
+
+| Endpoint | Method | Description                               |
+| -------- | ------ | ----------------------------------------- |
+| `/`    | GET    | List subscription tiers (public, no auth) |
 
 ### Content (`/api/v1/content/`)
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/load-parsed` | POST | Load pre-parsed document content from GCS |
-| `/check-exists` | GET | Check if parsed document exists in GCS |
+
+| Endpoint          | Method | Description                               |
+| ----------------- | ------ | ----------------------------------------- |
+| `/load-parsed`  | POST   | Load pre-parsed document content from GCS |
+| `/check-exists` | GET    | Check if parsed document exists in GCS    |
 
 ## Core Features
 
 ### Multi-Tenancy
+
 - Organization context extracted from `X-Organization-ID` header
 - All data operations scoped by org_id
 - Per-org file storage and store isolation
 
 ### Memory System
+
 - **Short-term Memory**: Per-session conversation history (max 20 messages)
 - **Long-term Memory**: PostgreSQL-backed persistent summaries and context
 
 ### Middleware Stack
+
 Both agents use a composable middleware stack for resilience and safety:
+
 - **Retry Logic**: Exponential backoff for model and tool calls (3 attempts)
 - **Model Fallback**: Primary/fallback model switching
 - **PII Detection**: Input/output redaction (redact/mask/hash/block strategies)
@@ -364,15 +387,18 @@ Both agents use a composable middleware stack for resilience and safety:
   - `LLMToolSelector`: Pre-filters tools based on query relevance
 
 ### Caching
+
 - **File Cache**: LRU cache (50 files) for SheetsAgent
 - **Response Cache**: Per-session query hash caching (10 responses)
 - **GCS Cache**: SHA-256 content hash validation for document generation
 - **Generation Cache**: PostgreSQL with content hash validation
 
 ### Rate Limiting
+
 10 requests per 60-second window per session.
 
 ### Background Tasks
+
 - Periodic cleanup task (expired sessions, rate limiter entries)
 - Async audit logging via ThreadPoolExecutor (non-blocking)
 - Token usage tracking and cost estimation
@@ -380,13 +406,16 @@ Both agents use a composable middleware stack for resilience and safety:
 ## Shared Infrastructure
 
 ### Utility Modules (`src/utils/`)
+
 - **gcs_utils.py**: GCS path parsing (`is_gcs_path()`, `parse_gcs_uri()`, `build_gcs_uri()`, `extract_gcs_path_parts()`)
 - **timer_utils.py**: Performance timing (`elapsed_ms()`, `Timer` context manager)
 - **async_utils.py**: Async/sync interop (`run_async()`, `run_sync_in_executor()`)
 - **env_utils.py**: Environment variable parsing (`parse_bool_env()`, `parse_int_env()`, `parse_float_env()`)
 
 ### Constants (`src/constants.py`)
+
 Centralized configuration values replacing magic numbers:
+
 - GCS URI prefix constants
 - Cache sizes (file: 50, response: 10 per session)
 - Session timeout (30 min), rate limits (10 req/60s)
@@ -395,6 +424,7 @@ Centralized configuration values replacing magic numbers:
 - Content generation defaults (10 FAQs, 10 questions, 500 word summary)
 
 ### Agent Infrastructure (`src/agents/core/`)
+
 - **RateLimiter** (`rate_limiter.py`): Thread-safe sliding window rate limiting per session
 - **SessionManager** (`session_manager.py`): Session lifecycle with response caching
 - **Memory**: Short-term (in-memory, 20 messages) + long-term (PostgreSQL)
@@ -403,6 +433,7 @@ Centralized configuration values replacing magic numbers:
 ## Environment Variables
 
 ### Required
+
 ```
 OPENAI_API_KEY=<key>
 GOOGLE_API_KEY=<key>
@@ -412,6 +443,7 @@ GCS_PREFIX=<prefix>
 ```
 
 ### Database (optional)
+
 ```
 DATABASE_ENABLED=true
 CLOUD_SQL_INSTANCE=<project>:<region>:<instance>
@@ -422,16 +454,19 @@ USE_CLOUD_SQL_CONNECTOR=true
 ```
 
 ### Agent Configuration
+
 ```
 OPENAI_SHEET_MODEL=gpt-5.1-codex-mini
-DOCUMENT_AGENT_MODEL=gpt-5.2
-EXTRACTOR_AGENT_MODEL=gpt-5-nano
+DOCUMENT_AGENT_MODEL=gpt-4o-mini
+EXTRACTOR_AGENT_MODEL=gpt-5-mini
+EXTRACTOR_FALLBACK_MODEL=gpt-5.2-2025-12-11
 RATE_LIMIT_REQUESTS=10
 RATE_LIMIT_WINDOW=60
 SESSION_TIMEOUT_MINUTES=30
 ```
 
 ### Middleware & Tool Selection
+
 ```
 ENABLE_MIDDLEWARE=true
 MODEL_RETRY_MAX_ATTEMPTS=3
@@ -439,11 +474,13 @@ TOOL_RETRY_MAX_ATTEMPTS=2
 ENABLE_PII_DETECTION=true
 PII_STRATEGY=redact
 ENABLE_TOOL_SELECTION=true
-TOOL_SELECTOR_MODEL=gpt-5.2
+TOOL_SELECTOR_MODEL=gpt-5-mini
 TOOL_SELECTOR_MAX_TOOLS=3
+USE_DIRECT_INVOCATION=true  # Bypass ReAct agent for deterministic workflows
 ```
 
 ### Bulk Processing
+
 ```
 BULK_MAX_DOCUMENTS_PER_FOLDER=10
 BULK_CONCURRENT_DOCUMENTS=3
@@ -452,13 +489,17 @@ BULK_WEBHOOK_SECRET=<secret>
 ```
 
 ### Extractor Agent
+
 ```
-EXTRACTOR_AGENT_MODEL=gpt-5-nano
+EXTRACTOR_AGENT_MODEL=gpt-5-mini
+EXTRACTOR_FALLBACK_MODEL=gpt-5.2-2025-12-11
 EXTRACTOR_MAX_FIELDS=50
+EXTRACTOR_MAX_SCHEMA_FIELDS=100
 EXTRACTOR_TIMEOUT_SECONDS=120
 ```
 
 ### Executor Pools
+
 ```
 AGENT_EXECUTOR_POOL_SIZE=10
 IO_EXECUTOR_POOL_SIZE=20
@@ -490,7 +531,10 @@ src/
 │   │   │   ├── schema.py     # Schema generation
 │   │   │   ├── extract.py    # Data extraction
 │   │   │   ├── records.py    # Record management
-│   │   │   └── export.py     # Export functionality
+│   │   │   ├── export.py     # Export functionality
+│   │   │   ├── cache.py      # Extraction caching
+│   │   │   ├── helpers.py    # Shared helpers
+│   │   │   └── health.py     # Health endpoint
 │   │   ├── bulk.py       # Bulk processing endpoints
 │   │   ├── rag.py        # Semantic search endpoints
 │   │   ├── ingest.py     # Upload/parse endpoints
@@ -498,7 +542,9 @@ src/
 │   │   ├── usage.py      # Usage/subscription endpoints
 │   │   ├── sessions.py   # Session management
 │   │   ├── tiers.py      # Subscription tiers (public)
-│   │   └── content.py    # Content loading from GCS
+│   │   ├── content.py    # Content loading from GCS
+│   │   ├── health.py     # Health check endpoints
+│   │   └── rag_helpers.py  # RAG helper utilities
 │   ├── utils/            # API utilities
 │   │   ├── formatting.py # Display formatting helpers
 │   │   ├── decorators.py # Endpoint decorators
@@ -526,8 +572,8 @@ src/
 │   │       ├── tool_selector.py     # Tool pre-filtering
 │   │       ├── resilience.py        # Retry logic
 │   │       └── safety.py            # PII detection
-│   ├── document/         # DocumentAgent (OpenAI gpt-5.2)
-│   │   ├── core.py       # Agent implementation (875 lines)
+│   ├── document/         # DocumentAgent (OpenAI gpt-4o-mini)
+│   │   ├── core.py       # Agent implementation (1786 lines)
 │   │   ├── config.py     # Agent configuration
 │   │   ├── schemas.py    # Request/response schemas
 │   │   ├── gcs_cache.py  # GCS content caching
@@ -542,8 +588,8 @@ src/
 │   │       ├── question_generator.py
 │   │       ├── persist.py          # Save to GCS/DB
 │   │       └── rag_search.py       # Semantic search
-│   ├── extractor/        # ExtractorAgent (OpenAI gpt-5-nano)
-│   │   ├── core.py       # Agent implementation (734 lines)
+│   ├── extractor/        # ExtractorAgent (OpenAI gpt-5-mini)
+│   │   ├── core.py       # Agent implementation (777 lines)
 │   │   ├── config.py     # Agent configuration
 │   │   ├── schemas.py    # Request/response schemas
 │   │   └── tools/        # Extraction tools
@@ -552,7 +598,7 @@ src/
 │   │       ├── schema_generator.py # Template generation
 │   │       └── data_extractor.py   # Data extraction
 │   └── sheets/           # SheetsAgent (OpenAI + DuckDB)
-│       ├── core.py       # Agent implementation (686 lines)
+│       ├── core.py       # Agent implementation (682 lines)
 │       ├── config.py     # Agent configuration
 │       ├── cache.py      # FileCache (LRU DataFrame caching)
 │       └── tools.py      # Analysis tools
@@ -588,7 +634,8 @@ src/
 │       ├── bulk_repository.py   # Bulk job persistence
 │       ├── extraction_repository.py # Extraction persistence
 │       ├── memory_repository.py
-│       └── rag_repository.py
+│       ├── rag_repository.py
+│       └── semantic_cache_repository.py  # Semantic cache persistence
 ├── rag/                  # Document parsing & search
 │   ├── llama_parse_util.py    # LlamaParse integration
 │   ├── gemini_file_store.py   # Gemini File Search API
@@ -605,7 +652,10 @@ cloud_functions/
 scripts/
 ├── db_setup.py           # Database setup/teardown
 ├── seed_tiers.py         # Seed subscription tiers
-└── migrate_documents_status.py  # Data migration
+├── migrate_orgs_free.py  # Migrate organizations to free tier
+├── migrate_documents_status.py  # Data migration
+├── clean_all_data.py     # Clean all data utility
+└── fix_cache_relevance.py  # Cache relevance fixes
 
 tests/
 ├── conftest.py           # Pytest fixtures
@@ -625,16 +675,17 @@ docs/                 # Sample documents
 
 Parsed documents and generated content are stored in Google Cloud Storage:
 
-| Content | GCS Path |
-|---------|----------|
-| Parsed docs | `gs://{GCS_BUCKET}/{GCS_PREFIX}/parsed/*.md` |
-| Generated | `gs://{GCS_BUCKET}/{GCS_PREFIX}/generated/*_generated.json` |
+| Content     | GCS Path                                                      |
+| ----------- | ------------------------------------------------------------- |
+| Parsed docs | `gs://{GCS_BUCKET}/{GCS_PREFIX}/parsed/*.md`                |
+| Generated   | `gs://{GCS_BUCKET}/{GCS_PREFIX}/generated/*_generated.json` |
 
 Authentication uses Application Default Credentials (ADC).
 
 ## Dependencies
 
 Key dependencies from `requirements.txt`:
+
 - `biz2bricks-core` - Shared core models and utilities
 - `langgraph>=1.0.4` - LangGraph for ReAct agents
 - `langchain>=1.2.0` - LangChain framework

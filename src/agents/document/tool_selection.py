@@ -190,19 +190,19 @@ class ToolSelectionManager:
 
 def bind_rag_filters(
     tools: List,
-    file_filter: Optional[str] = None,
+    file_filter: Optional[List[str]] = None,
     folder_filter: Optional[str] = None,
 ) -> List:
     """
     Bind filter values to the RAG search tool for correct cache scoping.
 
-    When a request targets a specific document or folder, the RAG tool
+    When a request targets specific document(s) or folder, the RAG tool
     needs these filters to ensure the semantic cache correctly scopes
     queries. This prevents cross-document cache hits.
 
     Args:
         tools: List of tools (may include RAG search tool)
-        file_filter: File name to bind to RAG tool
+        file_filter: List of file names to bind to RAG tool
         folder_filter: Folder name to bind to RAG tool
 
     Returns:

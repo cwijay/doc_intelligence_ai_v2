@@ -275,7 +275,7 @@ class TestContentPersistTool:
             # Check directories are correct
             directories = [call["directory"] for call in save_calls]
             assert "Acme corp/summary/invoices" in directories
-            assert "Acme corp/faqs/invoices" in directories
+            assert "Acme corp/faq/invoices" in directories  # "faq" is singular per base.py
             assert "Acme corp/questions/invoices" in directories
 
             # Check filenames are correct
