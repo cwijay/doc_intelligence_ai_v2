@@ -55,7 +55,7 @@ steps:
       - '--timeout=${_TIMEOUT}'
       - '--port=8080'
       - '--add-cloudsql-instances=${_CLOUD_SQL_INSTANCE}'
-      - '--set-secrets=OPENAI_API_KEY=doc-intelligence-openai-api-key:latest,GOOGLE_API_KEY=doc-intelligence-google-api-key:latest,LLAMA_CLOUD_API_KEY=doc-intelligence-llama-api-key:latest,DATABASE_PASSWORD=doc-intelligence-db-password:latest'
+      - '--set-secrets=OPENAI_API_KEY=openai-api-key:latest,GOOGLE_API_KEY=google-api-key:latest,LLAMA_CLOUD_API_KEY=llamaparse-api-key:latest,DATABASE_PASSWORD=DATABASE_PASSWORD:latest'
       - '--set-env-vars=CLOUD_SQL_INSTANCE=${_CLOUD_SQL_INSTANCE},DATABASE_NAME=${_DATABASE_NAME},DATABASE_USER=${_DATABASE_USER},DATABASE_ENABLED=true,USE_CLOUD_SQL_CONNECTOR=true,GCS_BUCKET=${_GCS_BUCKET},GCS_PREFIX=${_GCS_PREFIX},PARSED_DIRECTORY=parsed,GENERATED_DIRECTORY=generated,LOG_LEVEL=INFO'
 
 # Substitution variables (can be overridden via --substitutions flag or trigger config)
