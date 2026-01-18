@@ -56,7 +56,7 @@ steps:
       - '--port=8080'
       - '--add-cloudsql-instances=${_CLOUD_SQL_INSTANCE}'
       - '--set-secrets=OPENAI_API_KEY=openai-api-key:latest,GOOGLE_API_KEY=google-api-key:latest,LLAMA_CLOUD_API_KEY=llamaparse-api-key:latest,DATABASE_PASSWORD=DATABASE_PASSWORD:latest'
-      - '--set-env-vars=CLOUD_SQL_INSTANCE=${_CLOUD_SQL_INSTANCE},DATABASE_NAME=${_DATABASE_NAME},DATABASE_USER=${_DATABASE_USER},DATABASE_ENABLED=true,USE_CLOUD_SQL_CONNECTOR=true,GCS_BUCKET=${_GCS_BUCKET},GCS_PREFIX=${_GCS_PREFIX},PARSED_DIRECTORY=parsed,GENERATED_DIRECTORY=generated,LOG_LEVEL=INFO'
+      - '--set-env-vars=CLOUD_SQL_INSTANCE=${_CLOUD_SQL_INSTANCE},DATABASE_NAME=${_DATABASE_NAME},DATABASE_USER=${_DATABASE_USER},DATABASE_ENABLED=true,USE_CLOUD_SQL_CONNECTOR=true,CLOUD_SQL_IP_TYPE=PUBLIC,GCS_BUCKET=${_GCS_BUCKET},GCS_PREFIX=${_GCS_PREFIX},PARSED_DIRECTORY=parsed,GENERATED_DIRECTORY=generated,LOG_LEVEL=INFO'
 
 # Substitution variables (can be overridden via --substitutions flag or trigger config)
 substitutions:
@@ -68,7 +68,7 @@ substitutions:
   _MAX_INSTANCES: '10'
   _CONCURRENCY: '80'
   _TIMEOUT: '300'
-  _CLOUD_SQL_INSTANCE: 'biz2bricks-dev-v1:us-central1:biz-2-bricks-intelli-doc-dev'
+  _CLOUD_SQL_INSTANCE: 'biz2bricks-dev-v1:us-central1:doc-intelligence-db'
   _DATABASE_NAME: 'doc_intelligence'
   _DATABASE_USER: 'postgres'
   _GCS_BUCKET: 'biz2bricks-dev-v1-document-store'
