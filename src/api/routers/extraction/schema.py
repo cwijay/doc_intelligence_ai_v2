@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends
 
 from src.api.dependencies import get_org_id, get_extractor_agent
 from src.core.usage import check_quota, track_tokens
+from src.constants import QuotaEstimates
 from src.api.schemas.extraction import (
     GenerateSchemaRequest,
     GenerateSchemaResponse,
@@ -30,7 +31,7 @@ logger = logging.getLogger(__name__)
     operation_id="generateExtractionSchema",
     summary="Generate and save extraction schema from selected fields",
 )
-@check_quota(usage_type="tokens", estimated_usage=1500)
+@check_quota(usage_type="tokens", estimated_usage=QuotaEstimates.EXTRACTION_SCHEMA)
 @track_tokens(feature="extractor_agent", tokens_attr="token_usage.total_tokens")
 async def generate_extraction_schema(
     request: GenerateSchemaRequest,

@@ -15,6 +15,7 @@ from ..config import DocumentAgentConfig
 from .base import QuestionGeneratorInput, extract_llm_text, compute_content_hash
 from src.utils.async_utils import run_async
 from src.utils.timer_utils import elapsed_ms
+from src.constants import Timeouts
 
 logger = logging.getLogger(__name__)
 
@@ -48,7 +49,7 @@ class QuestionGeneratorTool(BaseTool):
                 temperature=self.config.temperature,
                 api_key=self.config.openai_api_key,
                 use_responses_api=True,  # Required for gpt-5-nano
-                timeout=120,  # 2 minutes per batch (parallel calls)
+                timeout=Timeouts.QUESTION_GENERATION,
             )
         return self.llm
 

@@ -26,6 +26,7 @@ from .config import DocumentAgentConfig
 from .tools import create_document_tools
 from .context import rag_filter_context
 from src.utils.timer_utils import elapsed_ms
+from src.constants import Timeouts
 
 # Base agent and shared utilities
 from src.agents.core.base_agent import BaseAgent
@@ -41,7 +42,8 @@ from .schemas import (
     FAQ,
     Question,
     TokenUsage,
-    SessionInfo
+    SessionInfo,
+    DirectGenerationResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -225,7 +227,7 @@ class DocumentAgent(BaseAgent):
             temperature=self.config.temperature,
             api_key=self.config.openai_api_key,
             use_responses_api=True,  # Required for gpt-5-nano
-            timeout=300,  # 5 minutes for complex generation tasks
+            timeout=Timeouts.LLM_EXECUTION,
             max_retries=2,
             callbacks=callbacks if callbacks else None,
         )
@@ -248,12 +250,16 @@ class DocumentAgent(BaseAgent):
 
     # _init_audit_logging() is inherited from BaseAgent
 
-    async def process_request(self, request: DocumentRequest) -> DocumentResponse:
+    async def process_request(
+        self, request: DocumentRequest, rag_only: bool = False
+    ) -> DocumentResponse:
         """
         Process a document request and return generated content.
 
         Args:
             request: Document request with document name and query
+            rag_only: If True, skip tool selection and use only rag_search tool.
+                      This optimizes RAG chat requests by ~2-3 seconds.
 
         Returns:
             Document response with generated content
@@ -304,7 +310,7 @@ class DocumentAgent(BaseAgent):
 
             try:
                 async with asyncio.timeout(self.config.timeout_seconds):
-                    agent_result = await self._execute_agent(context, request)
+                    agent_result = await self._execute_agent(context, request, rag_only=rag_only)
             except asyncio.TimeoutError:
                 processing_time = elapsed_ms(start_time)
                 logger.error(f"Agent execution timed out after {self.config.timeout_seconds}s")
@@ -341,6 +347,7 @@ class DocumentAgent(BaseAgent):
                 success=True,
                 message="Document processed successfully",
                 response_text=response_text,  # Include agent's response for RAG chat
+                citations=agent_result.get('citations', []),  # RAG search citations
                 document_name=request.document_name,
                 source_path=agent_result.get('source_path'),
                 content=agent_result.get('content'),
@@ -407,12 +414,17 @@ class DocumentAgent(BaseAgent):
         reraise=True
     )
     async def _execute_agent(
-        self, context: str, request: DocumentRequest
+        self, context: str, request: DocumentRequest, rag_only: bool = False
     ) -> Dict[str, Any]:
         """Execute the agent with the given context and request.
 
         Conversation history is handled automatically by the checkpointer via thread_id.
         Token tracking is handled via thread-local usage context.
+
+        Args:
+            context: Prepared context string for the agent
+            request: Document request with document name and query
+            rag_only: If True, skip tool selection and use only rag_search tool
         """
         # Import usage context for token tracking
         try:
@@ -440,7 +452,7 @@ class DocumentAgent(BaseAgent):
             if ctx_manager:
                 ctx_manager.__enter__()
 
-            return await self._execute_agent_inner(context, request, session_id)
+            return await self._execute_agent_inner(context, request, session_id, rag_only=rag_only)
 
         finally:
             # Exit usage context
@@ -448,9 +460,16 @@ class DocumentAgent(BaseAgent):
                 ctx_manager.__exit__(None, None, None)
 
     async def _execute_agent_inner(
-        self, context: str, request: DocumentRequest, session_id: str
+        self, context: str, request: DocumentRequest, session_id: str, rag_only: bool = False
     ) -> Dict[str, Any]:
-        """Inner agent execution (called within usage context)."""
+        """Inner agent execution (called within usage context).
+
+        Args:
+            context: Prepared context string for the agent
+            request: Document request with document name and query
+            session_id: Session ID for conversation continuity
+            rag_only: If True, skip tool selection and use only rag_search tool
+        """
         try:
             input_text = f"{context}\n\nPlease process this document and fulfill the request."
 
@@ -464,15 +483,23 @@ class DocumentAgent(BaseAgent):
                 }
             }
 
-            # Get relevant tools for this query via tool selection manager
-            query_context = {
-                "document_name": request.document_name,
-                "has_parsed_path": bool(request.parsed_file_path),
-                "organization_name": getattr(request, 'organization_id', None)
-            }
-            relevant_tools = self.tool_selection_manager.get_tools_for_query(
-                request.query, query_context
-            )
+            # Get relevant tools for this query
+            # PERF: Skip tool selection for RAG-only requests (saves ~2-3 seconds)
+            if rag_only:
+                # Direct RAG tool lookup - no LLM calls needed
+                rag_tool = self.tools_by_name.get('rag_search')
+                relevant_tools = [rag_tool] if rag_tool else self.tools
+                logger.info(f"RAG-only mode: skipping tool selection, using rag_search directly")
+            else:
+                # Full tool selection via QueryClassifier + LLMToolSelector
+                query_context = {
+                    "document_name": request.document_name,
+                    "has_parsed_path": bool(request.parsed_file_path),
+                    "organization_name": getattr(request, 'organization_id', None)
+                }
+                relevant_tools = self.tool_selection_manager.get_tools_for_query(
+                    request.query, query_context
+                )
 
             # Bind filters to RAG tool if present in request (ensures correct cache scoping)
             filters_bound = False
@@ -636,6 +663,20 @@ class DocumentAgent(BaseAgent):
         Returns:
             Generated summary text
         """
+        # Use direct invocation for better performance (bypasses ReAct agent)
+        if self.config.use_direct_invocation:
+            result = await self.generate_summary_direct(
+                document_name=document_name,
+                parsed_file_path=parsed_file_path,
+                max_words=max_words,
+                organization_id=organization_id,
+            )
+            if result.success and result.summary:
+                return result.summary
+            logger.warning(f"Direct summary generation failed: {result.error}")
+            return result.error or "Summary generation failed"
+
+        # Fall back to ReAct agent pattern
         options = GenerationOptions(
             summary_max_words=max_words or self.config.summary_max_words
         )
@@ -680,6 +721,21 @@ class DocumentAgent(BaseAgent):
         Returns:
             List of FAQ objects
         """
+        # Use direct invocation for better performance (bypasses ReAct agent)
+        if self.config.use_direct_invocation:
+            result = await self.generate_faqs_direct(
+                document_name=document_name,
+                parsed_file_path=parsed_file_path,
+                num_faqs=num_faqs,
+                organization_id=organization_id,
+            )
+            if result.success and result.faqs:
+                # Convert dict list to FAQ objects
+                return [FAQ(question=f['question'], answer=f['answer']) for f in result.faqs]
+            logger.warning(f"Direct FAQ generation failed: {result.error}")
+            return []
+
+        # Fall back to ReAct agent pattern
         options = GenerationOptions(
             num_faqs=num_faqs or self.config.default_num_faqs
         )
@@ -715,6 +771,28 @@ class DocumentAgent(BaseAgent):
         Returns:
             List of Question objects
         """
+        # Use direct invocation for better performance (bypasses ReAct agent)
+        if self.config.use_direct_invocation:
+            result = await self.generate_questions_direct(
+                document_name=document_name,
+                parsed_file_path=parsed_file_path,
+                num_questions=num_questions,
+                organization_id=organization_id,
+            )
+            if result.success and result.questions:
+                # Convert dict list to Question objects
+                return [
+                    Question(
+                        question=q['question'],
+                        expected_answer=q.get('expected_answer'),
+                        difficulty=q.get('difficulty'),
+                    )
+                    for q in result.questions
+                ]
+            logger.warning(f"Direct question generation failed: {result.error}")
+            return []
+
+        # Fall back to ReAct agent pattern
         options = GenerationOptions(
             num_questions=num_questions or self.config.default_num_questions
         )
@@ -750,6 +828,40 @@ class DocumentAgent(BaseAgent):
         Returns:
             GeneratedContent with summary, FAQs, and questions
         """
+        # Use direct invocation for better performance (bypasses ReAct agent)
+        if self.config.use_direct_invocation:
+            result = await self.generate_all_direct(
+                document_name=document_name,
+                parsed_file_path=parsed_file_path,
+                options=options,
+                organization_id=organization_id,
+            )
+            if result.success:
+                # Convert to GeneratedContent
+                faqs = None
+                if result.faqs:
+                    faqs = [FAQ(question=f['question'], answer=f['answer']) for f in result.faqs]
+
+                questions = None
+                if result.questions:
+                    questions = [
+                        Question(
+                            question=q['question'],
+                            expected_answer=q.get('expected_answer'),
+                            difficulty=q.get('difficulty'),
+                        )
+                        for q in result.questions
+                    ]
+
+                return GeneratedContent(
+                    summary=result.summary,
+                    faqs=faqs,
+                    questions=questions,
+                )
+            logger.warning(f"Direct generate_all failed: {result.error}")
+            return GeneratedContent()
+
+        # Fall back to ReAct agent pattern
         opts = options or GenerationOptions(
             num_faqs=self.config.default_num_faqs,
             num_questions=self.config.default_num_questions,
@@ -775,7 +887,7 @@ class DocumentAgent(BaseAgent):
         organization_name: str,
         session_id: Optional[str] = None,
         folder_filter: Optional[str] = None,
-        file_filter: Optional[str] = None,
+        file_filter: Optional[List[str]] = None,
         search_mode: str = "hybrid",
         organization_id: Optional[str] = None
     ) -> DocumentResponse:
@@ -790,7 +902,7 @@ class DocumentAgent(BaseAgent):
             organization_name: Organization name for store lookup
             session_id: Optional session ID for conversation continuity
             folder_filter: Optional folder name to filter search
-            file_filter: Optional file name to filter search
+            file_filter: Optional list of file names to filter search
             search_mode: Search mode - 'semantic', 'keyword', or 'hybrid'
             organization_id: Organization ID for multi-tenant isolation
 
@@ -802,7 +914,8 @@ class DocumentAgent(BaseAgent):
         if folder_filter:
             search_context += f" (filter by folder: {folder_filter})"
         if file_filter:
-            search_context += f" (filter by file: {file_filter})"
+            files_str = ", ".join(file_filter) if len(file_filter) > 1 else file_filter[0]
+            search_context += f" (filter by file(s): {files_str})"
         search_context += f" [organization: {organization_name}, mode: {search_mode}]"
 
         request = DocumentRequest(
@@ -815,7 +928,801 @@ class DocumentAgent(BaseAgent):
             folder_filter=folder_filter,  # Pass structured filter for cache scoping
         )
 
-        return await self.process_request(request)
+        # PERF: Skip tool selection for RAG chat - we know only rag_search is needed
+        # This saves ~2-3 seconds by avoiding QueryClassifier + LLMToolSelector LLM calls
+        return await self.process_request(request, rag_only=True)
+
+    async def chat_stream(
+        self,
+        query: str,
+        organization_name: str,
+        session_id: Optional[str] = None,
+        folder_filter: Optional[str] = None,
+        file_filter: Optional[List[str]] = None,
+        search_mode: str = "hybrid",
+        organization_id: Optional[str] = None,
+        include_tool_events: bool = True,
+    ):
+        """
+        Streaming conversational RAG - chat with documents using SSE.
+
+        Yields events as they occur:
+        - status: Progress updates
+        - tool_start: Tool execution beginning
+        - tool_end: Tool execution complete
+        - token: Individual LLM tokens
+        - citations: Source citations
+        - usage: Token usage statistics
+        - done: Stream complete
+
+        Args:
+            query: User's question or search query
+            organization_name: Organization name for store lookup
+            session_id: Optional session ID for conversation continuity
+            folder_filter: Optional folder name to filter search
+            file_filter: Optional list of file names to filter search
+            search_mode: Search mode - 'semantic', 'keyword', or 'hybrid'
+            organization_id: Organization ID for multi-tenant isolation
+            include_tool_events: Whether to include tool_start/tool_end events
+
+        Yields:
+            Dict with event type and data
+        """
+        import json
+
+        # Build the query with search context
+        search_context = f"Search documents for: {query}"
+        if folder_filter:
+            search_context += f" (filter by folder: {folder_filter})"
+        if file_filter:
+            files_str = ", ".join(file_filter) if len(file_filter) > 1 else file_filter[0]
+            search_context += f" (filter by file(s): {files_str})"
+        search_context += f" [organization: {organization_name}, mode: {search_mode}]"
+
+        session_id = session_id or str(uuid.uuid4())
+
+        # Yield initial status
+        yield {"event": "status", "message": "Starting RAG search..."}
+
+        # Get the RAG tool directly (skip tool selection for streaming too)
+        rag_tool = self.tools_by_name.get('rag_search')
+        relevant_tools = [rag_tool] if rag_tool else self.tools
+
+        # Bind filters to RAG tool if present
+        if file_filter or folder_filter:
+            relevant_tools = bind_rag_filters(
+                relevant_tools,
+                file_filter=file_filter,
+                folder_filter=folder_filter,
+            )
+
+        # Create dynamic agent for streaming
+        dynamic_prompt = get_system_prompt([t.name for t in relevant_tools])
+        dynamic_agent = create_agent(
+            model=self.llm,
+            tools=relevant_tools,
+            system_prompt=dynamic_prompt,
+            middleware=self.middleware_list if self.middleware_list else None,
+            checkpointer=self.checkpointer
+        )
+
+        config = {"configurable": {"thread_id": session_id}}
+        message = HumanMessage(content=search_context)
+
+        # Track state during streaming
+        accumulated_text = ""
+        citations = []
+        input_tokens = 0
+        output_tokens = 0
+        tool_start_time = None
+
+        try:
+            async with AgentConcurrency.get_semaphore():
+                # Use astream_events for granular streaming
+                async for event in dynamic_agent.astream_events(
+                    {"messages": [message]},
+                    config,
+                    version="v2",
+                ):
+                    event_kind = event.get("event")
+
+                    # Tool start event
+                    if event_kind == "on_tool_start" and include_tool_events:
+                        tool_name = event.get("name", "unknown")
+                        tool_start_time = time.time()
+                        yield {
+                            "event": "tool_start",
+                            "tool_name": tool_name,
+                            "status": "executing",
+                        }
+
+                    # Tool end event
+                    elif event_kind == "on_tool_end" and include_tool_events:
+                        tool_name = event.get("name", "unknown")
+                        duration_ms = elapsed_ms(tool_start_time) if tool_start_time else 0
+
+                        # Extract citations from RAG tool output
+                        output = event.get("data", {}).get("output", "")
+                        if tool_name == "rag_search" and output:
+                            try:
+                                result = json.loads(output) if isinstance(output, str) else output
+                                citations = result.get("citations", [])
+                            except (json.JSONDecodeError, AttributeError):
+                                pass
+
+                        yield {
+                            "event": "tool_end",
+                            "tool_name": tool_name,
+                            "status": "complete",
+                            "duration_ms": duration_ms,
+                            "citations_count": len(citations),
+                        }
+
+                    # Token streaming from LLM
+                    elif event_kind == "on_chat_model_stream":
+                        chunk = event.get("data", {}).get("chunk")
+                        if chunk and hasattr(chunk, "content"):
+                            content = chunk.content
+                            # Handle both string and list content types
+                            if content:
+                                if isinstance(content, str):
+                                    token = content
+                                elif isinstance(content, list):
+                                    # Extract text from list of content blocks
+                                    token = "".join(
+                                        item.get("text", "") if isinstance(item, dict) else str(item)
+                                        for item in content
+                                    )
+                                else:
+                                    token = str(content)
+
+                                if token:
+                                    accumulated_text += token
+                                    output_tokens += 1  # Approximate token count
+                                    yield {
+                                        "event": "token",
+                                        "token": token,
+                                        "accumulated": accumulated_text,
+                                    }
+
+                    # LLM start - capture input tokens
+                    elif event_kind == "on_chat_model_start":
+                        # Yield status for first LLM call after tool completes
+                        if citations:
+                            yield {"event": "status", "message": "Generating answer..."}
+
+                    # LLM end - capture usage if available
+                    elif event_kind == "on_chat_model_end":
+                        response = event.get("data", {}).get("output")
+                        if response and hasattr(response, "usage_metadata"):
+                            usage = response.usage_metadata
+                            if usage:
+                                input_tokens = getattr(usage, "input_tokens", 0)
+                                output_tokens = getattr(usage, "output_tokens", output_tokens)
+
+            # Yield citations
+            if citations:
+                yield {
+                    "event": "citations",
+                    "citations": citations,
+                }
+
+            # Yield usage
+            yield {
+                "event": "usage",
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "total_tokens": input_tokens + output_tokens,
+            }
+
+            # Yield done
+            yield {
+                "event": "done",
+                "session_id": session_id,
+                "success": True,
+            }
+
+        except Exception as e:
+            logger.error(f"Streaming chat error: {e}", exc_info=True)
+            yield {
+                "event": "error",
+                "error": str(e),
+                "recoverable": False,
+            }
+
+    # =========================================================================
+    # Direct Tool Invocation Methods (Bypass ReAct Agent)
+    # =========================================================================
+
+    async def _load_document_direct(
+        self,
+        document_name: str,
+        parsed_file_path: str,
+    ) -> tuple[bool, str, Optional[str]]:
+        """Load document content directly using DocumentLoaderTool.
+
+        Args:
+            document_name: Name of the document
+            parsed_file_path: GCS path to parsed document
+
+        Returns:
+            Tuple of (success, content, content_hash)
+        """
+        import json
+        from src.core.executors import get_executors
+        from src.utils.async_utils import run_in_executor_with_context
+        from .tools.base import compute_content_hash
+
+        loader_tool = self.tools_by_name.get('document_loader')
+        if not loader_tool:
+            logger.error("document_loader tool not found")
+            return False, "Document loader tool not available", None
+
+        try:
+            # Run loader in executor (it's sync internally for GCS)
+            result_json = await run_in_executor_with_context(
+                get_executors().io_executor,
+                loader_tool._run,
+                document_name,
+                parsed_file_path,
+            )
+
+            result = json.loads(result_json)
+            if not result.get('success'):
+                return False, result.get('error', 'Unknown error loading document'), None
+
+            content = result.get('content', '')
+            content_hash = compute_content_hash(content)
+
+            logger.info(
+                f"Direct document load: {document_name} "
+                f"({len(content)} chars, hash={content_hash[:8]}...)"
+            )
+            return True, content, content_hash
+
+        except Exception as e:
+            logger.error(f"Direct document load failed: {e}")
+            return False, str(e), None
+
+    async def generate_summary_direct(
+        self,
+        document_name: str,
+        parsed_file_path: str,
+        max_words: Optional[int] = None,
+        organization_id: Optional[str] = None,
+        persist: bool = True,
+    ) -> DirectGenerationResult:
+        """Generate summary using direct tool invocation (bypasses ReAct agent).
+
+        This method provides ~75% latency improvement over the ReAct agent pattern
+        by calling tools directly instead of going through the agent decision loop.
+
+        Args:
+            document_name: Name of the document
+            parsed_file_path: GCS path to parsed document
+            max_words: Maximum words for summary
+            organization_id: Organization ID for multi-tenant isolation
+            persist: Whether to persist the result to GCS/database
+
+        Returns:
+            DirectGenerationResult with summary
+        """
+        import json
+        start_time = time.time()
+
+        # Load document
+        success, content, content_hash = await self._load_document_direct(
+            document_name, parsed_file_path
+        )
+        if not success:
+            return DirectGenerationResult(
+                success=False,
+                error=content,  # content contains error message on failure
+                processing_time_ms=elapsed_ms(start_time),
+            )
+
+        # Get summary tool and invoke directly
+        summary_tool = self.tools_by_name.get('summary_generator')
+        if not summary_tool:
+            return DirectGenerationResult(
+                success=False,
+                error="Summary generator tool not available",
+                processing_time_ms=elapsed_ms(start_time),
+            )
+
+        try:
+            # Use async method if available, otherwise sync
+            summary_max_words = max_words or self.config.summary_max_words
+            result_json = await summary_tool._arun(
+                content=content,
+                document_name=document_name,
+                max_words=summary_max_words,
+                organization_id=organization_id,
+            )
+
+            result = json.loads(result_json)
+            if not result.get('success'):
+                return DirectGenerationResult(
+                    success=False,
+                    error=result.get('error', 'Summary generation failed'),
+                    processing_time_ms=elapsed_ms(start_time),
+                )
+
+            summary = result.get('summary')
+            cached = result.get('cached', False)
+
+            # Persist if requested and not cached (cached = already persisted)
+            output_paths = None
+            persisted = False
+            if persist and not cached:
+                persist_result = await self._persist_content_direct(
+                    document_name=document_name,
+                    parsed_file_path=parsed_file_path,
+                    summary=summary,
+                    content_hash=content_hash,
+                    organization_id=organization_id,
+                )
+                persisted = persist_result.get('success', False)
+                output_paths = persist_result.get('output_file_paths')
+
+            processing_time = elapsed_ms(start_time)
+            logger.info(
+                f"Direct summary generation: {document_name} "
+                f"({processing_time:.1f}ms, cached={cached})"
+            )
+
+            return DirectGenerationResult(
+                success=True,
+                summary=summary,
+                processing_time_ms=processing_time,
+                cached=cached,
+                persisted=persisted,
+                output_file_paths=output_paths,
+                content_hash=content_hash,
+            )
+
+        except Exception as e:
+            logger.error(f"Direct summary generation failed: {e}")
+            return DirectGenerationResult(
+                success=False,
+                error=str(e),
+                processing_time_ms=elapsed_ms(start_time),
+            )
+
+    async def generate_faqs_direct(
+        self,
+        document_name: str,
+        parsed_file_path: str,
+        num_faqs: Optional[int] = None,
+        organization_id: Optional[str] = None,
+        persist: bool = True,
+    ) -> DirectGenerationResult:
+        """Generate FAQs using direct tool invocation (bypasses ReAct agent).
+
+        Args:
+            document_name: Name of the document
+            parsed_file_path: GCS path to parsed document
+            num_faqs: Number of FAQs to generate
+            organization_id: Organization ID for multi-tenant isolation
+            persist: Whether to persist the result to GCS/database
+
+        Returns:
+            DirectGenerationResult with FAQs
+        """
+        import json
+        start_time = time.time()
+
+        # Load document
+        success, content, content_hash = await self._load_document_direct(
+            document_name, parsed_file_path
+        )
+        if not success:
+            return DirectGenerationResult(
+                success=False,
+                error=content,
+                processing_time_ms=elapsed_ms(start_time),
+            )
+
+        # Get FAQ tool and invoke directly
+        faq_tool = self.tools_by_name.get('faq_generator')
+        if not faq_tool:
+            return DirectGenerationResult(
+                success=False,
+                error="FAQ generator tool not available",
+                processing_time_ms=elapsed_ms(start_time),
+            )
+
+        try:
+            faq_count = num_faqs or self.config.default_num_faqs
+            result_json = await faq_tool._arun(
+                content=content,
+                document_name=document_name,
+                num_faqs=faq_count,
+                organization_id=organization_id,
+            )
+
+            result = json.loads(result_json)
+            if not result.get('success'):
+                return DirectGenerationResult(
+                    success=False,
+                    error=result.get('error', 'FAQ generation failed'),
+                    processing_time_ms=elapsed_ms(start_time),
+                )
+
+            faqs = result.get('faqs', [])
+            cached = result.get('cached', False)
+
+            # Persist if requested and not cached
+            output_paths = None
+            persisted = False
+            if persist and not cached:
+                persist_result = await self._persist_content_direct(
+                    document_name=document_name,
+                    parsed_file_path=parsed_file_path,
+                    faqs=json.dumps({'faqs': faqs}),
+                    content_hash=content_hash,
+                    organization_id=organization_id,
+                )
+                persisted = persist_result.get('success', False)
+                output_paths = persist_result.get('output_file_paths')
+
+            processing_time = elapsed_ms(start_time)
+            logger.info(
+                f"Direct FAQ generation: {document_name} "
+                f"({len(faqs)} FAQs, {processing_time:.1f}ms, cached={cached})"
+            )
+
+            return DirectGenerationResult(
+                success=True,
+                faqs=faqs,
+                processing_time_ms=processing_time,
+                cached=cached,
+                persisted=persisted,
+                output_file_paths=output_paths,
+                content_hash=content_hash,
+            )
+
+        except Exception as e:
+            logger.error(f"Direct FAQ generation failed: {e}")
+            return DirectGenerationResult(
+                success=False,
+                error=str(e),
+                processing_time_ms=elapsed_ms(start_time),
+            )
+
+    async def generate_questions_direct(
+        self,
+        document_name: str,
+        parsed_file_path: str,
+        num_questions: Optional[int] = None,
+        organization_id: Optional[str] = None,
+        persist: bool = True,
+    ) -> DirectGenerationResult:
+        """Generate questions using direct tool invocation (bypasses ReAct agent).
+
+        Args:
+            document_name: Name of the document
+            parsed_file_path: GCS path to parsed document
+            num_questions: Number of questions to generate
+            organization_id: Organization ID for multi-tenant isolation
+            persist: Whether to persist the result to GCS/database
+
+        Returns:
+            DirectGenerationResult with questions
+        """
+        import json
+        start_time = time.time()
+
+        # Load document
+        success, content, content_hash = await self._load_document_direct(
+            document_name, parsed_file_path
+        )
+        if not success:
+            return DirectGenerationResult(
+                success=False,
+                error=content,
+                processing_time_ms=elapsed_ms(start_time),
+            )
+
+        # Get question tool and invoke directly
+        question_tool = self.tools_by_name.get('question_generator')
+        if not question_tool:
+            return DirectGenerationResult(
+                success=False,
+                error="Question generator tool not available",
+                processing_time_ms=elapsed_ms(start_time),
+            )
+
+        try:
+            question_count = num_questions or self.config.default_num_questions
+            result_json = await question_tool._arun(
+                content=content,
+                document_name=document_name,
+                num_questions=question_count,
+                organization_id=organization_id,
+            )
+
+            result = json.loads(result_json)
+            if not result.get('success'):
+                return DirectGenerationResult(
+                    success=False,
+                    error=result.get('error', 'Question generation failed'),
+                    processing_time_ms=elapsed_ms(start_time),
+                )
+
+            questions = result.get('questions', [])
+            cached = result.get('cached', False)
+
+            # Persist if requested and not cached
+            output_paths = None
+            persisted = False
+            if persist and not cached:
+                persist_result = await self._persist_content_direct(
+                    document_name=document_name,
+                    parsed_file_path=parsed_file_path,
+                    questions=json.dumps({'questions': questions}),
+                    content_hash=content_hash,
+                    organization_id=organization_id,
+                )
+                persisted = persist_result.get('success', False)
+                output_paths = persist_result.get('output_file_paths')
+
+            processing_time = elapsed_ms(start_time)
+            logger.info(
+                f"Direct question generation: {document_name} "
+                f"({len(questions)} questions, {processing_time:.1f}ms, cached={cached})"
+            )
+
+            return DirectGenerationResult(
+                success=True,
+                questions=questions,
+                processing_time_ms=processing_time,
+                cached=cached,
+                persisted=persisted,
+                output_file_paths=output_paths,
+                content_hash=content_hash,
+            )
+
+        except Exception as e:
+            logger.error(f"Direct question generation failed: {e}")
+            return DirectGenerationResult(
+                success=False,
+                error=str(e),
+                processing_time_ms=elapsed_ms(start_time),
+            )
+
+    async def generate_all_direct(
+        self,
+        document_name: str,
+        parsed_file_path: str,
+        options: Optional[GenerationOptions] = None,
+        organization_id: Optional[str] = None,
+        persist: bool = True,
+    ) -> DirectGenerationResult:
+        """Generate all content types using direct tool invocation with parallel execution.
+
+        This method:
+        1. Loads the document once
+        2. Runs summary, FAQ, and question generation in parallel
+        3. Persists all content in a single operation
+
+        Args:
+            document_name: Name of the document
+            parsed_file_path: GCS path to parsed document
+            options: Generation options (num_faqs, num_questions, summary_max_words)
+            organization_id: Organization ID for multi-tenant isolation
+            persist: Whether to persist the result to GCS/database
+
+        Returns:
+            DirectGenerationResult with summary, FAQs, and questions
+        """
+        import json
+        start_time = time.time()
+
+        # Load document once
+        success, content, content_hash = await self._load_document_direct(
+            document_name, parsed_file_path
+        )
+        if not success:
+            return DirectGenerationResult(
+                success=False,
+                error=content,
+                processing_time_ms=elapsed_ms(start_time),
+            )
+
+        # Get tools
+        summary_tool = self.tools_by_name.get('summary_generator')
+        faq_tool = self.tools_by_name.get('faq_generator')
+        question_tool = self.tools_by_name.get('question_generator')
+
+        if not all([summary_tool, faq_tool, question_tool]):
+            missing = []
+            if not summary_tool:
+                missing.append('summary_generator')
+            if not faq_tool:
+                missing.append('faq_generator')
+            if not question_tool:
+                missing.append('question_generator')
+            return DirectGenerationResult(
+                success=False,
+                error=f"Missing tools: {', '.join(missing)}",
+                processing_time_ms=elapsed_ms(start_time),
+            )
+
+        # Get options
+        opts = options or GenerationOptions()
+        summary_max_words = opts.summary_max_words or self.config.summary_max_words
+        num_faqs = opts.num_faqs or self.config.default_num_faqs
+        num_questions = opts.num_questions or self.config.default_num_questions
+
+        try:
+            # Run all generators in parallel using asyncio.gather
+            summary_coro = summary_tool._arun(
+                content=content,
+                document_name=document_name,
+                max_words=summary_max_words,
+                organization_id=organization_id,
+            )
+            faq_coro = faq_tool._arun(
+                content=content,
+                document_name=document_name,
+                num_faqs=num_faqs,
+                organization_id=organization_id,
+            )
+            question_coro = question_tool._arun(
+                content=content,
+                document_name=document_name,
+                num_questions=num_questions,
+                organization_id=organization_id,
+            )
+
+            # Execute in parallel
+            results = await asyncio.gather(
+                summary_coro, faq_coro, question_coro,
+                return_exceptions=True
+            )
+
+            # Parse results
+            summary = None
+            faqs = None
+            questions = None
+            any_cached = False
+            errors = []
+
+            # Summary result
+            if isinstance(results[0], Exception):
+                errors.append(f"Summary: {results[0]}")
+            else:
+                summary_result = json.loads(results[0])
+                if summary_result.get('success'):
+                    summary = summary_result.get('summary')
+                    if summary_result.get('cached'):
+                        any_cached = True
+                else:
+                    errors.append(f"Summary: {summary_result.get('error')}")
+
+            # FAQ result
+            if isinstance(results[1], Exception):
+                errors.append(f"FAQs: {results[1]}")
+            else:
+                faq_result = json.loads(results[1])
+                if faq_result.get('success'):
+                    faqs = faq_result.get('faqs', [])
+                    if faq_result.get('cached'):
+                        any_cached = True
+                else:
+                    errors.append(f"FAQs: {faq_result.get('error')}")
+
+            # Question result
+            if isinstance(results[2], Exception):
+                errors.append(f"Questions: {results[2]}")
+            else:
+                question_result = json.loads(results[2])
+                if question_result.get('success'):
+                    questions = question_result.get('questions', [])
+                    if question_result.get('cached'):
+                        any_cached = True
+                else:
+                    errors.append(f"Questions: {question_result.get('error')}")
+
+            # Persist all content together if requested and any content was generated
+            output_paths = None
+            persisted = False
+            if persist and (summary or faqs or questions) and not any_cached:
+                persist_result = await self._persist_content_direct(
+                    document_name=document_name,
+                    parsed_file_path=parsed_file_path,
+                    summary=summary,
+                    faqs=json.dumps({'faqs': faqs}) if faqs else None,
+                    questions=json.dumps({'questions': questions}) if questions else None,
+                    content_hash=content_hash,
+                    organization_id=organization_id,
+                )
+                persisted = persist_result.get('success', False)
+                output_paths = persist_result.get('output_file_paths')
+
+            processing_time = elapsed_ms(start_time)
+            success = bool(summary or faqs or questions)
+
+            logger.info(
+                f"Direct generate_all: {document_name} "
+                f"(summary={'yes' if summary else 'no'}, "
+                f"faqs={len(faqs) if faqs else 0}, "
+                f"questions={len(questions) if questions else 0}, "
+                f"{processing_time:.1f}ms)"
+            )
+
+            return DirectGenerationResult(
+                success=success,
+                summary=summary,
+                faqs=faqs,
+                questions=questions,
+                processing_time_ms=processing_time,
+                cached=any_cached,
+                persisted=persisted,
+                output_file_paths=output_paths,
+                content_hash=content_hash,
+                error='; '.join(errors) if errors and not success else None,
+            )
+
+        except Exception as e:
+            logger.error(f"Direct generate_all failed: {e}")
+            return DirectGenerationResult(
+                success=False,
+                error=str(e),
+                processing_time_ms=elapsed_ms(start_time),
+            )
+
+    async def _persist_content_direct(
+        self,
+        document_name: str,
+        parsed_file_path: str,
+        summary: Optional[str] = None,
+        faqs: Optional[str] = None,
+        questions: Optional[str] = None,
+        content_hash: Optional[str] = None,
+        organization_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Persist generated content directly using ContentPersistTool.
+
+        Args:
+            document_name: Name of the document
+            parsed_file_path: GCS path to parsed document
+            summary: Generated summary text
+            faqs: FAQs as JSON string
+            questions: Questions as JSON string
+            content_hash: Hash of source content for cache validation
+            organization_id: Organization ID for multi-tenant isolation
+
+        Returns:
+            Dict with success status and output_file_paths
+        """
+        import json
+        from src.core.executors import get_executors
+        from src.utils.async_utils import run_in_executor_with_context
+
+        persist_tool = self.tools_by_name.get('content_persist')
+        if not persist_tool:
+            return {'success': False, 'error': 'Content persist tool not available'}
+
+        try:
+            result_json = await run_in_executor_with_context(
+                get_executors().io_executor,
+                persist_tool._run,
+                document_name,
+                parsed_file_path,
+                summary,
+                faqs,
+                questions,
+                content_hash,
+                organization_id,
+            )
+
+            return json.loads(result_json)
+
+        except Exception as e:
+            logger.error(f"Direct content persist failed: {e}")
+            return {'success': False, 'error': str(e)}
 
     def get_health_status(self) -> Dict[str, Any]:
         """Get health status of the agent and its components."""

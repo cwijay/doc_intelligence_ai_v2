@@ -243,3 +243,31 @@ class FileUpload:
     WAIT_TIME = 0.5  # Upload retry wait time
     MAX_WAIT = 10  # Upload retry max wait
     SIGNED_URL_EXPIRATION_MINUTES = 60  # Signed URL expiration
+
+
+# =============================================================================
+# Content Size Estimates
+# =============================================================================
+CHARS_PER_PAGE_ESTIMATE = 3000  # Approximate chars per page for markdown
+
+
+# =============================================================================
+# Quota Token Estimates
+# =============================================================================
+class QuotaEstimates:
+    """Token usage estimates for quota checking."""
+
+    # Document processing
+    DOCUMENT_PROCESS = 2000
+    DOCUMENT_SUMMARIZE = 1500
+    DOCUMENT_FAQS = 2000
+    DOCUMENT_QUESTIONS = 2500
+    DOCUMENT_GENERATE_ALL = 5000
+
+    # Extraction
+    EXTRACTION_ANALYZE = 2000
+    EXTRACTION_SCHEMA = 1500
+    EXTRACTION_EXTRACT = 3000
+
+    # Sheets
+    SHEETS_ANALYZE = 1500

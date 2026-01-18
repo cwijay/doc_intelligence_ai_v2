@@ -22,6 +22,7 @@ from ..schemas.errors import FILE_ERROR_RESPONSES
 from src.utils.timer_utils import elapsed_ms
 from src.utils.gcs_utils import is_gcs_path, extract_gcs_path_parts
 from src.core.usage import check_quota, track_resource, enqueue_resource_usage
+from src.constants import CHARS_PER_PAGE_ESTIMATE
 from ..schemas.ingest import (
     ParseRequest,
     ParseResponse,
@@ -352,8 +353,8 @@ async def parse_document(
 
         # Track LlamaParse page usage after successful parsing (non-blocking via background queue)
         try:
-            # Estimate page count based on content length (roughly 3000 chars per page)
-            estimated_pages = max(1, len(parsed_content) // 3000)
+            # Estimate page count based on content length
+            estimated_pages = max(1, len(parsed_content) // CHARS_PER_PAGE_ESTIMATE)
             enqueue_resource_usage(
                 org_id=org_id,
                 resource_type="llamaparse_pages",

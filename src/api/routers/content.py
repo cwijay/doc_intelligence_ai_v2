@@ -14,6 +14,7 @@ from ..schemas.content import (
     CONTENT_ERROR_RESPONSES,
 )
 from src.storage.config import get_storage
+from src.constants import CHARS_PER_PAGE_ESTIMATE
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -106,8 +107,7 @@ async def load_parsed_content(
         content_length = len(content)
 
         # Estimate page count from content (rough approximation)
-        # Assuming ~3000 chars per page for markdown
-        estimated_pages = max(1, content_length // 3000)
+        estimated_pages = max(1, content_length // CHARS_PER_PAGE_ESTIMATE)
 
         logger.info(f"Successfully loaded {content_length} bytes from {parsed_path}")
 

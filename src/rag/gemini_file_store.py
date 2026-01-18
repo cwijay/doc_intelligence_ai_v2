@@ -28,12 +28,16 @@ from google.genai import types
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 
 from src.utils.gcs_utils import is_gcs_path, parse_gcs_uri
+from src.constants import (
+    STORE_CACHE_TTL_SECONDS,
+    DEFAULT_CHUNK_MAX_TOKENS,
+    DEFAULT_CHUNK_OVERLAP_TOKENS,
+)
 
 # Store cache: maps display_name -> (store_object, cached_at_timestamp)
 # Stores rarely change, so 5-minute TTL is appropriate
 _store_cache: Dict[str, Tuple[Any, float]] = {}
 _store_list_cache: Tuple[Optional[List[Any]], float] = (None, 0.0)
-STORE_CACHE_TTL_SECONDS = 300  # 5 minutes
 
 # Get logger (config should be set by entry point)
 logger = logging.getLogger(__name__)
@@ -49,15 +53,83 @@ os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY")
 STORE_NAME = os.getenv("FILE_STORE_NAME", "doc-intelligence-store")
 SOURCE_DIRECTORY = os.getenv("SOURCE_DIRECTORY", "docs/structured")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
+
+# Chunking config - uses centralized defaults from constants (512/100)
+# Can be overridden via environment variables
 CHUNKING_CONFIG = {
     "white_space_config": {
-        "max_tokens_per_chunk": int(os.getenv("MAX_TOKENS_PER_CHUNK", "512")),
-        "max_overlap_tokens": int(os.getenv("MAX_OVERLAP_TOKENS", "100"))
+        "max_tokens_per_chunk": int(os.getenv("MAX_TOKENS_PER_CHUNK", str(DEFAULT_CHUNK_MAX_TOKENS))),
+        "max_overlap_tokens": int(os.getenv("MAX_OVERLAP_TOKENS", str(DEFAULT_CHUNK_OVERLAP_TOKENS)))
     }
 }
 
-# Initialize client
-client = genai.Client()
+# File Search optimization settings
+DEFAULT_TOP_K = int(os.getenv("GEMINI_FILE_SEARCH_TOP_K", "3"))
+# Thinking level: MINIMAL (fastest), LOW, MEDIUM, HIGH (most thorough)
+THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "MINIMAL")
+
+# =============================================================================
+# Gemini Client Singleton Manager
+# =============================================================================
+class GeminiClientManager:
+    """Singleton manager for Gemini File Search client.
+
+    Provides controlled initialization at app startup and graceful shutdown.
+    """
+    _instance: Optional["GeminiClientManager"] = None
+    _client: Optional[genai.Client] = None
+
+    @classmethod
+    def get_instance(cls) -> "GeminiClientManager":
+        """Get the singleton instance."""
+        if cls._instance is None:
+            cls._instance = cls()
+        return cls._instance
+
+    @classmethod
+    def initialize(cls) -> genai.Client:
+        """Initialize the Gemini client. Call during app startup."""
+        instance = cls.get_instance()
+        if instance._client is None:
+            instance._client = genai.Client()
+            logger.info("Gemini File Search client initialized (singleton)")
+        return instance._client
+
+    @classmethod
+    def get_client(cls) -> genai.Client:
+        """Get the Gemini client. Initializes lazily if not already done."""
+        instance = cls.get_instance()
+        if instance._client is None:
+            return cls.initialize()
+        return instance._client
+
+    @classmethod
+    def shutdown(cls):
+        """Shutdown the client gracefully. Call during app shutdown."""
+        instance = cls.get_instance()
+        if instance._client:
+            logger.info("Gemini File Search client shutdown")
+            instance._client = None
+
+    @classmethod
+    def is_initialized(cls) -> bool:
+        """Check if the client has been initialized."""
+        instance = cls.get_instance()
+        return instance._client is not None
+
+
+def get_client() -> genai.Client:
+    """Get the Gemini client singleton.
+
+    This is the preferred way to access the client throughout the codebase.
+    The client is initialized lazily on first access, or explicitly at app startup.
+    """
+    return GeminiClientManager.get_client()
+
+
+# Backward compatibility: module-level client reference (lazy)
+# Note: Direct usage of 'client' should be migrated to get_client()
+client = None  # Will be set on first access via get_client() or kept None
 
 # Retry decorator for transient API failures
 api_retry = retry(
@@ -123,7 +195,7 @@ def create_file_search_store(display_name: str):
     """
     global _store_cache, _store_list_cache
 
-    file_search_store = client.file_search_stores.create(
+    file_search_store = get_client().file_search_stores.create(
         config={"display_name": display_name}
     )
     logger.info(f"Created store: {file_search_store.name}")
@@ -166,7 +238,7 @@ def find_store_by_name(display_name: str):
             return cached_store
 
     # Fetch from API and update cache
-    for store in client.file_search_stores.list():
+    for store in get_client().file_search_stores.list():
         # Cache all stores we see
         _store_cache[store.display_name] = (store, time.time())
         if store.display_name == display_name:
@@ -281,10 +353,10 @@ def upload_file(
     replaced = False
 
     # Check if document already exists and delete it
-    for doc in client.file_search_stores.documents.list(parent=file_search_store.name):
+    for doc in get_client().file_search_stores.documents.list(parent=file_search_store.name):
         if doc.display_name == file_name:
             logger.info(f"Document '{file_name}' already exists, replacing...")
-            client.file_search_stores.documents.delete(name=doc.name, config={"force": True})
+            get_client().file_search_stores.documents.delete(name=doc.name, config={"force": True})
             replaced = True
             _log_event(
                 "file_replaced",
@@ -354,7 +426,7 @@ def upload_file(
     if parser_version:
         custom_metadata.append({"key": "parser_version", "string_value": parser_version})
 
-    operation = client.file_search_stores.upload_to_file_search_store(
+    operation = get_client().file_search_stores.upload_to_file_search_store(
         file_search_store_name=file_search_store.name,
         file=upload_path,
         config={
@@ -370,7 +442,7 @@ def upload_file(
     while not operation.done:
         time.sleep(wait_time)
         logger.debug(f"Waiting for {file_name} to upload (next check in {wait_time:.1f}s)...")
-        operation = client.operations.get(operation)
+        operation = get_client().operations.get(operation)
         wait_time = min(wait_time * 2, max_wait)
 
     logger.info(f"Uploaded: {file_name}" + (f" to folder '{folder_name}'" if folder_name else ""))
@@ -438,12 +510,13 @@ def upload_all_files(file_search_store, directory: str, max_workers: int = 3):
 def query_store(
     file_search_store,
     prompt: str,
-    file_name_filter: str = None,
+    file_name_filter: Optional[List[str]] = None,
     folder_name_filter: str = None,
     folder_id_filter: str = None,
     search_mode: str = "semantic",
     generate_answer: bool = True,
-    top_k: int = 5,
+    top_k: int = None,
+    thinking_level: str = None,
 ):
     """
     Query the file search store with optional folder/file filtering and search modes.
@@ -451,12 +524,13 @@ def query_store(
     Args:
         file_search_store: The file search store object
         prompt: The query prompt
-        file_name_filter: Optional file name to filter by
+        file_name_filter: Optional list of file names to filter by (supports multiple files with OR logic)
         folder_name_filter: Optional folder name to filter by (for folder-scoped search)
         folder_id_filter: Optional folder ID to filter by
         search_mode: Search mode - 'semantic' (vector), 'keyword' (BM25), or 'hybrid' (combined)
         generate_answer: Whether to generate an answer from retrieved chunks
-        top_k: Number of results to retrieve
+        top_k: Number of results to retrieve (default: GEMINI_FILE_SEARCH_TOP_K env var or 3)
+        thinking_level: Gemini thinking level - MINIMAL (fastest), LOW, MEDIUM, HIGH (default: env var or MINIMAL)
 
     Returns:
         Response object from the model (or dict with citations if generate_answer=False)
@@ -464,7 +538,8 @@ def query_store(
     Search Scopes:
         - Org-wide: Leave all filters empty to search ALL indexed documents
         - Folder: Set folder_name_filter to search files in a specific folder
-        - Single file: Set file_name_filter to search within a specific file
+        - Single file: Set file_name_filter=["contract.pdf"] to search within a specific file
+        - Multiple files: Set file_name_filter=["file1.pdf", "file2.pdf"] to search across selected files
 
     Examples:
         # Org-wide search (cross-folder)
@@ -474,17 +549,33 @@ def query_store(
         query_store(store, "find invoices", folder_name_filter="Invoices 2024")
 
         # Single file search
-        query_store(store, "summarize", file_name_filter="contract.pdf")
+        query_store(store, "summarize", file_name_filter=["contract.pdf"])
+
+        # Multiple file search (OR logic)
+        query_store(store, "compare invoices", file_name_filter=["invoice1.pdf", "invoice2.pdf"])
 
         # Hybrid search with keyword + semantic
         query_store(store, "payment terms NET 30", search_mode="hybrid")
     """
+    # Apply defaults from environment config
+    if top_k is None:
+        top_k = DEFAULT_TOP_K
+    if thinking_level is None:
+        thinking_level = THINKING_LEVEL
+
     file_search_kwargs = {"file_search_store_names": [file_search_store.name]}
 
     # Build metadata filter for folder/file scoping
     filters = []
     if file_name_filter:
-        filters.append(f'file_name="{file_name_filter}"')
+        if len(file_name_filter) == 1:
+            # Single file - simple equality
+            filters.append(f'file_name="{file_name_filter[0]}"')
+        else:
+            # Multiple files - combine with OR logic
+            # Per AIP-160: OR has higher precedence than AND, so wrap in parens
+            file_conditions = " OR ".join(f'file_name="{f}"' for f in file_name_filter)
+            filters.append(f"({file_conditions})")
     if folder_name_filter:
         filters.append(f'folder_name="{folder_name_filter}"')
     if folder_id_filter:
@@ -493,6 +584,9 @@ def query_store(
     if filters:
         # Combine filters with AND logic
         file_search_kwargs["metadata_filter"] = " AND ".join(filters)
+        logger.info(f"Gemini metadata_filter: {file_search_kwargs['metadata_filter']}")
+    else:
+        logger.info("No metadata filters - searching entire store")
 
     # Configure retrieval based on search mode
     # Gemini File Search API supports semantic retrieval by default
@@ -507,28 +601,39 @@ def query_store(
 
     file_search_config = types.FileSearch(**file_search_kwargs)
 
+    # Build thinking config for latency optimization
+    # MINIMAL = fastest (best for RAG), LOW, MEDIUM, HIGH = most thorough
+    thinking_config = None
+    if thinking_level and thinking_level.upper() in ["MINIMAL", "LOW", "MEDIUM", "HIGH"]:
+        thinking_config = types.ThinkingConfig(thinking_level=thinking_level.upper())
+        logger.debug(f"Using thinking_level={thinking_level.upper()} for faster response")
+
     if generate_answer:
         # Generate content with answer from retrieved chunks
-        response = client.models.generate_content(
+        config_kwargs = {
+            "tools": [types.Tool(file_search=file_search_config)]
+        }
+        if thinking_config:
+            config_kwargs["thinking_config"] = thinking_config
+
+        response = get_client().models.generate_content(
             model=GEMINI_MODEL,
             contents=enhanced_prompt,
-            config=types.GenerateContentConfig(
-                tools=[
-                    types.Tool(file_search=file_search_config)
-                ]
-            )
+            config=types.GenerateContentConfig(**config_kwargs)
         )
     else:
         # Retrieval only - still need to call generate_content but with a retrieval-focused prompt
         retrieval_prompt = f"Retrieve the top {top_k} most relevant passages for: {enhanced_prompt}. Return only the citations."
-        response = client.models.generate_content(
+        config_kwargs = {
+            "tools": [types.Tool(file_search=file_search_config)]
+        }
+        if thinking_config:
+            config_kwargs["thinking_config"] = thinking_config
+
+        response = get_client().models.generate_content(
             model=GEMINI_MODEL,
             contents=retrieval_prompt,
-            config=types.GenerateContentConfig(
-                tools=[
-                    types.Tool(file_search=file_search_config)
-                ]
-            )
+            config=types.GenerateContentConfig(**config_kwargs)
         )
 
     # Log the search event
@@ -546,6 +651,7 @@ def query_store(
             "search_mode": search_mode,
             "generate_answer": generate_answer,
             "top_k": top_k,
+            "thinking_level": thinking_level,
             "has_results": has_results,
         }
     )
@@ -599,7 +705,7 @@ def list_documents(file_search_store):
     logger.info(f"Documents in {file_search_store.display_name}:")
     logger.info("=" * 60)
 
-    for document in client.file_search_stores.documents.list(parent=file_search_store.name):
+    for document in get_client().file_search_stores.documents.list(parent=file_search_store.name):
         documents.append(document)
         logger.info(f"  Name: {document.name}")
         logger.info(f"  Display Name: {document.display_name}")
@@ -639,7 +745,7 @@ def delete_store(store_name: str):
     """
     global _store_cache, _store_list_cache
 
-    client.file_search_stores.delete(name=store_name, config={"force": True})
+    get_client().file_search_stores.delete(name=store_name, config={"force": True})
     logger.info(f"Deleted store: {store_name}")
 
     # Invalidate caches - clear all since we don't know the display name
@@ -673,7 +779,7 @@ def list_all_stores():
     logger.info("All File Search Stores:")
     logger.info("-" * 50)
 
-    for store in client.file_search_stores.list():
+    for store in get_client().file_search_stores.list():
         stores.append(store)
         # Update individual store cache
         _store_cache[store.display_name] = (store, time.time())

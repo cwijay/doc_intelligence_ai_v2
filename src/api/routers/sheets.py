@@ -18,6 +18,7 @@ from ..schemas.common import TokenUsage
 from ..schemas.errors import FILE_ERROR_RESPONSES, BASE_ERROR_RESPONSES
 from src.utils.timer_utils import elapsed_ms
 from src.core.usage import check_quota
+from src.constants import QuotaEstimates
 from ..schemas.sheets import (
     SheetsAnalyzeRequest,
     SheetsAnalyzeResponse,
@@ -39,7 +40,7 @@ router = APIRouter()
     operation_id="analyzeSheets",
     summary="Analyze Excel/CSV files with natural language",
 )
-@check_quota(usage_type="tokens", estimated_usage=1500)
+@check_quota(usage_type="tokens", estimated_usage=QuotaEstimates.SHEETS_ANALYZE)
 async def analyze_sheets(
     request: SheetsAnalyzeRequest,
     agent=Depends(get_sheets_agent),

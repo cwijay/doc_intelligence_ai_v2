@@ -9,7 +9,9 @@ import os
 import time
 from typing import Optional
 
+import json
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 
 from ..dependencies import get_document_agent, get_org_id
 from ..schemas.common import TokenUsage
@@ -17,6 +19,7 @@ from ..schemas.errors import DOCUMENT_ERROR_RESPONSES
 from src.utils.timer_utils import elapsed_ms
 from src.core.usage import check_quota, track_resource
 from src.core.usage.context import usage_context
+from src.constants import QuotaEstimates
 from ..schemas.documents import (
     DocumentProcessRequest,
     DocumentProcessResponse,
@@ -34,6 +37,7 @@ from ..schemas.documents import (
     RAGChatRequest,
     RAGChatResponse,
     RAGCitation,
+    RAGChatStreamRequest,
 )
 
 logger = logging.getLogger(__name__)
@@ -47,7 +51,7 @@ router = APIRouter()
     operation_id="processDocument",
     summary="Process document with flexible query",
 )
-@check_quota(usage_type="tokens", estimated_usage=2000)
+@check_quota(usage_type="tokens", estimated_usage=QuotaEstimates.DOCUMENT_PROCESS)
 async def process_document(
     request: DocumentProcessRequest,
     agent=Depends(get_document_agent),
@@ -128,7 +132,7 @@ async def process_document(
     operation_id="summarizeDocument",
     summary="Generate document summary",
 )
-@check_quota(usage_type="tokens", estimated_usage=1500)
+@check_quota(usage_type="tokens", estimated_usage=QuotaEstimates.DOCUMENT_SUMMARIZE)
 async def summarize_document(
     request: SummarizeRequest,
     agent=Depends(get_document_agent),
@@ -208,7 +212,7 @@ async def summarize_document(
     operation_id="generateFaqs",
     summary="Generate FAQs from document",
 )
-@check_quota(usage_type="tokens", estimated_usage=2000)
+@check_quota(usage_type="tokens", estimated_usage=QuotaEstimates.DOCUMENT_FAQS)
 async def generate_faqs(
     request: FAQsRequest,
     agent=Depends(get_document_agent),
@@ -289,7 +293,7 @@ async def generate_faqs(
     operation_id="generateQuestions",
     summary="Generate comprehension questions",
 )
-@check_quota(usage_type="tokens", estimated_usage=2500)
+@check_quota(usage_type="tokens", estimated_usage=QuotaEstimates.DOCUMENT_QUESTIONS)
 async def generate_questions(
     request: QuestionsRequest,
     agent=Depends(get_document_agent),
@@ -393,7 +397,7 @@ async def generate_questions(
     operation_id="generateAllContent",
     summary="Generate all content types",
 )
-@check_quota(usage_type="tokens", estimated_usage=5000)
+@check_quota(usage_type="tokens", estimated_usage=QuotaEstimates.DOCUMENT_GENERATE_ALL)
 async def generate_all_content(
     request: GenerateAllRequest,
     agent=Depends(get_document_agent),
@@ -536,13 +540,27 @@ async def chat_with_documents(
         # Use organization_name from request (required field)
         organization_name = request.organization_name
 
-        # Transform original filename to parsed filename for Gemini File Search
+        # Transform original filename(s) to parsed filename(s) for Gemini File Search
         # Indexed files use .md extension (e.g., "IMG_4696.JPEG" -> "IMG_4696.md")
-        effective_file_filter = request.file_filter
-        if effective_file_filter:
-            stem = os.path.splitext(effective_file_filter)[0]
-            effective_file_filter = f"{stem}.md"
+        # Normalize: accept both single string and list of strings
+        effective_file_filter: list[str] | None = None
+        if request.file_filter:
+            # Normalize to list
+            if isinstance(request.file_filter, str):
+                file_list = [request.file_filter]
+            else:
+                file_list = list(request.file_filter)
+            # Transform each file to .md extension
+            effective_file_filter = [f"{os.path.splitext(f)[0]}.md" for f in file_list]
             logger.info(f"Transformed file_filter: {request.file_filter} -> {effective_file_filter}")
+        else:
+            logger.info("No file_filter in request - frontend did not send file names")
+
+        # Log folder filter for debugging
+        if request.folder_filter:
+            logger.info(f"Using folder_filter: {request.folder_filter}")
+        else:
+            logger.info("No folder_filter specified - searching org-wide")
 
         # Use the agent's chat method
         # Wrap with usage_context to enable token tracking via callback handler
@@ -560,17 +578,28 @@ async def chat_with_documents(
         processing_time = elapsed_ms(start_time)
 
         # Extract citations from response if available
+        # Citations are now RAGCitation Pydantic models from the agent
         citations = []
         if hasattr(response, 'citations') and response.citations:
-            citations = [
-                RAGCitation(
-                    text=c.get('text', ''),
-                    file=c.get('file', ''),
-                    relevance_score=c.get('relevance_score', 0.0),
-                    folder_name=c.get('folder_name'),
-                )
-                for c in response.citations
-            ]
+            for c in response.citations:
+                # Handle both dict and Pydantic model formats
+                if hasattr(c, 'text'):
+                    # Pydantic model
+                    citations.append(RAGCitation(
+                        text=c.text,
+                        file=c.file,
+                        relevance_score=c.relevance_score,
+                        folder_name=c.folder_name,
+                    ))
+                else:
+                    # Dict format (legacy)
+                    citations.append(RAGCitation(
+                        text=c.get('text', ''),
+                        file=c.get('file', ''),
+                        relevance_score=c.get('relevance_score', 0.0),
+                        folder_name=c.get('folder_name'),
+                    ))
+            logger.info(f"Extracted {len(citations)} citations with relevance scores: {[c.relevance_score for c in citations]}")
 
         # Usage tracking handled by @track_resource decorator
 
@@ -605,3 +634,124 @@ async def chat_with_documents(
             processing_time_ms=processing_time,
             error=str(e),
         )
+
+
+def format_sse_event(event: dict) -> str:
+    """Format event as Server-Sent Event data."""
+    event_type = event.get("event", "message")
+    data = json.dumps(event)
+    return f"event: {event_type}\ndata: {data}\n\n"
+
+
+@router.post(
+    "/chat/stream",
+    response_class=StreamingResponse,
+    responses={
+        200: {
+            "content": {"text/event-stream": {}},
+            "description": "Server-Sent Events stream with chat response"
+        },
+        **DOCUMENT_ERROR_RESPONSES
+    },
+    operation_id="chatWithDocumentsStream",
+    summary="Streaming conversational RAG chat with documents",
+)
+@check_quota(usage_type="file_search_queries", estimated_usage=1)
+@track_resource(resource_type="file_search_queries", amount=1)
+async def chat_with_documents_stream(
+    request: RAGChatStreamRequest,
+    agent=Depends(get_document_agent),
+    org_id: str = Depends(get_org_id),
+):
+    """
+    Streaming version of /chat endpoint using Server-Sent Events (SSE).
+
+    Streams events as they occur:
+    - **status**: Progress updates ("Starting RAG search...", "Generating answer...")
+    - **tool_start**: Tool execution beginning (rag_search)
+    - **tool_end**: Tool execution complete with citations count
+    - **token**: Individual LLM tokens for real-time text display
+    - **citations**: Source citations array
+    - **usage**: Token usage statistics
+    - **error**: Error information if something fails
+    - **done**: Stream completion marker
+
+    **Search Scopes**:
+    - Single File: Set `file_filter` to target file name
+    - Folder: Set `folder_filter` to target folder name
+    - Org-wide: Leave both filters empty
+
+    **Multi-tenancy**: Scoped by X-Organization-ID header.
+
+    **Usage Tracking**: Each search query counts against the monthly file_search_queries limit.
+
+    **Client Usage**:
+    ```javascript
+    const response = await fetch('/api/v1/documents/chat/stream', {
+        method: 'POST',
+        body: JSON.stringify(request),
+        headers: {'Content-Type': 'application/json'}
+    });
+    const reader = response.body.getReader();
+    // Process SSE events...
+    ```
+    """
+    start_time = time.time()
+
+    async def generate_events():
+        """Async generator for SSE events."""
+        try:
+            # Transform file filter to .md extension (same as non-streaming)
+            effective_file_filter = None
+            if request.file_filter:
+                if isinstance(request.file_filter, str):
+                    file_list = [request.file_filter]
+                else:
+                    file_list = list(request.file_filter)
+                effective_file_filter = [f"{os.path.splitext(f)[0]}.md" for f in file_list]
+                logger.info(f"[Stream] Transformed file_filter: {request.file_filter} -> {effective_file_filter}")
+
+            # Stream events from agent
+            with usage_context(org_id=org_id, feature="document_agent"):
+                async for event in agent.chat_stream(
+                    query=request.query,
+                    organization_name=request.organization_name,
+                    session_id=request.session_id,
+                    folder_filter=request.folder_filter,
+                    file_filter=effective_file_filter,
+                    search_mode=request.search_mode,
+                    organization_id=org_id,
+                    include_tool_events=request.include_tool_events,
+                ):
+                    # Add processing time to done event
+                    if event.get("event") == "done":
+                        event["processing_time_ms"] = elapsed_ms(start_time)
+
+                    yield format_sse_event(event)
+
+        except asyncio.CancelledError:
+            logger.info("[Stream] Client disconnected")
+            raise
+        except Exception as e:
+            logger.exception(f"[Stream] RAG chat streaming failed: {e}")
+            yield format_sse_event({
+                "event": "error",
+                "error": str(e),
+                "recoverable": False,
+            })
+            yield format_sse_event({
+                "event": "done",
+                "session_id": request.session_id or "",
+                "processing_time_ms": elapsed_ms(start_time),
+                "success": False,
+            })
+
+    return StreamingResponse(
+        generate_events(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable nginx buffering
+        }
+    )
