@@ -40,7 +40,7 @@ from src.db.repositories.audit_repository import (
     get_document_by_path,
 )
 from src.storage import get_storage, get_storage_config
-from src.rag.llama_parse_util import parse_document as llama_parse
+from src.rag.parser import parse_document_async
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -281,14 +281,9 @@ async def parse_document(
                 )
             local_file_path = request.file_path
 
-        # Parse document (using local file path)
-        # llama_parse is a sync function that returns markdown string directly
+        # Parse document using configured parser (LlamaParse or Gemini)
         try:
-            loop = asyncio.get_running_loop()
-            parsed_content = await loop.run_in_executor(
-                None,
-                lambda: llama_parse(file_path=local_file_path)
-            )
+            parsed_content = await parse_document_async(file_path=local_file_path)
         finally:
             # Clean up temp file if we created one
             if temp_file_path and os.path.exists(temp_file_path):

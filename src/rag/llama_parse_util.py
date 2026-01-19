@@ -52,6 +52,13 @@ AGENT_MULTIMODAL_MODEL = os.getenv("AGENT_MULTIMODAL_MODEL", "openai-gpt-5-mini"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
+# LlamaParse performance configuration
+LLAMA_PARSE_TIMEOUT = int(os.getenv("LLAMA_PARSE_TIMEOUT_SECONDS", "300"))  # 5 min default
+LLAMA_PARSE_CHECK_INTERVAL = float(os.getenv("LLAMA_PARSE_CHECK_INTERVAL", "2"))  # 2 sec between polls
+LLAMA_PARSE_MAX_CHECK_INTERVAL = float(os.getenv("LLAMA_PARSE_MAX_CHECK_INTERVAL", "10"))  # max 10 sec
+LLAMA_PARSE_NUM_WORKERS = int(os.getenv("LLAMA_PARSE_NUM_WORKERS", "4"))  # parallel workers
+LLAMA_PARSE_VERBOSE = os.getenv("LLAMA_PARSE_VERBOSE", "false").lower() == "true"
+
 
 def _get_parser() -> LlamaParse:
     """
@@ -109,6 +116,14 @@ Ensure all handwritten text is accurately transcribed."""
 
         # Visual content
         take_screenshot=True,  # Capture page screenshots for visual analysis
+
+        # Performance configuration
+        max_timeout=LLAMA_PARSE_TIMEOUT,
+        check_interval=LLAMA_PARSE_CHECK_INTERVAL,
+        max_check_interval=LLAMA_PARSE_MAX_CHECK_INTERVAL,
+        num_workers=LLAMA_PARSE_NUM_WORKERS,
+        verbose=LLAMA_PARSE_VERBOSE,
+        show_progress=LLAMA_PARSE_VERBOSE,
     )
 
 
@@ -143,6 +158,13 @@ def _get_agent_parser(complexity: str = "normal") -> LlamaParse:
         vendor_multimodal_api_key=api_key,
         output_tables_as_HTML=True,
         take_screenshot=True,
+        # Performance configuration
+        max_timeout=LLAMA_PARSE_TIMEOUT,
+        check_interval=LLAMA_PARSE_CHECK_INTERVAL,
+        max_check_interval=LLAMA_PARSE_MAX_CHECK_INTERVAL,
+        num_workers=LLAMA_PARSE_NUM_WORKERS,
+        verbose=LLAMA_PARSE_VERBOSE,
+        show_progress=LLAMA_PARSE_VERBOSE,
     )
 
 
@@ -220,6 +242,57 @@ def _save_markdown(content: str, file_path: Path, output_dir: str) -> str:
     except RuntimeError:
         # No running loop - create new one
         return asyncio.run(_save_markdown_async(content, file_path, output_dir))
+
+
+async def parse_document_async(
+    file_path: str,
+    output_dir: str = None,
+    use_agent_mode: bool = False,
+    complexity: str = "normal"
+) -> str:
+    """
+    Async version: Parse a document and return markdown content.
+
+    Uses native async LlamaParse API for better performance in async contexts.
+
+    Args:
+        file_path: Path to the document to parse
+        output_dir: Optional directory to save the markdown file.
+        use_agent_mode: Use agent parsing mode for difficult documents.
+        complexity: Document complexity ("normal" or "high")
+                   - "normal": openai-gpt-5-mini (default)
+                   - "high": gemini-2.5-pro
+
+    Returns:
+        str: Parsed document content in markdown format
+    """
+    path = _validate_file(file_path)
+    logger.info(f"Parsing document (async): {path.name} (agent_mode={use_agent_mode}, complexity={complexity})")
+
+    parser = _get_agent_parser(complexity) if use_agent_mode else _get_parser()
+
+    try:
+        # Parse the document using async API - returns list of Document objects
+        documents = await parser.aload_data(str(path))
+
+        if not documents:
+            logger.warning(f"No content extracted from: {path.name}")
+            return ""
+
+        # Extract markdown content from each document
+        content = "\n\n---\n\n".join(doc.text for doc in documents)
+
+        logger.info(f"Successfully parsed (async): {path.name}")
+
+        # Save to file if output_dir is specified
+        if output_dir:
+            await _save_markdown_async(content, path, output_dir)
+
+        return content
+
+    except Exception as e:
+        logger.error(f"Error parsing {path.name}: {e}")
+        raise
 
 
 def parse_document(
@@ -305,7 +378,7 @@ def parse_documents(file_paths: list[str], output_dir: str = None) -> list[str]:
     try:
         # Parse each document individually
         contents = []
-        for i, path in enumerate(paths):
+        for path in paths:
             documents = parser.load_data(str(path))
             content = "\n\n---\n\n".join(doc.text for doc in documents)
             contents.append(content)

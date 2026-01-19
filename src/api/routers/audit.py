@@ -94,15 +94,15 @@ async def get_dashboard(
             end_date=end_date,
         )
 
-        # Get recent data
+        # Get recent data (org_id is required first parameter for multi-tenancy)
         recent_jobs_data = await get_processing_history(
-            limit=5,
             organization_id=org_id,
+            limit=5,
         )
 
         recent_gens_data = await get_recent_generations(
-            limit=5,
             organization_id=org_id,
+            limit=5,
         )
 
         # Build response
@@ -199,10 +199,11 @@ async def list_jobs(
     try:
         from src.db.repositories.audit import get_processing_history, count_jobs
 
+        # org_id is required first parameter for multi-tenancy
         jobs = await get_processing_history(
+            organization_id=org_id,
             limit=limit,
             offset=offset,
-            organization_id=org_id,
             status=status,
             start_date=start_date,
             end_date=end_date,
@@ -426,7 +427,8 @@ async def get_document(
         )
 
         # Get document - using file_hash as file_name for lookup
-        doc = await get_document_by_name(file_hash)
+        # Multi-tenancy: Pass org_id to ensure tenant isolation
+        doc = await get_document_by_name(file_hash, organization_id=org_id)
 
         if not doc:
             return GetDocumentResponse(
@@ -443,7 +445,7 @@ async def get_document(
             created_at=doc.get("created_at"),
         )
 
-        # Get associated jobs (org-scoped)
+        # Get associated jobs (org_id is required for multi-tenancy)
         doc_filename = doc.get("filename") or doc.get("file_name", "")
         jobs_data = await get_jobs_by_document(doc_filename, organization_id=org_id)
         jobs = [
@@ -464,7 +466,7 @@ async def get_document(
             for j in jobs_data
         ]
 
-        # Get associated generations (org-scoped)
+        # Get associated generations (org_id is required for multi-tenancy)
         gens_data = await get_generations_by_document(doc_filename, organization_id=org_id)
         generations = [
             DocumentGeneration(
@@ -526,10 +528,11 @@ async def list_generations(
     try:
         from src.db.repositories.audit import get_recent_generations, count_generations
 
+        # org_id is required first parameter for multi-tenancy
         gens = await get_recent_generations(
+            organization_id=org_id,
             limit=limit,
             offset=offset,
-            organization_id=org_id,
             generation_type=generation_type,
             start_date=start_date,
             end_date=end_date,
@@ -612,9 +615,10 @@ async def get_audit_trail(
     try:
         from src.db.repositories.audit import get_audit_trail as get_trail, count_audit_events
 
+        # org_id is required first parameter for multi-tenancy
         events_data = await get_trail(
-            file_name=file_name,
             organization_id=org_id,
+            file_name=file_name,
             event_type=event_type,
             start_date=start_date,
             end_date=end_date,
@@ -753,9 +757,10 @@ async def get_activity_timeline(
     try:
         from src.db.repositories.audit import get_audit_trail as get_trail, count_audit_events
 
+        # org_id is required first parameter for multi-tenancy
         events_data = await get_trail(
-            file_name=file_name,
             organization_id=org_id,
+            file_name=file_name,
             event_type=event_type,
             start_date=start_date,
             end_date=end_date,

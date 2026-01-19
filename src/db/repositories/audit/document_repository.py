@@ -432,18 +432,33 @@ async def get_document_by_path(
 
 
 @with_db_retry
-async def get_document_by_name(file_name: str) -> Optional[Dict[str, Any]]:
+async def get_document_by_name(
+    file_name: str,
+    organization_id: str,
+) -> Optional[Dict[str, Any]]:
     """
-    Find document by file name.
+    Find document by file name within an organization.
+
+    Multi-tenancy: REQUIRED organization_id for tenant isolation.
 
     Args:
         file_name: Name of the document file
+        organization_id: Organization ID for tenant isolation (REQUIRED)
 
     Returns:
         Document data with hash, or None if not found
     """
     async with db.session() as session:
-        stmt = select(Document).where(Document.filename == file_name).limit(1)
+        stmt = (
+            select(Document)
+            .where(
+                and_(
+                    Document.filename == file_name,
+                    Document.organization_id == organization_id,
+                )
+            )
+            .limit(1)
+        )
         result = await session.execute(stmt)
         doc = result.scalar_one_or_none()
 
@@ -453,6 +468,7 @@ async def get_document_by_name(file_name: str) -> Optional[Dict[str, Any]]:
                 "storage_path": doc.storage_path,
                 "filename": doc.filename,
                 "file_size": doc.file_size,
+                "organization_id": doc.organization_id,
                 "created_at": doc.created_at,
             }
         return None

@@ -25,18 +25,18 @@ logger = logging.getLogger(__name__)
 async def find_cached_result(
     file_hash: str,
     model: str,
-    organization_id: Optional[str] = None,
+    organization_id: str,
 ) -> Optional[str]:
     """
     Check for completed job with same hash+model, return output_path if found.
 
     Uses partial index idx_jobs_org_cache_lookup for optimal performance.
-    Multi-tenancy: Scoped by organization_id when provided.
+    Multi-tenancy: REQUIRED organization_id for tenant isolation.
 
     Args:
         file_hash: SHA-256 hash of the document
         model: Model used for processing
-        organization_id: Organization ID for tenant isolation
+        organization_id: Organization ID for tenant isolation (REQUIRED)
 
     Returns:
         Output path if cached result exists, None otherwise
@@ -46,9 +46,8 @@ async def find_cached_result(
             ProcessingJob.document_hash == file_hash,
             ProcessingJob.model == model,
             ProcessingJob.status == "completed",
+            ProcessingJob.organization_id == organization_id,
         ]
-        if organization_id:
-            where_clauses.append(ProcessingJob.organization_id == organization_id)
 
         stmt = (
             select(ProcessingJob.output_path)
@@ -159,9 +158,9 @@ async def fail_job(job_id: str, error: str):
 
 @with_db_retry
 async def get_processing_history(
+    organization_id: str,
     limit: int = 100,
     offset: int = 0,
-    organization_id: Optional[str] = None,
     status: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
@@ -169,12 +168,12 @@ async def get_processing_history(
     """
     Get recent processing jobs with filtering and pagination.
 
-    Multi-tenancy: Filtered by organization_id when provided.
+    Multi-tenancy: REQUIRED organization_id for tenant isolation.
 
     Args:
+        organization_id: Organization ID for tenant isolation (REQUIRED)
         limit: Maximum number of jobs to return
         offset: Number of jobs to skip for pagination
-        organization_id: Organization ID for tenant isolation
         status: Optional status filter (pending, processing, completed, failed)
         start_date: Optional filter for jobs started after this date
         end_date: Optional filter for jobs started before this date
@@ -183,9 +182,7 @@ async def get_processing_history(
         List of job dictionaries with id and all fields
     """
     async with db.session() as session:
-        where_clauses = []
-        if organization_id:
-            where_clauses.append(ProcessingJob.organization_id == organization_id)
+        where_clauses = [ProcessingJob.organization_id == organization_id]
         if status:
             where_clauses.append(ProcessingJob.status == status)
         if start_date:
@@ -193,10 +190,13 @@ async def get_processing_history(
         if end_date:
             where_clauses.append(ProcessingJob.started_at <= end_date)
 
-        stmt = select(ProcessingJob)
-        if where_clauses:
-            stmt = stmt.where(and_(*where_clauses))
-        stmt = stmt.order_by(desc(ProcessingJob.started_at)).offset(offset).limit(limit)
+        stmt = (
+            select(ProcessingJob)
+            .where(and_(*where_clauses))
+            .order_by(desc(ProcessingJob.started_at))
+            .offset(offset)
+            .limit(limit)
+        )
 
         result = await session.execute(stmt)
         jobs = result.scalars().all()
@@ -224,24 +224,25 @@ async def get_processing_history(
 @with_db_retry
 async def get_jobs_by_document(
     file_name: str,
-    organization_id: Optional[str] = None,
+    organization_id: str,
 ) -> List[Dict[str, Any]]:
     """
     Get all processing jobs for a document by name.
 
-    Multi-tenancy: Filtered by organization_id when provided.
+    Multi-tenancy: REQUIRED organization_id for tenant isolation.
 
     Args:
         file_name: Name of the document file
-        organization_id: Organization ID for tenant isolation
+        organization_id: Organization ID for tenant isolation (REQUIRED)
 
     Returns:
         List of job dictionaries ordered by start time (newest first)
     """
     async with db.session() as session:
-        where_clauses = [ProcessingJob.file_name == file_name]
-        if organization_id:
-            where_clauses.append(ProcessingJob.organization_id == organization_id)
+        where_clauses = [
+            ProcessingJob.file_name == file_name,
+            ProcessingJob.organization_id == organization_id,
+        ]
 
         stmt = (
             select(ProcessingJob)

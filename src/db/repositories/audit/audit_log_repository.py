@@ -149,8 +149,8 @@ async def log_event(
 
 @with_db_retry
 async def get_audit_trail(
+    organization_id: str,
     file_name: Optional[str] = None,
-    organization_id: Optional[str] = None,
     event_type: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
@@ -160,11 +160,11 @@ async def get_audit_trail(
     """
     Get audit trail with flexible filtering and pagination.
 
-    Multi-tenancy: Filtered by organization_id when provided.
+    Multi-tenancy: REQUIRED organization_id for tenant isolation.
 
     Args:
+        organization_id: Organization ID for tenant isolation (REQUIRED)
         file_name: Optional filter by document file name
-        organization_id: Organization ID for tenant isolation
         event_type: Optional filter by event type
         start_date: Optional filter for events after this date
         end_date: Optional filter for events before this date
@@ -175,11 +175,9 @@ async def get_audit_trail(
         List of audit events ordered by timestamp (newest first)
     """
     async with db.session() as session:
-        where_clauses = []
+        where_clauses = [AuditLog.organization_id == organization_id]
         if file_name:
             where_clauses.append(AuditLog.file_name == file_name)
-        if organization_id:
-            where_clauses.append(AuditLog.organization_id == organization_id)
         if event_type:
             where_clauses.append(AuditLog.event_type == event_type)
         if start_date:
@@ -190,10 +188,13 @@ async def get_audit_trail(
         # Always filter out NULL event_type records (incomplete/legacy data)
         where_clauses.append(AuditLog.event_type.isnot(None))
 
-        stmt = select(AuditLog)
-        if where_clauses:
-            stmt = stmt.where(and_(*where_clauses))
-        stmt = stmt.order_by(desc(AuditLog.created_at)).offset(offset).limit(limit)
+        stmt = (
+            select(AuditLog)
+            .where(and_(*where_clauses))
+            .order_by(desc(AuditLog.created_at))
+            .offset(offset)
+            .limit(limit)
+        )
 
         result = await session.execute(stmt)
         events = result.scalars().all()
@@ -215,29 +216,30 @@ async def get_audit_trail(
 
 async def get_document_summary(
     file_name: str,
-    organization_id: Optional[str] = None,
+    organization_id: str,
 ) -> Optional[Dict[str, Any]]:
     """
     Get complete summary of a document including jobs and audit trail.
 
     Uses asyncio.gather for parallel queries.
-    Multi-tenancy: Jobs and audit trail are filtered by organization_id when provided.
+    Multi-tenancy: REQUIRED organization_id for tenant isolation.
 
     Args:
         file_name: Name of the document file
-        organization_id: Organization ID for tenant isolation
+        organization_id: Organization ID for tenant isolation (REQUIRED)
 
     Returns:
         Dictionary with document info, jobs, and audit trail
     """
-    doc = await get_document_by_name(file_name)
+    # Multi-tenancy: Pass org_id to ensure tenant isolation
+    doc = await get_document_by_name(file_name, organization_id=organization_id)
     if not doc:
         return None
 
-    # Run queries concurrently with org_id filtering
+    # Run queries concurrently with org_id filtering (required for multi-tenancy)
     jobs, audit_trail = await asyncio.gather(
         get_jobs_by_document(file_name, organization_id=organization_id),
-        get_audit_trail(file_name, organization_id=organization_id),
+        get_audit_trail(organization_id=organization_id, file_name=file_name),
     )
 
     return {

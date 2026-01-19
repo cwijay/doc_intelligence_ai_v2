@@ -100,40 +100,37 @@ async def find_cached_generation(
     document_name: str,
     generation_type: str,
     model: str,
+    organization_id: str,
     content_hash: Optional[str] = None,
-    organization_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Find cached generation result for a document.
 
-    Multi-tenancy: Filtered by organization_id when provided.
+    Multi-tenancy: REQUIRED organization_id for tenant isolation.
 
     Args:
         document_name: Name of the document
         generation_type: Type of generation
         model: Model used
+        organization_id: Organization ID for tenant isolation (REQUIRED)
         content_hash: SHA-256 hash of document content for cache validation.
                      If provided, only returns cached result if content unchanged.
-        organization_id: Organization ID for tenant isolation
 
     Returns:
         Cached generation data if found and valid, None otherwise
     """
     async with db.session() as session:
-        # Build where clauses
+        # Build where clauses - always include organization_id for multi-tenancy
         where_clauses = [
             DocumentGeneration.document_name == document_name,
             DocumentGeneration.generation_type == generation_type,
             DocumentGeneration.model == model,
+            DocumentGeneration.organization_id == organization_id,
         ]
 
         # If content_hash provided, only return cache if document content unchanged
         if content_hash:
             where_clauses.append(DocumentGeneration.document_hash == content_hash)
-
-        # Multi-tenancy filter
-        if organization_id:
-            where_clauses.append(DocumentGeneration.organization_id == organization_id)
 
         stmt = (
             select(DocumentGeneration)
@@ -165,26 +162,27 @@ async def find_cached_generation(
 @with_db_retry
 async def get_generations_by_document(
     document_name: str,
+    organization_id: str,
     limit: int = 10,
-    organization_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Get all generations for a document.
 
-    Multi-tenancy: Filtered by organization_id when provided.
+    Multi-tenancy: REQUIRED organization_id for tenant isolation.
 
     Args:
         document_name: Name of the document
+        organization_id: Organization ID for tenant isolation (REQUIRED)
         limit: Maximum number of results
-        organization_id: Organization ID for tenant isolation
 
     Returns:
         List of generation records ordered by creation time (newest first)
     """
     async with db.session() as session:
-        where_clauses = [DocumentGeneration.document_name == document_name]
-        if organization_id:
-            where_clauses.append(DocumentGeneration.organization_id == organization_id)
+        where_clauses = [
+            DocumentGeneration.document_name == document_name,
+            DocumentGeneration.organization_id == organization_id,
+        ]
 
         stmt = (
             select(DocumentGeneration)
@@ -216,9 +214,9 @@ async def get_generations_by_document(
 
 @with_db_retry
 async def get_recent_generations(
+    organization_id: str,
     limit: int = 50,
     offset: int = 0,
-    organization_id: Optional[str] = None,
     generation_type: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
@@ -226,12 +224,12 @@ async def get_recent_generations(
     """
     Get recent document generations across all documents with filtering and pagination.
 
-    Multi-tenancy: Filtered by organization_id when provided.
+    Multi-tenancy: REQUIRED organization_id for tenant isolation.
 
     Args:
+        organization_id: Organization ID for tenant isolation (REQUIRED)
         limit: Maximum number of results
         offset: Number of results to skip for pagination
-        organization_id: Organization ID for tenant isolation
         generation_type: Optional filter by type (summary, faqs, questions, all)
         start_date: Optional filter for generations after this date
         end_date: Optional filter for generations before this date
@@ -240,9 +238,7 @@ async def get_recent_generations(
         List of generation records ordered by creation time (newest first)
     """
     async with db.session() as session:
-        where_clauses = []
-        if organization_id:
-            where_clauses.append(DocumentGeneration.organization_id == organization_id)
+        where_clauses = [DocumentGeneration.organization_id == organization_id]
         if generation_type:
             where_clauses.append(DocumentGeneration.generation_type == generation_type)
         if start_date:
@@ -250,10 +246,13 @@ async def get_recent_generations(
         if end_date:
             where_clauses.append(DocumentGeneration.created_at <= end_date)
 
-        stmt = select(DocumentGeneration)
-        if where_clauses:
-            stmt = stmt.where(and_(*where_clauses))
-        stmt = stmt.order_by(desc(DocumentGeneration.created_at)).offset(offset).limit(limit)
+        stmt = (
+            select(DocumentGeneration)
+            .where(and_(*where_clauses))
+            .order_by(desc(DocumentGeneration.created_at))
+            .offset(offset)
+            .limit(limit)
+        )
 
         result = await session.execute(stmt)
         generations = result.scalars().all()

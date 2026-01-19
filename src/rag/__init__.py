@@ -20,12 +20,28 @@ from src.rag.gemini_file_store import (
     list_all_stores,
 )
 
-# LlamaParse document parsing
-from src.rag.llama_parse_util import (
+# Unified parser interface (recommended)
+from src.rag.parser import (
     parse_document,
-    parse_documents,
+    parse_document_async,
     get_supported_extensions,
-    SUPPORTED_EXTENSIONS,
+    ParserBackend,
+    get_parser_backend,
+)
+
+# LlamaParse document parsing (direct access)
+from src.rag.llama_parse_util import (
+    parse_document as llama_parse_document,
+    parse_document_async as llama_parse_document_async,
+    parse_documents as llama_parse_documents,
+    SUPPORTED_EXTENSIONS as LLAMA_SUPPORTED_EXTENSIONS,
+)
+
+# Gemini document parsing (direct access)
+from src.rag.gemini_parse_util import (
+    parse_document as gemini_parse_document,
+    parse_document_async as gemini_parse_document_async,
+    SUPPORTED_EXTENSIONS as GEMINI_SUPPORTED_EXTENSIONS,
 )
 
 # High-level service functions
@@ -50,11 +66,21 @@ __all__ = [
     "list_documents",
     "delete_store",
     "list_all_stores",
-    # LlamaParse
+    # Unified parser (recommended)
     "parse_document",
-    "parse_documents",
+    "parse_document_async",
     "get_supported_extensions",
-    "SUPPORTED_EXTENSIONS",
+    "ParserBackend",
+    "get_parser_backend",
+    # LlamaParse (direct access)
+    "llama_parse_document",
+    "llama_parse_document_async",
+    "llama_parse_documents",
+    "LLAMA_SUPPORTED_EXTENSIONS",
+    # Gemini parser (direct access)
+    "gemini_parse_document",
+    "gemini_parse_document_async",
+    "GEMINI_SUPPORTED_EXTENSIONS",
     # Service
     "setup_store",
     "search_by_document",

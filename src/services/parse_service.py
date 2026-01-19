@@ -3,7 +3,6 @@ Shared document parsing service.
 Used by both single file and bulk upload workflows.
 """
 
-import asyncio
 import logging
 import os
 import tempfile
@@ -14,7 +13,7 @@ from dataclasses import dataclass
 
 from src.storage import get_storage
 from src.utils.gcs_utils import is_gcs_path, extract_gcs_path_parts
-from src.rag.llama_parse_util import parse_document as llama_parse
+from src.rag.parser import parse_document_async
 from src.db.repositories.audit_repository import register_or_update_parsed_document
 
 logger = logging.getLogger(__name__)
@@ -145,13 +144,9 @@ async def parse_and_save(
                     error=f"File not found: {file_path}",
                 )
 
-        # Parse document
+        # Parse document using configured parser (LlamaParse or Gemini)
         try:
-            loop = asyncio.get_running_loop()
-            parsed_content = await loop.run_in_executor(
-                None,
-                lambda: llama_parse(file_path=local_file_path)
-            )
+            parsed_content = await parse_document_async(file_path=local_file_path)
         finally:
             # Clean up temp file
             if temp_file_path and os.path.exists(temp_file_path):

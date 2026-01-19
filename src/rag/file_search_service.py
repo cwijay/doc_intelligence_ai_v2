@@ -118,7 +118,8 @@ def parse_handwritten_document(
     output_dir: str = PARSED_OUTPUT_DIR,
     use_agent_mode: bool = True,
     complexity: str = "normal",
-    skip_cache: bool = False
+    skip_cache: bool = False,
+    organization_id: str = None,
 ) -> str:
     """
     Parse a handwritten document using LlamaParse and save as markdown.
@@ -128,6 +129,8 @@ def parse_handwritten_document(
     - Tracks processing history and job status
     - Logs all operations for auditability
 
+    Multi-tenancy: organization_id is required for proper data isolation.
+
     Args:
         file_path: Path to the document to parse
         output_dir: Output directory for markdown file (default: parsed/)
@@ -136,14 +139,15 @@ def parse_handwritten_document(
                    - "normal": openai-gpt-5-mini (default, cost-effective)
                    - "high": gemini-2.5-pro (better for complex handwriting)
         skip_cache: Force re-processing even if cached result exists (default: False)
+        organization_id: Organization ID for multi-tenancy (REQUIRED for caching)
 
     Returns:
         str: Parsed markdown content
 
     Example:
-        >>> content = parse_handwritten_document("simple.pdf")
-        >>> content = parse_handwritten_document("complex.pdf", complexity="high")
-        >>> content = parse_handwritten_document("doc.pdf", skip_cache=True)
+        >>> content = parse_handwritten_document("simple.pdf", organization_id="org-123")
+        >>> content = parse_handwritten_document("complex.pdf", complexity="high", organization_id="org-123")
+        >>> content = parse_handwritten_document("doc.pdf", skip_cache=True, organization_id="org-123")
     """
     logger.info("=" * 60)
     logger.info(f"PARSING: {file_path} (complexity={complexity})")
@@ -154,11 +158,11 @@ def parse_handwritten_document(
     file_name = Path(file_path).name
     model = PARSING_MODEL_HIGH_COMPLEXITY if complexity == "high" else PARSING_MODEL_STANDARD
 
-    # Check cache
-    if not skip_cache:
-        cached_path = find_cached_result(file_hash, model)
+    # Check cache (requires organization_id for multi-tenancy)
+    if not skip_cache and organization_id:
+        cached_path = find_cached_result(file_hash, model, organization_id=organization_id)
         if cached_path:
-            log_event("cache_hit", document_hash=file_hash, file_name=file_name)
+            log_event("cache_hit", document_hash=file_hash, file_name=file_name, organization_id=organization_id)
             logger.info(f"Cache hit for {file_path}")
             try:
                 # Read from GCS storage
@@ -183,9 +187,9 @@ def parse_handwritten_document(
             except Exception as e:
                 logger.warning(f"Failed to read cached file from GCS: {e}, re-processing...")
 
-    # Start job
-    job_id = start_job(file_hash, file_name, model, complexity)
-    log_event("parse_started", document_hash=file_hash, file_name=file_name, job_id=job_id)
+    # Start job (pass organization_id for multi-tenancy)
+    job_id = start_job(file_hash, file_name, model, complexity, organization_id=organization_id)
+    log_event("parse_started", document_hash=file_hash, file_name=file_name, job_id=job_id, organization_id=organization_id)
     start_time = time.time()
 
     try:
@@ -205,7 +209,8 @@ def parse_handwritten_document(
             document_hash=file_hash,
             file_name=file_name,
             job_id=job_id,
-            details={"duration_ms": duration_ms}
+            details={"duration_ms": duration_ms},
+            organization_id=organization_id,
         )
 
         logger.info(f"Successfully parsed document to {output_dir}/ ({duration_ms}ms)")
@@ -218,6 +223,7 @@ def parse_handwritten_document(
             document_hash=file_hash,
             file_name=file_name,
             job_id=job_id,
-            details={"error": str(e)}
+            details={"error": str(e)},
+            organization_id=organization_id,
         )
         raise

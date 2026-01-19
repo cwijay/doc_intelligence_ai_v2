@@ -181,22 +181,25 @@ async def get_dashboard_stats(
 @with_db_retry
 async def get_job_by_id(
     job_id: str,
-    organization_id: Optional[str] = None,
+    organization_id: str,
 ) -> Optional[Dict[str, Any]]:
     """
     Get a single processing job by ID.
 
+    Multi-tenancy: REQUIRED organization_id for tenant isolation.
+
     Args:
         job_id: Job ID (UUID)
-        organization_id: Optional org filter for multi-tenancy
+        organization_id: Organization ID for tenant isolation (REQUIRED)
 
     Returns:
         Job as dictionary or None if not found
     """
     async with db.session() as session:
-        where_clauses = [ProcessingJob.id == job_id]
-        if organization_id:
-            where_clauses.append(ProcessingJob.organization_id == organization_id)
+        where_clauses = [
+            ProcessingJob.id == job_id,
+            ProcessingJob.organization_id == organization_id,
+        ]
 
         stmt = select(ProcessingJob).where(and_(*where_clauses))
         result = await session.execute(stmt)

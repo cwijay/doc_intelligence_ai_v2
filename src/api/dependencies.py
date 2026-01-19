@@ -214,6 +214,89 @@ async def lookup_organization(identifier: str) -> Optional[Any]:
         return None
 
 
+async def validate_user_organization_membership(
+    user_id: str,
+    claimed_org_id: str,
+) -> bool:
+    """
+    Validate that a user belongs to the claimed organization.
+
+    SECURITY: This is critical for multi-tenant isolation. Users must only
+    access data from organizations they belong to.
+
+    Args:
+        user_id: User ID from authentication
+        claimed_org_id: Organization ID being claimed in the request
+
+    Returns:
+        True if user belongs to the organization, False otherwise
+    """
+    try:
+        from src.db.connection import db
+        from src.db.models import UserModel
+
+        async with db.session() as session:
+            if session is None:
+                logger.warning("Database unavailable for user-org validation")
+                return False
+
+            # Look up user and verify organization membership
+            stmt = select(UserModel).where(
+                UserModel.id == user_id,
+                UserModel.is_active == True,
+            )
+            result = await session.execute(stmt)
+            user = result.scalar_one_or_none()
+
+            if not user:
+                logger.warning(f"User not found or inactive: {user_id}")
+                return False
+
+            if user.organization_id != claimed_org_id:
+                logger.warning(
+                    f"SECURITY: User {user_id} (org={user.organization_id}) "
+                    f"attempted to access org={claimed_org_id}"
+                )
+                return False
+
+            logger.debug(f"User {user_id} validated for org {claimed_org_id}")
+            return True
+
+    except Exception as e:
+        logger.error(f"User-org validation failed: {e}", exc_info=True)
+        return False
+
+
+async def lookup_user_by_email(email: str) -> Optional[Any]:
+    """
+    Look up user by email address.
+
+    Args:
+        email: User email address
+
+    Returns:
+        UserModel instance or None if not found
+    """
+    try:
+        from src.db.connection import db
+        from src.db.models import UserModel
+
+        async with db.session() as session:
+            if session is None:
+                return None
+
+            stmt = select(UserModel).where(
+                func.lower(UserModel.email) == email.lower(),
+                UserModel.is_active == True,
+            )
+            result = await session.execute(stmt)
+            return result.scalar_one_or_none()
+
+    except Exception as e:
+        logger.error(f"User lookup by email failed: {e}", exc_info=True)
+        return None
+
+
 # =============================================================================
 # Multi-Tenancy Context
 # =============================================================================
@@ -233,10 +316,15 @@ class OrgContext:
 
 
 async def get_org_id(
-    x_organization_id: Optional[str] = Header(None, alias="X-Organization-ID")
+    x_organization_id: Optional[str] = Header(None, alias="X-Organization-ID"),
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
 ) -> str:
     """
-    Extract and resolve organization ID from request header.
+    Extract and resolve organization ID from request header with user validation.
+
+    SECURITY: Validates that the authenticated user belongs to the claimed
+    organization. Users cannot access data from other organizations.
 
     Looks up the organization by UUID or name and returns the actual UUID.
     Required for multi-tenant isolation. All data operations must be
@@ -244,12 +332,16 @@ async def get_org_id(
 
     Args:
         x_organization_id: Organization identifier (UUID or name) from header
+        x_user_id: User ID from authentication (required for validation)
+        x_user_email: User email from authentication (fallback for user lookup)
 
     Returns:
         Organization UUID string
 
     Raises:
-        HTTPException 400: If header is missing
+        HTTPException 400: If required headers are missing
+        HTTPException 401: If user authentication is missing
+        HTTPException 403: If user doesn't belong to the claimed organization
         HTTPException 404: If organization not found
     """
     if not x_organization_id:
@@ -266,51 +358,121 @@ async def get_org_id(
             detail=f"Organization not found: {x_organization_id}"
         )
 
-    return str(org.id)
+    org_id = str(org.id)
+
+    # SECURITY: Validate user belongs to the claimed organization
+    # User identity can come from X-User-ID or X-User-Email header
+    user_id = x_user_id
+
+    # If no user_id but have email, look up user by email
+    if not user_id and x_user_email:
+        user = await lookup_user_by_email(x_user_email)
+        if user:
+            user_id = str(user.id)
+
+    if not user_id:
+        # No user authentication provided - reject for security
+        logger.warning(
+            f"SECURITY: Request to org '{x_organization_id}' without user authentication"
+        )
+        raise HTTPException(
+            status_code=401,
+            detail="User authentication required. Provide X-User-ID or X-User-Email header."
+        )
+
+    # Validate user belongs to the claimed organization
+    is_member = await validate_user_organization_membership(user_id, org_id)
+    if not is_member:
+        raise HTTPException(
+            status_code=403,
+            detail="Access denied: You do not belong to this organization"
+        )
+
+    return org_id
 
 
 async def get_optional_org_id(
-    x_organization_id: Optional[str] = Header(None, alias="X-Organization-ID")
+    x_organization_id: Optional[str] = Header(None, alias="X-Organization-ID"),
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
 ) -> Optional[str]:
     """
     Extract and resolve optional organization ID from request header.
 
     Use for endpoints that can work without org context (e.g., health checks).
-    Returns the actual UUID if org is found, None otherwise.
+    Returns the actual UUID if org is found and user is authorized, None otherwise.
+
+    SECURITY: If org is provided, user must also be provided and validated.
     """
     if not x_organization_id:
         return None
 
     # Look up organization to get actual UUID
     org = await lookup_organization(x_organization_id)
-    if org:
-        return str(org.id)
+    if not org:
+        return None
 
-    # Return None if org not found (optional context)
+    org_id = str(org.id)
+
+    # SECURITY: If org is provided, validate user belongs to it
+    user_id = x_user_id
+    if not user_id and x_user_email:
+        user = await lookup_user_by_email(x_user_email)
+        if user:
+            user_id = str(user.id)
+
+    if user_id:
+        is_member = await validate_user_organization_membership(user_id, org_id)
+        if not is_member:
+            logger.warning(
+                f"SECURITY: User {user_id} denied access to org {org_id} (optional context)"
+            )
+            return None
+        return org_id
+
+    # No user provided with org - return None for optional context
+    logger.debug(f"Optional org context without user auth - returning None")
     return None
 
 
 async def get_user_id(
-    x_user_id: Optional[str] = Header(None, alias="X-User-ID")
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
 ) -> Optional[str]:
     """
     Extract user ID from request header.
 
-    In production, this should be extracted from a validated JWT token
-    via shared auth with v2.0 backend.
+    Can be provided directly via X-User-ID or looked up by X-User-Email.
+    In production, this should ideally be extracted from a validated JWT token.
     """
-    return x_user_id
+    if x_user_id:
+        return x_user_id
+
+    if x_user_email:
+        user = await lookup_user_by_email(x_user_email)
+        if user:
+            return str(user.id)
+
+    return None
 
 
 async def get_org_context(
-    org_id: str = Depends(get_org_id),
-    user_id: Optional[str] = Depends(get_user_id),
+    x_organization_id: Optional[str] = Header(None, alias="X-Organization-ID"),
+    x_user_id: Optional[str] = Header(None, alias="X-User-ID"),
+    x_user_email: Optional[str] = Header(None, alias="X-User-Email"),
 ) -> OrgContext:
     """
     Get full organization context for multi-tenant operations.
 
     Combines org_id and user_id into a single context object.
+    User-organization membership is validated for security.
     """
+    # Get org_id with user validation
+    org_id = await get_org_id(x_organization_id, x_user_id, x_user_email)
+
+    # Get user_id (already validated as part of get_org_id)
+    user_id = await get_user_id(x_user_id, x_user_email)
+
     return OrgContext(org_id=org_id, user_id=user_id)
 
 
