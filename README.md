@@ -697,3 +697,242 @@ Key dependencies from `requirements.txt`:
 - `sqlalchemy[asyncio]>=2.0.0` - Async ORM
 - `duckdb>=0.9.0` - SQL on DataFrames
 - `google-cloud-storage>=2.14.0` - GCS client
+
+## GCP Deployment
+
+This section covers deploying the AI API to Google Cloud Run.
+
+### Prerequisites
+
+- **Google Cloud SDK** installed and configured
+- **Docker** installed locally
+- **GCP Project** with billing enabled
+- Cloud SQL instance provisioned
+- GCS bucket created
+
+```bash
+# Authenticate with Google Cloud
+gcloud auth login
+gcloud config set project YOUR_PROJECT_ID
+
+# Set up Application Default Credentials
+gcloud auth application-default login
+
+# Authenticate Docker with Artifact Registry
+gcloud auth configure-docker us-central1-docker.pkg.dev
+```
+
+### Required GCP APIs
+
+```bash
+gcloud services enable \
+  run.googleapis.com \
+  artifactregistry.googleapis.com \
+  cloudbuild.googleapis.com \
+  sqladmin.googleapis.com \
+  secretmanager.googleapis.com \
+  storage.googleapis.com
+```
+
+### Secrets Configuration
+
+Create secrets in Secret Manager using the provided script:
+
+```bash
+# Create all required secrets
+./scripts/gcp/create_secrets.sh
+```
+
+Or create them manually:
+
+```bash
+# OpenAI API Key
+echo -n "sk-your-openai-key" | gcloud secrets create openai-api-key --data-file=-
+
+# Google API Key (for Gemini)
+echo -n "your-google-api-key" | gcloud secrets create google-api-key --data-file=-
+
+# LlamaParse API Key
+echo -n "your-llamaparse-key" | gcloud secrets create llamaparse-api-key --data-file=-
+
+# Database Password
+echo -n "your-db-password" | gcloud secrets create DATABASE_PASSWORD --data-file=-
+
+# For production (with -prod suffix)
+echo -n "sk-prod-key" | gcloud secrets create openai-api-key-prod --data-file=-
+echo -n "prod-google-key" | gcloud secrets create google-api-key-prod --data-file=-
+echo -n "prod-llama-key" | gcloud secrets create llamaparse-api-key-prod --data-file=-
+echo -n "prod-db-pass" | gcloud secrets create DATABASE_PASSWORD-prod --data-file=-
+```
+
+Grant Cloud Run access to secrets:
+
+```bash
+PROJECT_NUMBER=$(gcloud projects describe $PROJECT_ID --format="value(projectNumber)")
+for SECRET in openai-api-key google-api-key llamaparse-api-key DATABASE_PASSWORD; do
+  gcloud secrets add-iam-policy-binding $SECRET \
+    --member="serviceAccount:$PROJECT_NUMBER-compute@developer.gserviceaccount.com" \
+    --role="roles/secretmanager.secretAccessor"
+done
+```
+
+### Manual Deployment
+
+```bash
+# Build and deploy to development
+gcloud builds submit --config cloudbuild.yaml
+
+# Deploy to production
+gcloud builds submit --config cloudbuild.yaml \
+  --substitutions=_ENV=prod,_SERVICE_NAME=document-intelligence-ai-api-prod,_SECRET_SUFFIX=-prod
+
+# Or use the deployment script
+./scripts/gcp/deploy_to_cloud_run.sh
+```
+
+### CI/CD Triggers
+
+Set up automatic deployments from GitHub:
+
+```bash
+# Run the setup script
+./scripts/gcp/setup_triggers.sh
+```
+
+**Trigger Configuration:**
+
+| Trigger | Branch | Service Name | Secret Suffix |
+|---------|--------|--------------|---------------|
+| `ai-api-dev-deploy` | `develop` | `document-intelligence-ai-api-dev` | (none) |
+| `ai-api-prod-deploy` | `master` | `document-intelligence-ai-api-prod` | `-prod` |
+
+### Cloud Run Service Details
+
+| Setting | Development | Production |
+|---------|-------------|------------|
+| Service Name | `document-intelligence-ai-api-dev` | `document-intelligence-ai-api-prod` |
+| Port | 8080 | 8080 |
+| Memory | 2Gi | 2Gi |
+| CPU | 2 | 2 |
+| Min Instances | 0 | 0 |
+| Max Instances | 5 | 10 |
+| Timeout | 300s | 300s |
+| Cloud SQL | Connected via Auth Proxy | Connected via Auth Proxy |
+
+### Environment Variables
+
+Automatically configured via `cloudbuild.yaml`:
+
+| Variable | Description |
+|----------|-------------|
+| `CLOUD_SQL_INSTANCE` | Cloud SQL connection name |
+| `DATABASE_NAME` | Database name |
+| `DATABASE_USER` | Database user |
+| `DATABASE_ENABLED` | Enable database operations |
+| `USE_CLOUD_SQL_CONNECTOR` | Use Cloud SQL Auth Proxy |
+| `GCS_BUCKET` | GCS bucket for storage |
+| `GCS_PREFIX` | GCS path prefix |
+| `PARSED_DIRECTORY` | Directory for parsed documents |
+| `GENERATED_DIRECTORY` | Directory for generated content |
+| `LOG_LEVEL` | Logging level (DEBUG/INFO) |
+
+### Required IAM Roles
+
+The Cloud Run service account needs:
+
+| Role | Purpose |
+|------|---------|
+| `roles/cloudsql.client` | Connect to Cloud SQL |
+| `roles/storage.objectAdmin` | Access GCS bucket |
+| `roles/logging.logWriter` | Write logs |
+| `roles/secretmanager.secretAccessor` | Access API keys and secrets |
+
+### Verification
+
+```bash
+# Get service URL
+SERVICE_URL=$(gcloud run services describe document-intelligence-ai-api-dev \
+  --region=us-central1 --format="value(status.url)")
+
+# Test health endpoint
+curl "$SERVICE_URL/health"
+# Expected: {"status": "healthy", ...}
+
+# Test a simple API call (requires X-Organization-ID header)
+curl -H "X-Organization-ID: test-org" "$SERVICE_URL/api/v1/tiers"
+```
+
+### Rollback
+
+```bash
+# List recent revisions
+gcloud run revisions list \
+  --service=document-intelligence-ai-api-dev \
+  --region=us-central1
+
+# Rollback using the script
+./scripts/gcp/rollback.sh document-intelligence-ai-api-dev REVISION_NAME
+
+# Or manually route traffic
+gcloud run services update-traffic document-intelligence-ai-api-dev \
+  --region=us-central1 \
+  --to-revisions=REVISION_NAME=100
+```
+
+### Troubleshooting
+
+**Health check failing (503)?**
+```bash
+# Check container logs
+gcloud run services logs read document-intelligence-ai-api-dev \
+  --region=us-central1 --limit=50
+
+# Verify Cloud SQL connectivity
+gcloud sql instances describe doc-intelligence-db --format="value(connectionName)"
+```
+
+**Secret access denied?**
+```bash
+# Verify secrets exist
+gcloud secrets list --filter="name~api-key"
+
+# Check IAM binding
+gcloud secrets get-iam-policy openai-api-key
+
+# Verify secret value (careful - shows actual value)
+gcloud secrets versions access latest --secret=openai-api-key
+```
+
+**OpenAI/Gemini API errors?**
+```bash
+# Check recent logs for API errors
+gcloud logging read "resource.type=cloud_run_revision AND \
+  resource.labels.service_name=document-intelligence-ai-api-dev AND \
+  textPayload=~'API'" \
+  --limit=20
+
+# Verify environment variables
+gcloud run services describe document-intelligence-ai-api-dev \
+  --region=us-central1 --format="yaml(spec.template.spec.containers[0].env)"
+```
+
+**GCS access errors?**
+```bash
+# Verify bucket exists
+gsutil ls gs://YOUR_BUCKET_NAME
+
+# Check service account has storage permissions
+gcloud projects get-iam-policy $PROJECT_ID \
+  --filter="bindings.members:compute@developer" \
+  --format="table(bindings.role)" | grep storage
+```
+
+### GCP Scripts Reference
+
+| Script | Purpose |
+|--------|---------|
+| `scripts/gcp/config.sh` | Shared configuration variables |
+| `scripts/gcp/create_secrets.sh` | Create Secret Manager secrets |
+| `scripts/gcp/deploy_to_cloud_run.sh` | Manual deployment script |
+| `scripts/gcp/setup_triggers.sh` | Set up Cloud Build triggers |
+| `scripts/gcp/rollback.sh` | Rollback to previous revision |
