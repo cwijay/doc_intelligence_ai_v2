@@ -99,6 +99,36 @@ class ReportAgentConfig(BaseAgentConfig):
         description="Directory containing extracted data"
     )
 
+    # Parsed Document Processing Settings
+    extraction_model: str = Field(
+        default_factory=lambda: os.getenv("REPORT_EXTRACTION_MODEL", "gpt-4o-mini"),
+        description="LLM model for extracting data from parsed documents (cheaper model)"
+    )
+
+    max_document_chars: int = Field(
+        default_factory=lambda: parse_int_env("REPORT_MAX_DOCUMENT_CHARS", 50000),
+        description="Maximum characters to process from a single document"
+    )
+
+    @field_validator('max_document_chars')
+    @classmethod
+    def validate_max_document_chars(cls, v: int) -> int:
+        if not 1000 <= v <= 200000:
+            raise ValueError("max_document_chars must be between 1000 and 200000")
+        return v
+
+    extraction_batch_size: int = Field(
+        default_factory=lambda: parse_int_env("REPORT_EXTRACTION_BATCH_SIZE", 5),
+        description="Number of documents to process in parallel batches"
+    )
+
+    @field_validator('extraction_batch_size')
+    @classmethod
+    def validate_extraction_batch_size(cls, v: int) -> int:
+        if not 1 <= v <= 20:
+            raise ValueError("extraction_batch_size must be between 1 and 20")
+        return v
+
     # Persistence
     persist_to_database: bool = Field(
         default_factory=lambda: parse_bool_env("REPORT_PERSIST", True),

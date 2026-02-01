@@ -1,423 +1,303 @@
-"""Chart generation for business intelligence reports.
+"""Chart data generation for business intelligence reports.
 
-Uses matplotlib for server-side chart rendering.
-Charts are saved as PNG images and can be embedded in PDF reports.
+Generates chart data structures to be rendered by the frontend using Recharts.
+No server-side rendering - just prepares the data in the format expected by charts.
 """
 
-import asyncio
-import io
 import logging
+import math
 from typing import Any, Dict, List, Optional
 
 from ..schemas import ReportType, ChartData
 
 logger = logging.getLogger(__name__)
 
-# Check if matplotlib is available
-try:
-    import matplotlib
-    matplotlib.use('Agg')  # Non-interactive backend for server-side rendering
-    import matplotlib.pyplot as plt
-    MATPLOTLIB_AVAILABLE = True
-except ImportError:
-    MATPLOTLIB_AVAILABLE = False
-    logger.warning("matplotlib not available - chart generation disabled")
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """Safely convert a value to float, handling NaN, Infinity, and None.
+
+    Args:
+        value: Value to convert
+        default: Default value if conversion fails or value is invalid
+
+    Returns:
+        Valid float value (never NaN or Infinity)
+    """
+    if value is None:
+        return default
+    try:
+        f = float(value)
+        if math.isnan(f) or math.isinf(f):
+            return default
+        return f
+    except (TypeError, ValueError):
+        return default
+
+
+def _safe_str(value: Any, default: str = "Unknown", max_length: Optional[int] = None) -> str:
+    """Safely convert a value to string.
+
+    Args:
+        value: Value to convert
+        default: Default value if conversion fails
+        max_length: Optional max length to truncate to
+
+    Returns:
+        String value
+    """
+    if value is None:
+        return default
+    result = str(value) if value else default
+    if max_length and len(result) > max_length:
+        return result[:max_length]
+    return result
 
 
 async def generate_charts(
     analysis_results: Dict[str, Any],
     report_type: ReportType,
     chart_types: List[str],
-    dpi: int = 150,
+    dpi: int = 150,  # Kept for API compatibility, but unused
 ) -> List[ChartData]:
-    """Generate charts from analysis results.
+    """Generate chart data structures from analysis results.
 
     Args:
         analysis_results: Results from analysis queries
         report_type: Type of report
         chart_types: List of chart types to generate ("pie", "bar", "line")
-        dpi: DPI for chart images
+        dpi: Unused - kept for API compatibility
 
     Returns:
-        List of ChartData objects with rendered chart data
+        List of ChartData objects with chart configurations for frontend rendering
     """
-    if not MATPLOTLIB_AVAILABLE:
-        logger.warning("Skipping chart generation - matplotlib not available")
-        return []
-
     charts = []
 
     try:
-        # Generate category pie chart
+        # Generate category pie chart data
         if "pie" in chart_types and "by_category" in analysis_results:
-            chart = await _generate_pie_chart(
+            chart = _build_pie_chart_data(
                 analysis_results["by_category"],
                 "Spending by Category",
                 "category",
                 "total",
-                dpi,
             )
             if chart:
                 charts.append(chart)
 
-        # Generate vendor bar chart
+        # Generate vendor bar chart data
         if "bar" in chart_types and "by_vendor" in analysis_results:
-            chart = await _generate_bar_chart(
+            chart = _build_bar_chart_data(
                 analysis_results["by_vendor"][:10],  # Top 10
                 "Top Vendors by Spend",
                 "vendor",
                 "total",
-                dpi,
             )
             if chart:
                 charts.append(chart)
 
-        # Generate monthly trend line chart
+        # Generate monthly trend line chart data
         if "line" in chart_types and "monthly_trends" in analysis_results:
-            chart = await _generate_line_chart(
+            chart = _build_line_chart_data(
                 analysis_results["monthly_trends"],
                 "Monthly Spending Trend",
                 "month",
                 "total",
-                dpi,
+            )
+            if chart:
+                charts.append(chart)
+
+        # Generate top expenses bar chart
+        if "bar" in chart_types and "top_expenses" in analysis_results:
+            chart = _build_top_expenses_chart(
+                analysis_results["top_expenses"][:10],
+                "Top Expenses",
             )
             if chart:
                 charts.append(chart)
 
     except Exception as e:
-        logger.error(f"Chart generation failed: {e}")
+        logger.error(f"Chart data generation failed: {e}")
 
     return charts
 
 
-async def _generate_pie_chart(
+def _build_pie_chart_data(
     data: List[Dict[str, Any]],
     title: str,
     label_field: str,
     value_field: str,
-    dpi: int,
-) -> Optional[ChartData]:
-    """Generate a pie chart.
+) -> ChartData | None:
+    """Build pie chart data structure.
 
     Args:
         data: List of dicts with label and value fields
         title: Chart title
         label_field: Field name for labels
         value_field: Field name for values
-        dpi: DPI for image
 
     Returns:
-        ChartData object or None if generation fails
+        ChartData object or None if no data
     """
     if not data:
         return None
 
-    try:
-        loop = asyncio.get_event_loop()
-        image_bytes = await loop.run_in_executor(
-            None,
-            lambda: _render_pie_chart(data, title, label_field, value_field, dpi)
-        )
+    # Limit to top 8 for readability
+    limited_data = data[:8]
 
-        return ChartData(
-            chart_type="pie",
-            title=title,
-            data={
-                "labels": [d.get(label_field, "Unknown") for d in data],
-                "values": [d.get(value_field, 0) for d in data],
-                "image_base64": image_bytes.decode('latin-1') if image_bytes else None,
-            },
-        )
+    # Calculate percentages (use safe_float to handle NaN)
+    total = sum(_safe_float(d.get(value_field)) for d in limited_data) or 1
 
-    except Exception as e:
-        logger.error(f"Pie chart generation failed: {e}")
-        return None
+    chart_items = []
+    for d in limited_data:
+        value = _safe_float(d.get(value_field))
+        chart_items.append({
+            "name": _safe_str(d.get(label_field), max_length=25),
+            "value": round(value, 2),
+            "percentage": round((value / total) * 100, 1),
+        })
+
+    return ChartData(
+        chart_type="pie",
+        title=title,
+        data={
+            "items": chart_items,
+            "total": round(total, 2),
+        },
+    )
 
 
-def _render_pie_chart(
+def _build_bar_chart_data(
     data: List[Dict[str, Any]],
     title: str,
     label_field: str,
     value_field: str,
-    dpi: int,
-) -> bytes:
-    """Render pie chart to bytes (runs in executor)."""
-    fig, ax = plt.subplots(figsize=(8, 6))
-
-    labels = [d.get(label_field, "Unknown")[:20] for d in data[:8]]  # Top 8, truncate labels
-    values = [d.get(value_field, 0) for d in data[:8]]
-
-    # Calculate percentages for labels
-    total = sum(values) or 1
-    percentages = [(v / total) * 100 for v in values]
-
-    # Only show labels for slices > 5%
-    def autopct_func(pct):
-        return f'{pct:.1f}%' if pct > 5 else ''
-
-    colors = plt.cm.Set3.colors[:len(labels)]
-
-    wedges, texts, autotexts = ax.pie(
-        values,
-        labels=None,  # We'll add legend instead
-        autopct=autopct_func,
-        colors=colors,
-        startangle=90,
-    )
-
-    ax.set_title(title, fontsize=14, fontweight='bold')
-
-    # Add legend
-    ax.legend(
-        wedges,
-        [f"{l} (${v:,.0f})" for l, v in zip(labels, values)],
-        loc="center left",
-        bbox_to_anchor=(1, 0.5),
-        fontsize=9,
-    )
-
-    plt.tight_layout()
-
-    # Save to bytes
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=dpi, bbox_inches='tight')
-    buf.seek(0)
-    image_bytes = buf.getvalue()
-    plt.close(fig)
-
-    return image_bytes
-
-
-async def _generate_bar_chart(
-    data: List[Dict[str, Any]],
-    title: str,
-    label_field: str,
-    value_field: str,
-    dpi: int,
-) -> Optional[ChartData]:
-    """Generate a horizontal bar chart.
+) -> ChartData | None:
+    """Build bar chart data structure.
 
     Args:
         data: List of dicts with label and value fields
         title: Chart title
         label_field: Field name for labels
         value_field: Field name for values
-        dpi: DPI for image
 
     Returns:
-        ChartData object or None if generation fails
+        ChartData object or None if no data
     """
     if not data:
         return None
 
-    try:
-        loop = asyncio.get_event_loop()
-        image_bytes = await loop.run_in_executor(
-            None,
-            lambda: _render_bar_chart(data, title, label_field, value_field, dpi)
-        )
+    chart_items = []
+    for d in data:
+        chart_items.append({
+            "name": _safe_str(d.get(label_field), max_length=30),
+            "value": round(_safe_float(d.get(value_field)), 2),
+        })
 
-        return ChartData(
-            chart_type="bar",
-            title=title,
-            data={
-                "labels": [d.get(label_field, "Unknown") for d in data],
-                "values": [d.get(value_field, 0) for d in data],
-                "image_base64": image_bytes.decode('latin-1') if image_bytes else None,
-            },
-        )
-
-    except Exception as e:
-        logger.error(f"Bar chart generation failed: {e}")
-        return None
+    return ChartData(
+        chart_type="bar",
+        title=title,
+        data={
+            "items": chart_items,
+        },
+    )
 
 
-def _render_bar_chart(
-    data: List[Dict[str, Any]],
-    title: str,
-    label_field: str,
-    value_field: str,
-    dpi: int,
-) -> bytes:
-    """Render horizontal bar chart to bytes (runs in executor)."""
-    fig, ax = plt.subplots(figsize=(10, 6))
-
-    labels = [d.get(label_field, "Unknown")[:25] for d in data]  # Truncate long labels
-    values = [d.get(value_field, 0) for d in data]
-
-    # Reverse for horizontal bar (top item at top)
-    labels = labels[::-1]
-    values = values[::-1]
-
-    colors = plt.cm.Blues([0.3 + 0.5 * (i / len(values)) for i in range(len(values))])
-
-    bars = ax.barh(labels, values, color=colors)
-
-    # Add value labels on bars
-    for bar, value in zip(bars, values):
-        ax.text(
-            bar.get_width() + max(values) * 0.01,
-            bar.get_y() + bar.get_height() / 2,
-            f'${value:,.0f}',
-            va='center',
-            fontsize=9,
-        )
-
-    ax.set_xlabel('Amount ($)', fontsize=11)
-    ax.set_title(title, fontsize=14, fontweight='bold')
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-
-    plt.tight_layout()
-
-    # Save to bytes
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=dpi, bbox_inches='tight')
-    buf.seek(0)
-    image_bytes = buf.getvalue()
-    plt.close(fig)
-
-    return image_bytes
-
-
-async def _generate_line_chart(
+def _build_line_chart_data(
     data: List[Dict[str, Any]],
     title: str,
     x_field: str,
     y_field: str,
-    dpi: int,
-) -> Optional[ChartData]:
-    """Generate a line chart for trends.
+) -> ChartData | None:
+    """Build line chart data structure for trends.
 
     Args:
         data: List of dicts with x and y fields
         title: Chart title
         x_field: Field name for x-axis
         y_field: Field name for y-axis
-        dpi: DPI for image
 
     Returns:
-        ChartData object or None if generation fails
+        ChartData object or None if insufficient data
     """
     if not data or len(data) < 2:
         return None
 
-    try:
-        loop = asyncio.get_event_loop()
-        image_bytes = await loop.run_in_executor(
-            None,
-            lambda: _render_line_chart(data, title, x_field, y_field, dpi)
-        )
+    chart_items = []
+    prev_value = None
 
-        return ChartData(
-            chart_type="line",
-            title=title,
-            data={
-                "x_values": [d.get(x_field, "") for d in data],
-                "y_values": [d.get(y_field, 0) for d in data],
-                "image_base64": image_bytes.decode('latin-1') if image_bytes else None,
-            },
-        )
+    for d in data:
+        value = _safe_float(d.get(y_field))
+        item = {
+            "name": _safe_str(d.get(x_field), default=""),
+            "value": round(value, 2),
+        }
 
-    except Exception as e:
-        logger.error(f"Line chart generation failed: {e}")
-        return None
+        # Calculate change percentage from previous
+        if prev_value is not None and prev_value != 0:
+            change = ((value - prev_value) / prev_value) * 100
+            # Ensure change is also safe (could be inf if prev_value is very small)
+            item["change"] = round(_safe_float(change), 1)
+
+        chart_items.append(item)
+        prev_value = value
+
+    return ChartData(
+        chart_type="line",
+        title=title,
+        data={
+            "items": chart_items,
+        },
+    )
 
 
-def _render_line_chart(
+def _build_top_expenses_chart(
     data: List[Dict[str, Any]],
     title: str,
-    x_field: str,
-    y_field: str,
-    dpi: int,
-) -> bytes:
-    """Render line chart to bytes (runs in executor)."""
-    fig, ax = plt.subplots(figsize=(10, 5))
-
-    x_values = [d.get(x_field, "") for d in data]
-    y_values = [d.get(y_field, 0) for d in data]
-
-    ax.plot(x_values, y_values, marker='o', linewidth=2, markersize=6, color='#2196F3')
-    ax.fill_between(x_values, y_values, alpha=0.3, color='#2196F3')
-
-    # Add data labels
-    for x, y in zip(x_values, y_values):
-        ax.annotate(
-            f'${y:,.0f}',
-            (x, y),
-            textcoords="offset points",
-            xytext=(0, 10),
-            ha='center',
-            fontsize=8,
-        )
-
-    ax.set_xlabel('Month', fontsize=11)
-    ax.set_ylabel('Amount ($)', fontsize=11)
-    ax.set_title(title, fontsize=14, fontweight='bold')
-
-    # Rotate x labels if many data points
-    if len(x_values) > 6:
-        plt.xticks(rotation=45, ha='right')
-
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    ax.grid(axis='y', alpha=0.3)
-
-    plt.tight_layout()
-
-    # Save to bytes
-    buf = io.BytesIO()
-    fig.savefig(buf, format='png', dpi=dpi, bbox_inches='tight')
-    buf.seek(0)
-    image_bytes = buf.getvalue()
-    plt.close(fig)
-
-    return image_bytes
-
-
-def render_chart_to_bytes(chart_data: ChartData, dpi: int = 150) -> Optional[bytes]:
-    """Re-render a chart from its data to bytes.
-
-    Useful when you have ChartData but need the raw image bytes.
+) -> ChartData | None:
+    """Build chart data for top expenses.
 
     Args:
-        chart_data: ChartData object with chart configuration
-        dpi: DPI for output image
+        data: List of expense records
+        title: Chart title
 
     Returns:
-        PNG image bytes or None
+        ChartData object or None if no data
     """
-    if not MATPLOTLIB_AVAILABLE:
+    if not data:
         return None
 
-    if chart_data.chart_type == "pie":
-        data = [
-            {"label": l, "value": v}
-            for l, v in zip(
-                chart_data.data.get("labels", []),
-                chart_data.data.get("values", [])
-            )
-        ]
-        return _render_pie_chart(data, chart_data.title, "label", "value", dpi)
+    chart_items = []
+    for d in data:
+        # Try different field names for vendor/description
+        name = d.get("vendor") or d.get("merchant") or d.get("description") or "Unknown"
+        amount = d.get("amount") or d.get("total") or d.get("total_amount") or 0
 
-    elif chart_data.chart_type == "bar":
-        data = [
-            {"label": l, "value": v}
-            for l, v in zip(
-                chart_data.data.get("labels", []),
-                chart_data.data.get("values", [])
-            )
-        ]
-        return _render_bar_chart(data, chart_data.title, "label", "value", dpi)
+        # Get date value, convert to string if it's a date object
+        date_val = d.get("date") or d.get("invoice_date")
+        if date_val is not None:
+            date_val = str(date_val) if date_val else None
 
-    elif chart_data.chart_type == "line":
-        data = [
-            {"x": x, "y": y}
-            for x, y in zip(
-                chart_data.data.get("x_values", []),
-                chart_data.data.get("y_values", [])
-            )
-        ]
-        return _render_line_chart(data, chart_data.title, "x", "y", dpi)
+        chart_items.append({
+            "name": _safe_str(name, max_length=30),
+            "value": round(_safe_float(amount), 2),
+            "date": date_val,
+            "category": d.get("category"),
+        })
 
+    return ChartData(
+        chart_type="bar",
+        title=title,
+        data={
+            "items": chart_items,
+        },
+    )
+
+
+# Legacy function for backwards compatibility - returns None
+def render_chart_to_bytes(chart_data: ChartData, dpi: int = 150) -> None:
+    """Legacy function - charts are now rendered on the frontend.
+
+    Returns None as server-side rendering is no longer used.
+    """
+    logger.info("Server-side chart rendering deprecated - use frontend Recharts instead")
     return None

@@ -23,6 +23,7 @@ from src.agents.report.schemas import (
 class CreateReportRequest(BaseModel):
     """Request to create a new report."""
     folder_id: str = Field(..., description="Folder ID containing documents to analyze")
+    folder_name: Optional[str] = Field(None, description="Folder name for direct path lookup (avoids UUID resolution)")
     report_type: ReportType = Field(..., description="Type of report to generate")
     date_range_start: Optional[date] = Field(None, description="Start date for filtering (inclusive)")
     date_range_end: Optional[date] = Field(None, description="End date for filtering (inclusive)")

@@ -41,7 +41,7 @@ openpyxl>=3.0.0
 gcsfs>=2024.1.0
 
 # Report Agent (Business Intelligence)
-matplotlib>=3.8.0
+# Note: Charts are rendered on frontend with Recharts - no matplotlib needed
 weasyprint>=60.0
 
 # Google Cloud Storage

@@ -139,6 +139,7 @@ class ReportAgent(BaseAgent):
         date_range: Optional[DateRange] = None,
         options: Optional[ReportOptions] = None,
         session_id: Optional[str] = None,
+        folder_name: Optional[str] = None,
     ) -> Report:
         """Generate a business intelligence report.
 
@@ -149,6 +150,7 @@ class ReportAgent(BaseAgent):
             date_range: Optional date range filter
             options: Report generation options
             session_id: Optional session ID for tracking
+            folder_name: Optional folder name for direct path lookup (avoids UUID resolution)
 
         Returns:
             Generated Report object
@@ -178,7 +180,7 @@ class ReportAgent(BaseAgent):
         try:
             # Step 1: Extract/load data from folder
             report.status = ReportStatus.EXTRACTING
-            extracted_data = await self._load_extracted_data(org_id, folder_id, date_range)
+            extracted_data = await self._load_extracted_data(org_id, folder_id, date_range, folder_name)
             report.document_count = extracted_data.get("document_count", 0)
             report.extracted_record_count = len(extracted_data.get("records", []))
 
@@ -202,11 +204,15 @@ class ReportAgent(BaseAgent):
             insights = await self._generate_insights(analysis_results, report_type, options)
             report.insights = insights
 
-            # Generate charts if enabled
+            # Generate charts if enabled (non-fatal if it fails)
             charts = []
             if options.include_charts:
-                charts = await self._generate_charts(analysis_results, report_type, options)
-                report.charts = charts
+                try:
+                    charts = await self._generate_charts(analysis_results, report_type, options)
+                    report.charts = charts
+                except Exception as e:
+                    logger.warning(f"Chart generation failed (non-fatal): {e}")
+                    # Continue without charts
 
             # Build summary
             report.summary = self._build_summary(analysis_results, date_range)
@@ -221,15 +227,24 @@ class ReportAgent(BaseAgent):
                     analysis_results, insights
                 )
 
-            # Step 5: Render outputs
+            # Step 5: Render outputs (non-fatal if individual formats fail)
             if options.output_format.value == "pdf" or "pdf" in [f.value for f in options.additional_formats]:
-                report.pdf_path = await self._render_pdf(report, org_id)
+                try:
+                    report.pdf_path = await self._render_pdf(report, org_id)
+                except Exception as e:
+                    logger.warning(f"PDF generation failed (non-fatal): {e}")
 
             if options.output_format.value == "excel" or "excel" in [f.value for f in options.additional_formats]:
-                report.excel_path = await self._render_excel(report, org_id)
+                try:
+                    report.excel_path = await self._render_excel(report, org_id)
+                except Exception as e:
+                    logger.warning(f"Excel generation failed (non-fatal): {e}")
 
             if options.output_format.value == "json" or "json" in [f.value for f in options.additional_formats]:
-                report.json_path = await self._save_json(report, org_id)
+                try:
+                    report.json_path = await self._save_json(report, org_id)
+                except Exception as e:
+                    logger.warning(f"JSON save failed (non-fatal): {e}")
 
             # Mark complete
             report.status = ReportStatus.COMPLETED
@@ -256,16 +271,21 @@ class ReportAgent(BaseAgent):
         org_id: str,
         folder_id: str,
         date_range: Optional[DateRange] = None,
+        folder_name: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Load extracted records from folder.
+
+        First tries to load from extracted data directory. If no extracted data
+        is found, falls back to loading and extracting data from parsed documents.
 
         Args:
             org_id: Organization ID
             folder_id: Folder ID containing documents
             date_range: Optional date filter
+            folder_name: Optional folder name (if provided, skips UUID resolution)
 
         Returns:
-            Dict with records and metadata
+            Dict with records, metadata, and data_source indicator
         """
         from src.storage import get_storage
         from src.db.repositories import rag_repository, bulk_repository
@@ -273,84 +293,91 @@ class ReportAgent(BaseAgent):
         storage = get_storage()
         records = []
         document_count = 0
+        data_source = "extracted"  # Track where data came from
 
         try:
-            # Get folder info - try multiple lookup strategies
-            folder_name = None
+            # If folder_name is provided, use it directly (skip UUID resolution)
+            if folder_name:
+                logger.info(f"Using provided folder_name: {folder_name}")
+            else:
+                # Get folder info - try multiple lookup strategies
+                # Strategy 1: Try rag document folders by ID
+                folder_info = await rag_repository.get_folder_by_id(folder_id)
+                if folder_info:
+                    folder_name = folder_info.get("folder_name")
+                    logger.info(f"Found folder in document_folders: {folder_name}")
 
-            # Strategy 1: Try rag document folders by ID
-            folder_info = await rag_repository.get_folder_by_id(folder_id)
-            if folder_info:
-                folder_name = folder_info.get("folder_name")
-                logger.info(f"Found folder in document_folders: {folder_name}")
+                # Strategy 2: Try bulk jobs by ID (folder_id might be a bulk job ID)
+                if not folder_name:
+                    bulk_job = await bulk_repository.get_bulk_job(folder_id)
+                    if bulk_job:
+                        folder_name = bulk_job.get("folder_name")
+                        logger.info(f"Found folder in bulk_jobs by ID: {folder_name}")
 
-            # Strategy 2: Try bulk jobs by ID (folder_id might be a bulk job ID)
-            if not folder_name:
-                bulk_job = await bulk_repository.get_bulk_job(folder_id)
-                if bulk_job:
-                    folder_name = bulk_job.get("folder_name")
-                    logger.info(f"Found folder in bulk_jobs by ID: {folder_name}")
+                # Strategy 3: Try bulk jobs by folder name (folder_id might be the folder name)
+                if not folder_name:
+                    bulk_job = await bulk_repository.get_bulk_job_by_folder(org_id, folder_id)
+                    if bulk_job:
+                        folder_name = bulk_job.get("folder_name")
+                        logger.info(f"Found folder in bulk_jobs by name: {folder_name}")
 
-            # Strategy 3: Try bulk jobs by folder name (folder_id might be the folder name)
-            if not folder_name:
-                bulk_job = await bulk_repository.get_bulk_job_by_folder(org_id, folder_id)
-                if bulk_job:
-                    folder_name = bulk_job.get("folder_name")
-                    logger.info(f"Found folder in bulk_jobs by name: {folder_name}")
-
-            # Strategy 4: Use folder_id as folder_name directly and check if path exists
-            if not folder_name:
-                # Check if extracted path exists with folder_id as name
-                test_path = f"{org_id}/extracted/{folder_id}"
-                test_files = await storage.list_files(directory=test_path, use_prefix=False)
-                if test_files:
+                # Strategy 4: Use folder_id as folder_name directly
+                if not folder_name:
                     folder_name = folder_id
-                    logger.info(f"Found extracted data at path using folder_id as name: {folder_name}")
-                else:
-                    logger.warning(f"No folder found for {folder_id} and no extracted data at {test_path}")
-                    folder_name = folder_id  # Still use it, will return empty results
+                    logger.info(f"Using folder_id as folder_name: {folder_name}")
 
-            # List extracted JSON files in folder
+            # Try to load from extracted directory first
             extracted_path = f"{org_id}/extracted/{folder_name}"
             files = await storage.list_files(directory=extracted_path, use_prefix=False)
+            json_files = [f for f in files if isinstance(f, str) and f.endswith(".json")]
 
-            for file_info in files:
-                if not file_info.get("name", "").endswith(".json"):
-                    continue
+            if json_files:
+                logger.info(f"Found {len(json_files)} JSON files in extracted directory")
+                for file_path in json_files:
+                    document_count += 1
+                    try:
+                        content = await storage.read(file_path, use_prefix=False)
+                        if content:
+                            import json
+                            data = json.loads(content)
+                            if isinstance(data, list):
+                                records.extend(data)
+                            elif isinstance(data, dict) and "records" in data:
+                                records.extend(data["records"])
+                            elif isinstance(data, dict):
+                                records.append(data)
+                    except Exception as e:
+                        logger.warning(f"Failed to load {file_path}: {e}")
+            else:
+                # Fallback: Load from parsed documents and extract data using LLM
+                logger.info(
+                    f"No extracted data found at {extracted_path}, "
+                    f"falling back to parsed documents"
+                )
+                data_source = "parsed"
+                # Pass folder_name directly (already resolved above)
+                records, document_count = await self._load_from_parsed_documents(
+                    org_id, folder_name, date_range
+                )
 
-                document_count += 1
-                try:
-                    content = await storage.read(
-                        filename=file_info["name"],
-                        directory=extracted_path,
-                        use_prefix=False,
-                    )
-                    if content:
-                        import json
-                        data = json.loads(content)
-                        if isinstance(data, list):
-                            records.extend(data)
-                        elif isinstance(data, dict) and "records" in data:
-                            records.extend(data["records"])
-                        elif isinstance(data, dict):
-                            records.append(data)
-                except Exception as e:
-                    logger.warning(f"Failed to load {file_info['name']}: {e}")
-
-            # Filter by date range if provided
-            if date_range and records:
+            # Filter by date range if provided (only for extracted data, parsed already filtered)
+            if date_range and records and data_source == "extracted":
                 records = self._filter_by_date(records, date_range)
 
-            logger.info(f"Loaded {len(records)} records from {document_count} documents")
+            logger.info(
+                f"Loaded {len(records)} records from {document_count} documents "
+                f"(source: {data_source})"
+            )
             return {
                 "records": records,
                 "document_count": document_count,
                 "folder_name": folder_name,
+                "data_source": data_source,
             }
 
         except Exception as e:
             logger.error(f"Failed to load extracted data: {e}")
-            return {"records": [], "document_count": 0}
+            return {"records": [], "document_count": 0, "data_source": "none"}
 
     def _filter_by_date(
         self,
@@ -390,6 +417,225 @@ class ReportAgent(BaseAgent):
                 filtered.append(record)
 
         return filtered
+
+    async def _load_from_parsed_documents(
+        self,
+        org_id: str,
+        folder_name: str,
+        date_range: Optional[DateRange] = None,
+    ) -> tuple[List[Dict[str, Any]], int]:
+        """Load parsed Markdown documents and extract structured data using LLM.
+
+        Falls back to this method when no extracted data is found.
+        Looks for files at: {org_name}/parsed/{folder_name}/*.md
+
+        Args:
+            org_id: Organization ID
+            folder_name: Folder name (already resolved from folder_id)
+            date_range: Optional date filter
+
+        Returns:
+            Tuple of (list of extracted records, document count)
+        """
+        from src.storage import get_storage
+        from src.db.repositories import get_organization_name
+
+        storage = get_storage()
+        records = []
+        document_count = 0
+
+        try:
+            # Get org name from org_id
+            org_name = await get_organization_name(org_id)
+            if not org_name:
+                logger.warning(f"Could not find organization name for {org_id}, using org_id as name")
+                org_name = org_id
+
+            # List .md files from parsed directory
+            # Path: {org_name}/parsed/{folder_name}/*.md
+            parsed_path = f"{org_name}/{self.config.parsed_directory}/{folder_name}"
+            logger.info(f"Looking for parsed documents at: {parsed_path}")
+
+            files = await storage.list_files(directory=parsed_path, use_prefix=False)
+            md_files = [f for f in files if f.endswith(".md")]
+
+            if not md_files:
+                logger.info(f"No .md files found at {parsed_path}")
+                return [], 0
+
+            logger.info(f"Found {len(md_files)} .md files in parsed directory")
+
+            # Process documents in batches for rate limiting
+            batch_size = self.config.extraction_batch_size
+            for i in range(0, len(md_files), batch_size):
+                batch = md_files[i:i + batch_size]
+                batch_records = await self._process_document_batch(batch, storage)
+                records.extend(batch_records)
+                document_count += len(batch)
+
+                # Log progress
+                logger.info(
+                    f"Processed batch {i // batch_size + 1}/{(len(md_files) + batch_size - 1) // batch_size}: "
+                    f"{len(batch_records)} records extracted"
+                )
+
+            # Filter by date range if provided
+            if date_range and records:
+                records = self._filter_by_date(records, date_range)
+
+            logger.info(f"Extracted {len(records)} records from {document_count} parsed documents")
+            return records, document_count
+
+        except Exception as e:
+            logger.error(f"Failed to load from parsed documents: {e}", exc_info=True)
+            return [], 0
+
+    async def _process_document_batch(
+        self,
+        file_paths: List[str],
+        storage: Any,
+    ) -> List[Dict[str, Any]]:
+        """Process a batch of documents concurrently.
+
+        Args:
+            file_paths: List of GCS file paths
+            storage: Storage backend
+
+        Returns:
+            List of extracted records
+        """
+        import asyncio
+        from pathlib import Path
+
+        async def process_single(file_path: str) -> Optional[Dict[str, Any]]:
+            try:
+                # Read document content
+                content = await storage.read(file_path, use_prefix=False)
+                if not content:
+                    logger.warning(f"Empty content for {file_path}")
+                    return None
+
+                # Extract filename from path
+                filename = Path(file_path.split("/")[-1]).stem + ".md"
+
+                # Extract data using LLM
+                return await self._extract_data_from_document(content, filename)
+            except Exception as e:
+                logger.warning(f"Failed to process {file_path}: {e}")
+                return None
+
+        # Process all files in batch concurrently
+        tasks = [process_single(fp) for fp in file_paths]
+        results = await asyncio.gather(*tasks)
+
+        # Filter out None results
+        return [r for r in results if r is not None]
+
+    async def _extract_data_from_document(
+        self,
+        document_content: str,
+        filename: str,
+    ) -> Optional[Dict[str, Any]]:
+        """Use LLM to extract structured data from a parsed document.
+
+        Args:
+            document_content: The parsed document content (Markdown)
+            filename: Original filename for context
+
+        Returns:
+            Extracted data dict or None if extraction fails
+        """
+        import json
+        import re
+        from langchain.chat_models import init_chat_model
+        from .templates import get_document_data_extraction_prompt
+
+        try:
+            # Truncate content if too long
+            max_chars = self.config.max_document_chars
+            if len(document_content) > max_chars:
+                document_content = document_content[:max_chars]
+                logger.debug(f"Truncated {filename} to {max_chars} chars")
+
+            # Generate extraction prompt
+            prompt = get_document_data_extraction_prompt(
+                document_content=document_content,
+                filename=filename,
+                max_chars=max_chars,
+            )
+
+            # Use cheaper extraction model
+            extraction_llm = init_chat_model(
+                model=self.config.extraction_model,
+                model_provider="openai",
+                temperature=0.1,  # Low temperature for deterministic extraction
+            )
+
+            # Run extraction in executor to avoid blocking
+            response = await asyncio.get_event_loop().run_in_executor(
+                self._executors.agent_executor,
+                lambda: extraction_llm.invoke(prompt),
+            )
+
+            # Parse JSON response
+            content = response.content.strip()
+
+            # Try to extract JSON from response (handle markdown code blocks)
+            json_match = re.search(r'```(?:json)?\s*(\{[\s\S]*?\})\s*```', content)
+            if json_match:
+                content = json_match.group(1)
+
+            data = json.loads(content)
+
+            # Ensure source_file is set
+            if "source_file" not in data:
+                data["source_file"] = filename
+
+            # Normalize amount fields
+            data = self._normalize_extracted_data(data)
+
+            logger.debug(f"Extracted data from {filename}: {list(data.keys())}")
+            return data
+
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse JSON from LLM response for {filename}: {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"Failed to extract data from {filename}: {e}")
+            return None
+
+    def _normalize_extracted_data(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        """Normalize extracted data for consistent analysis.
+
+        Ensures consistent field names and data types.
+
+        Args:
+            data: Raw extracted data
+
+        Returns:
+            Normalized data dict
+        """
+        # Normalize amount field (use 'amount' as standard)
+        if "total" in data and "amount" not in data:
+            data["amount"] = data["total"]
+        elif "total_amount" in data and "amount" not in data:
+            data["amount"] = data["total_amount"]
+
+        # Normalize vendor field
+        if "merchant" in data and "vendor" not in data:
+            data["vendor"] = data["merchant"]
+
+        # Ensure amount is numeric
+        if "amount" in data:
+            try:
+                if isinstance(data["amount"], str):
+                    # Remove currency symbols and commas
+                    clean = data["amount"].replace("$", "").replace(",", "").replace("€", "").replace("£", "")
+                    data["amount"] = float(clean)
+            except (ValueError, TypeError):
+                pass
+
+        return data
 
     async def _aggregate_data(
         self,

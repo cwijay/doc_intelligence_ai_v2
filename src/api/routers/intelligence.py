@@ -59,6 +59,7 @@ async def _generate_report_background(
     report_type: ReportType,
     date_range,
     options,
+    folder_name: Optional[str] = None,
 ):
     """Background task to generate a report."""
     agent = get_report_agent()
@@ -74,6 +75,7 @@ async def _generate_report_background(
             report_type=report_type,
             date_range=date_range,
             options=options,
+            folder_name=folder_name,
         )
 
         # Update database with results
@@ -164,6 +166,7 @@ async def create_report(
         report_type=request.report_type,
         date_range=date_range,
         options=options,
+        folder_name=request.folder_name,
     )
 
     # Estimate time based on report type

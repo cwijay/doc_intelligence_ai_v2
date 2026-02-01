@@ -3,7 +3,7 @@
 Provides prompt templates and report structures for different report types.
 """
 
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from ..schemas import ReportType
 
@@ -309,3 +309,139 @@ Respond in JSON format as an array of objects with these fields:
 - "severity": one of "info", "warning", "critical"
 
 Provide exactly {max_insights} insights as a JSON array:"""
+
+
+# =============================================================================
+# DOCUMENT DATA EXTRACTION PROMPTS
+# =============================================================================
+
+
+def get_document_data_extraction_prompt(
+    document_content: str,
+    filename: str,
+    max_chars: int = 50000,
+) -> str:
+    """Generate prompt for extracting structured data from parsed document content.
+
+    This prompt instructs the LLM to extract standardized fields from document
+    text (typically Markdown from LlamaParse) for use in report analysis.
+
+    Args:
+        document_content: The parsed document content (usually Markdown)
+        filename: Original filename for context
+        max_chars: Maximum characters to include from document
+
+    Returns:
+        Formatted prompt string
+    """
+    # Truncate if needed
+    if len(document_content) > max_chars:
+        document_content = document_content[:max_chars] + "\n\n[... content truncated ...]"
+
+    return f"""You are a data extraction specialist. Extract structured financial/business data from the following document.
+
+**Document**: {filename}
+
+**Document Content**:
+```
+{document_content}
+```
+
+**Instructions**:
+Analyze the document and extract all relevant financial/business data. Return a JSON object with the following fields (include only fields that have actual values in the document):
+
+Required fields (always include if identifiable):
+- "document_type": string - Type of document (e.g., "invoice", "receipt", "contract", "purchase_order", "expense_report", "statement", "unknown")
+- "source_file": string - The filename "{filename}"
+
+Financial fields (include if present):
+- "amount" or "total": number - The main monetary amount/total
+- "subtotal": number - Subtotal before tax/fees if separate from total
+- "tax": number - Tax amount if listed
+- "currency": string - Currency code (e.g., "USD", "EUR") or symbol
+
+Date fields (include if present):
+- "date": string (YYYY-MM-DD format) - Primary date (invoice date, transaction date, etc.)
+- "due_date": string (YYYY-MM-DD format) - Due date if applicable
+- "payment_date": string (YYYY-MM-DD format) - Payment/receipt date if different
+
+Entity fields (include if present):
+- "vendor" or "merchant": string - Name of vendor/supplier/merchant
+- "vendor_address": string - Vendor's address
+- "customer": string - Customer/buyer name if not the document owner
+- "invoice_number": string - Invoice or reference number
+- "po_number": string - Purchase order number if referenced
+
+Categorization (include if determinable):
+- "category": string - Expense category (e.g., "Office Supplies", "Travel", "Software", "Utilities", "Professional Services")
+- "payment_method": string - How payment was made (e.g., "Credit Card", "Check", "ACH", "Wire")
+- "payment_status": string - Status (e.g., "paid", "pending", "overdue")
+
+Line items (include if document has itemized entries):
+- "line_items": array of objects, each with:
+  - "description": string
+  - "quantity": number
+  - "unit_price": number
+  - "amount": number
+
+Additional notes:
+- "notes": string - Any important notes or special terms
+
+**Important**:
+1. Only include fields that have actual values found in the document
+2. Use null for truly missing values, but prefer to omit the field entirely
+3. Parse dates into YYYY-MM-DD format when possible
+4. Convert amounts to numbers (remove currency symbols, commas)
+5. Be conservative - only extract what's clearly stated in the document
+
+Respond with ONLY a valid JSON object, no markdown code blocks or explanation:"""
+
+
+def get_batch_extraction_prompt(
+    documents: list[tuple[str, str]],
+    max_chars_per_doc: int = 10000,
+) -> str:
+    """Generate prompt for batch extracting data from multiple documents.
+
+    Args:
+        documents: List of (filename, content) tuples
+        max_chars_per_doc: Maximum characters per document
+
+    Returns:
+        Formatted prompt string
+    """
+    doc_sections = []
+    for i, (filename, content) in enumerate(documents, 1):
+        truncated = content[:max_chars_per_doc] if len(content) > max_chars_per_doc else content
+        doc_sections.append(f"""
+--- DOCUMENT {i}: {filename} ---
+{truncated}
+--- END DOCUMENT {i} ---
+""")
+
+    all_docs = "\n".join(doc_sections)
+
+    return f"""You are a data extraction specialist. Extract structured financial/business data from the following {len(documents)} documents.
+
+{all_docs}
+
+**Instructions**:
+For EACH document, extract all relevant financial/business data. Return a JSON array with one object per document.
+
+Each object should contain (include only fields with actual values):
+- "source_file": string - The document filename (REQUIRED)
+- "document_type": string - Type (invoice, receipt, contract, etc.)
+- "amount" or "total": number - Main monetary amount
+- "date": string (YYYY-MM-DD) - Primary date
+- "vendor" or "merchant": string - Vendor/supplier name
+- "category": string - Expense category if determinable
+- "invoice_number": string - Reference number if present
+- Other relevant fields as described in standard extraction
+
+**Important**:
+1. Return a JSON array with exactly {len(documents)} objects (one per document)
+2. Each object MUST have "source_file" matching the document filename
+3. Only include fields with actual values from each document
+4. Parse dates to YYYY-MM-DD, amounts to numbers
+
+Respond with ONLY a valid JSON array, no markdown or explanation:"""

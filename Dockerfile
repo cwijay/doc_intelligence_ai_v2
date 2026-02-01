@@ -35,9 +35,19 @@ RUN pip install --no-cache-dir --upgrade pip && \
 FROM python:3.12-slim
 
 # Install runtime dependencies only
+# Note: WeasyPrint dependencies (pango, gdk-pixbuf, etc.) for PDF report generation
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
+    # WeasyPrint dependencies for PDF generation
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libgdk-pixbuf-2.0-0 \
+    libffi8 \
+    libcairo2 \
+    libharfbuzz0b \
+    fontconfig \
+    fonts-liberation \
     && rm -rf /var/lib/apt/lists/* \
     && groupadd --gid 1000 appuser \
     && useradd --uid 1000 --gid 1000 --shell /bin/bash --create-home appuser

@@ -15,13 +15,23 @@ from ..schemas import Report, ReportType, Insight
 
 logger = logging.getLogger(__name__)
 
+# Suppress weasyprint's noisy warnings about missing libraries on local dev
+# Must be set BEFORE importing weasyprint
+logging.getLogger('weasyprint').setLevel(logging.ERROR)
+logging.getLogger('weasyprint.text.fonts').setLevel(logging.ERROR)
+
 # Check if weasyprint is available
+WEASYPRINT_AVAILABLE = False
 try:
-    from weasyprint import HTML, CSS
+    # Suppress the warning banner during import
+    import warnings
+    with warnings.catch_warnings():
+        warnings.filterwarnings('ignore', message='.*WeasyPrint.*')
+        from weasyprint import HTML, CSS
     WEASYPRINT_AVAILABLE = True
-except ImportError:
-    WEASYPRINT_AVAILABLE = False
-    logger.warning("weasyprint not available - using basic PDF generation")
+except (ImportError, OSError) as e:
+    # Only log at debug level - this is expected on local macOS dev
+    logger.debug(f"weasyprint not available (will work in Docker): {e}")
 
 
 async def generate_pdf(report: Report) -> bytes:

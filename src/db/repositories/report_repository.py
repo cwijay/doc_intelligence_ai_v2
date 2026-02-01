@@ -5,6 +5,7 @@ Handles CRUD operations for intelligence reports in PostgreSQL.
 
 import json
 import logging
+import math
 from datetime import date, datetime
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
@@ -14,6 +15,42 @@ from sqlalchemy import text
 from src.db.connection import db
 
 logger = logging.getLogger(__name__)
+
+
+class SafeJSONEncoder(json.JSONEncoder):
+    """Custom JSON encoder that handles date, datetime, NaN, and Infinity values.
+
+    PostgreSQL JSONB doesn't support NaN or Infinity, so we convert them to null.
+    """
+
+    def default(self, obj):
+        if isinstance(obj, datetime):
+            return obj.isoformat()
+        if isinstance(obj, date):
+            return obj.isoformat()
+        return super().default(obj)
+
+    def encode(self, obj):
+        """Override encode to handle NaN/Infinity in the final JSON string."""
+        return super().encode(self._sanitize(obj))
+
+    def _sanitize(self, obj):
+        """Recursively sanitize object, replacing NaN/Infinity with None."""
+        if isinstance(obj, float):
+            if math.isnan(obj) or math.isinf(obj):
+                return None
+            return obj
+        elif isinstance(obj, dict):
+            return {k: self._sanitize(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [self._sanitize(item) for item in obj]
+        elif isinstance(obj, tuple):
+            return tuple(self._sanitize(item) for item in obj)
+        return obj
+
+
+# Alias for backwards compatibility
+DateTimeEncoder = SafeJSONEncoder
 
 
 def _parse_date(date_str: Optional[str]) -> Optional[date]:
@@ -112,7 +149,7 @@ async def create_report(
                 "report_type": report_type,
                 "date_start": _parse_date(date_range_start),
                 "date_end": _parse_date(date_range_end),
-                "options": json.dumps(options) if options else None,
+                "options": json.dumps(options, cls=DateTimeEncoder) if options else None,
                 "created_by": created_by,
             }
         )
@@ -253,15 +290,15 @@ async def update_report_data(
 
         if summary is not None:
             set_parts.append("summary = CAST(:summary AS jsonb)")
-            params["summary"] = json.dumps(summary)
+            params["summary"] = json.dumps(summary, cls=DateTimeEncoder)
 
         if insights is not None:
             set_parts.append("insights = CAST(:insights AS jsonb)")
-            params["insights"] = json.dumps(insights)
+            params["insights"] = json.dumps(insights, cls=DateTimeEncoder)
 
         if charts is not None:
             set_parts.append("charts = CAST(:charts AS jsonb)")
-            params["charts"] = json.dumps(charts)
+            params["charts"] = json.dumps(charts, cls=DateTimeEncoder)
 
         if pdf_path is not None:
             set_parts.append("pdf_path = :pdf_path")
