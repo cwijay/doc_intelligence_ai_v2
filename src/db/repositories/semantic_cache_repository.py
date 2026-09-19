@@ -361,6 +361,63 @@ async def clear_cache(
 
 
 @with_db_retry
+async def invalidate_document(org_id: str, file_name: str) -> int:
+    """
+    Drop every cached answer that could have been grounded in a document.
+
+    Call this whenever a document is deleted, replaced or re-indexed. A cached
+    answer quotes content captured at cache time, so once the underlying document
+    changes the entry is not merely stale - it can cite a file that no longer
+    exists (see the orphaned-document incident on 2026-09-19).
+
+    Matching is deliberately broader than clear_cache()'s exact comparison:
+
+    * ``file_filter`` holds a sorted, comma-joined list ("a.md,b.md"), so an exact
+      match would miss multi-file queries that also covered this document. Membership
+      is tested with string_to_array rather than LIKE, which keeps filenames
+      containing '%' or '_' (e.g. invoice_1.md) from acting as wildcards.
+    * ``file_filter IS NULL`` marks store-wide queries. Those searched every
+      document, so they may quote this one and are dropped too.
+
+    Args:
+        org_id: Organization that owns the document
+        file_name: Indexed document name, as stored in file_filter (e.g. "invoice_1.md")
+
+    Returns:
+        Number of cache entries removed (0 if caching is disabled or unavailable)
+    """
+    if not is_cache_enabled():
+        return 0
+
+    async with db.session() as session:
+        if session is None:
+            return 0
+
+        try:
+            result = await session.execute(
+                text("""
+                    DELETE FROM rag_query_cache
+                    WHERE org_id = :org_id
+                      AND (
+                            file_filter IS NULL
+                         OR :file_name = ANY(string_to_array(file_filter, ','))
+                      )
+                """),
+                {"org_id": org_id, "file_name": file_name}
+            )
+            deleted = result.rowcount
+            logger.info(
+                f"Invalidated {deleted} cache entries for document '{file_name}' (org {org_id})"
+            )
+            return deleted
+
+        except Exception as e:
+            # Invalidation must never break the delete/index operation that triggered it.
+            logger.error(f"Error invalidating cache for '{file_name}': {e}")
+            return 0
+
+
+@with_db_retry
 async def cleanup_expired_entries(ttl_hours: Optional[int] = None) -> int:
     """
     Remove cache entries older than TTL.

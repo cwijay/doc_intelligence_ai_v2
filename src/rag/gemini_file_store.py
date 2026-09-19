@@ -52,7 +52,7 @@ os.environ["GOOGLE_API_KEY"] = os.getenv("GOOGLE_API_KEY")
 # Configuration from environment
 STORE_NAME = os.getenv("FILE_STORE_NAME", "doc-intelligence-store")
 SOURCE_DIRECTORY = os.getenv("SOURCE_DIRECTORY", "docs/structured")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 
 # Chunking config - uses centralized defaults from constants (512/100)
 # Can be overridden via environment variables
@@ -66,7 +66,13 @@ CHUNKING_CONFIG = {
 # File Search optimization settings
 DEFAULT_TOP_K = int(os.getenv("GEMINI_FILE_SEARCH_TOP_K", "3"))
 # Thinking level: MINIMAL (fastest), LOW, MEDIUM, HIGH (most thorough)
-THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "MINIMAL")
+#
+# NOTE: MINIMAL is NOT accepted by every model - gemini-3.8-flash rejects it with
+# 400 INVALID_ARGUMENT ("Thinking level MINIMAL is not supported for this model"),
+# while gemini-3-flash-preview accepts it. LOW is the fastest level the current
+# default model supports, so it is the default here. Check the target model before
+# lowering this, and keep it in step with GEMINI_MODEL above.
+THINKING_LEVEL = os.getenv("GEMINI_THINKING_LEVEL", "LOW")
 
 # =============================================================================
 # Gemini Client Singleton Manager
@@ -736,6 +742,39 @@ def list_documents(file_search_store):
 
 
 @api_retry
+def delete_document_by_name(store_name: str, file_name: str) -> bool:
+    """
+    Remove a single document from a file search store by its display name.
+
+    Used when a document is deleted in the main API: the row is only soft-deleted
+    there, so without this the document stays in the File Search index and RAG keeps
+    quoting it long after the user believes it is gone.
+
+    Args:
+        store_name: Full store resource name (e.g. 'fileSearchStores/xxx')
+        file_name: Indexed document display name (e.g. 'Sample1.md')
+
+    Returns:
+        True if a matching document was found and deleted, False if it was not
+        present (already removed, or never indexed).
+    """
+    for doc in get_client().file_search_stores.documents.list(parent=store_name):
+        if doc.display_name == file_name:
+            get_client().file_search_stores.documents.delete(
+                name=doc.name, config={"force": True}
+            )
+            logger.info(f"Deleted document '{file_name}' from store {store_name}")
+            _log_event(
+                "file_deleted",
+                file_name=file_name,
+                details={"store_name": store_name},
+            )
+            return True
+
+    logger.info(f"Document '{file_name}' not present in store {store_name}; nothing to delete")
+    return False
+
+
 def delete_store(store_name: str):
     """
     Delete a file search store.

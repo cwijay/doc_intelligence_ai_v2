@@ -201,6 +201,9 @@ MODEL_PRICING = {
         "input": Decimal("0.00000005"),
         "output": Decimal("0.0000004"),
     },
+    # NOTE: gemini-3.8-flash (the current default answer/parse model) has no entry
+    # here - real per-token rates were unavailable at rollout, so it resolves to
+    # "default" below and its billed cost is an ESTIMATE. Add real rates when known.
     # Google Gemini Flash ($0.075/1M input, $0.30/1M output)
     "gemini-3-flash-preview": {
         "input": Decimal("0.000000075"),

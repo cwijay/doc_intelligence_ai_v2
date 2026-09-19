@@ -186,6 +186,20 @@ class DeleteStoreResponse(BaseModel):
     error: Optional[str] = None
 
 
+class DeleteIndexedDocumentResponse(BaseModel):
+    """Response for removing a single document from an organization's store."""
+    success: bool = Field(..., example=True)
+    file_name: str = Field(..., example="Sample1.md")
+    removed_from_store: bool = Field(
+        default=False,
+        description="True if the document was present in the store and deleted",
+        example=True,
+    )
+    cache_entries_invalidated: int = Field(default=0, example=3)
+    message: Optional[str] = Field(default=None, example="Document de-indexed")
+    error: Optional[str] = None
+
+
 # =============================================================================
 # Folder Models
 # =============================================================================

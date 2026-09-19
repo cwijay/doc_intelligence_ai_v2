@@ -29,6 +29,7 @@ from ..schemas.rag import (
     SearchStoreResponse,
     ListStoreFilesResponse,
     DeleteStoreResponse,
+    DeleteIndexedDocumentResponse,
     StoreInfo,
     StoreFileInfo,
     Citation,
@@ -41,6 +42,7 @@ from ..schemas.rag import (
     FolderInfo,
 )
 from src.db.repositories import rag_repository
+from src.db.repositories import semantic_cache_repository
 from .rag_helpers import (
     validate_store_ownership,
     validate_folder_ownership,
@@ -206,6 +208,72 @@ async def get_store(
 
 
 @router.delete(
+    "/documents/{file_name}",
+    response_model=DeleteIndexedDocumentResponse,
+    responses=STORE_ERROR_RESPONSES,
+    operation_id="deleteIndexedDocument",
+    summary="Remove a document from the organization's File Search index",
+)
+async def delete_indexed_document(
+    file_name: str = Path(..., description="Indexed document name, e.g. 'Sample1.md'"),
+    org_id: str = Depends(get_org_id),
+):
+    """
+    De-index a single document and drop any cached answers that quote it.
+
+    The main API only soft-deletes documents, so without this call the document
+    stays in the Gemini File Search store and RAG keeps returning it - citing a
+    file the user has already deleted.
+
+    Idempotent: removing a document that is not indexed returns success with
+    `removed_from_store=false`, so a retry or a double delete is harmless.
+
+    **Multi-tenancy**: only ever touches the calling organization's own store.
+    """
+    try:
+        from src.rag.gemini_file_store import delete_document_by_name
+
+        store_record = await rag_repository.get_store_by_org(org_id)
+        removed = False
+
+        if store_record and store_record.get("gemini_store_id"):
+            loop = asyncio.get_running_loop()
+            removed = await loop.run_in_executor(
+                get_executors().io_executor,
+                delete_document_by_name,
+                store_record["gemini_store_id"],
+                file_name,
+            )
+        else:
+            logger.info(f"No File Search store for org {org_id}; nothing to de-index")
+
+        # Always invalidate, even when the document was absent from the store: the
+        # cached answers are keyed by file name and are stale either way.
+        invalidated = await semantic_cache_repository.invalidate_document(org_id, file_name)
+
+        return DeleteIndexedDocumentResponse(
+            success=True,
+            file_name=file_name,
+            removed_from_store=removed,
+            cache_entries_invalidated=invalidated,
+            message=(
+                "Document de-indexed" if removed
+                else "Document was not indexed; cache invalidated"
+            ),
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception(f"Failed to de-index document '{file_name}': {e}")
+        return DeleteIndexedDocumentResponse(
+            success=False,
+            file_name=file_name,
+            error=str(e),
+        )
+
+
+@router.delete(
     "/stores/{store_id}",
     response_model=DeleteStoreResponse,
     responses=STORE_ERROR_RESPONSES,
@@ -236,6 +304,10 @@ async def delete_store(
 
         # Delete from PostgreSQL
         await rag_repository.delete_store(store_id, organization_id=org_id)
+
+        # Every cached answer for this org was grounded in the store just deleted,
+        # so drop them all - otherwise they keep citing documents that are gone.
+        await semantic_cache_repository.clear_cache(org_id)
 
         return DeleteStoreResponse(
             success=True,
@@ -775,6 +847,12 @@ async def delete_folder(
                 documents_delta=-documents_to_delete,
                 size_delta=-size_to_delete,
             )
+
+        # Cached answers scoped to this folder now reference deleted documents.
+        # folder_filter stores the folder NAME, which is what rag_search caches under.
+        folder_name = info.get("folder_name")
+        if folder_name:
+            await semantic_cache_repository.clear_cache(org_id, folder_filter=folder_name)
 
         logger.info(f"Deleted folder {folder_id} for org {org_id}")
 

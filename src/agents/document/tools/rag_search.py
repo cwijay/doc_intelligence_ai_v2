@@ -348,9 +348,21 @@ class RAGSearchTool(BaseTool):
             # This saves ~1.0s by running both operations concurrently
             # =============================================================
             async def get_embedding_async():
-                """Run sync embedding in executor to not block event loop."""
+                """Run sync embedding in executor to not block event loop.
+
+                The embedding only drives the semantic cache; File Search retrieval
+                does not need it. A failure here (e.g. a retired embedding model)
+                must not take down the whole query, so degrade to an uncached search
+                instead of propagating out of the gather() below.
+                """
                 loop = asyncio.get_event_loop()
-                return await loop.run_in_executor(None, get_query_embedding_sync, query)
+                try:
+                    return await loop.run_in_executor(None, get_query_embedding_sync, query)
+                except Exception as embed_error:
+                    logger.warning(
+                        f"Embedding failed, continuing without semantic cache: {embed_error}"
+                    )
+                    return None
 
             # Run store lookup and embedding generation in parallel
             cache_enabled = semantic_cache_repository.is_cache_enabled()

@@ -48,7 +48,7 @@ MIME_TYPES = {
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # Model configuration
-GEMINI_PARSE_MODEL = os.getenv("GEMINI_PARSE_MODEL", "gemini-3-flash-preview")
+GEMINI_PARSE_MODEL = os.getenv("GEMINI_PARSE_MODEL", "gemini-3.8-flash")
 GEMINI_PARSE_MODEL_HIGH = os.getenv("GEMINI_PARSE_MODEL_HIGH", "gemini-3-pro-preview")
 GEMINI_PARSE_TIMEOUT = int(os.getenv("GEMINI_PARSE_TIMEOUT_SECONDS", "120"))
 

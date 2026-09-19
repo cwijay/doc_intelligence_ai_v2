@@ -107,9 +107,14 @@ def build_gcs_uri(bucket: str, *path_parts: str) -> str:
     """
     # Filter out empty parts and join
     path = "/".join(part for part in path_parts if part)
-    if path:
-        return f"{GCS_URI_PREFIX}{bucket}/{path}"
-    return f"{GCS_URI_PREFIX}{bucket}"
+    if not path:
+        return f"{GCS_URI_PREFIX}{bucket}"
+    # Idempotent: callers sometimes pass a value that is already a full gs:// URI
+    # (e.g. documents.storage_path). Prefixing those again yields doubled paths
+    # such as gs://bucket/gs://bucket/org/original/doc.pdf.
+    if is_gcs_path(path):
+        return path
+    return f"{GCS_URI_PREFIX}{bucket}/{path}"
 
 
 def strip_gcs_prefix(gcs_uri: str) -> str:

@@ -33,6 +33,7 @@ from ..schemas.ingest import (
     SaveAndIndexRequest,
     SaveAndIndexResponse,
 )
+from src.db.repositories import semantic_cache_repository
 from src.db.repositories.audit_repository import (
     register_uploaded_document,
     update_document_status,
@@ -635,6 +636,12 @@ async def save_and_index(
 
             indexed = True
             logger.info(f"Content indexed in Gemini store: {store_info['display_name']}")
+
+            # upload_file() replaces any existing document with the same name, so
+            # cached answers now quote superseded content. Drop them; a stale hit
+            # would cite text that is no longer in the store.
+            indexed_file_name = os.path.basename(full_gcs_path)
+            await semantic_cache_repository.invalidate_document(org_id, indexed_file_name)
         else:
             logger.warning(f"Could not find Gemini store object for: {gemini_store_id}")
 
@@ -642,7 +649,9 @@ async def save_and_index(
 
         return SaveAndIndexResponse(
             success=True,
-            saved_path=f"gs://{storage_config.gcs_bucket}/{saved_path}" if saved_path else None,
+            # saved_path is already a full gs:// URI from storage.save(); re-prefixing
+            # it here produced doubled paths like gs://bucket/gs://bucket/...
+            saved_path=saved_path,
             store_id=store_info["id"] if store_info else None,
             store_name=store_info["display_name"] if store_info else None,
             indexed=indexed,

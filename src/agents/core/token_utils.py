@@ -18,6 +18,10 @@ MODEL_PRICING: Dict[str, Dict[str, float]] = {
     "gpt-4o": {"input": 2.50, "output": 10.00},
 
     # Gemini models
+    # NOTE: gemini-3.8-flash (the current default answer/parse model) is deliberately
+    # absent - real per-token rates were not available when it was rolled out, so it
+    # falls through to DEFAULT_PRICING below and its reported cost is an ESTIMATE.
+    # Add a real entry here once the published rates are confirmed.
     "gemini-3-flash-preview": {"input": 0.075, "output": 0.30},
     "gemini-2.5-flash": {"input": 0.075, "output": 0.30},
     "gemini-2.5-pro": {"input": 1.25, "output": 5.00},

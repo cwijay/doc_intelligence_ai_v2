@@ -1,7 +1,11 @@
 """
-Embedding service for semantic caching using Gemini text-embedding-004.
+Embedding service for semantic caching using Gemini embeddings.
 
 Generates query embeddings for semantic similarity matching in the RAG cache.
+
+NOTE: these embeddings feed the semantic cache only - document retrieval is
+handled by Gemini File Search and does not depend on this module. Callers should
+treat embedding failures as non-fatal and fall back to an uncached query.
 """
 
 import logging
@@ -9,6 +13,7 @@ import os
 from typing import List, Optional
 
 from google import genai
+from google.genai import types
 
 logger = logging.getLogger(__name__)
 
@@ -28,20 +33,31 @@ def get_client() -> genai.Client:
     return _client
 
 
-# Gemini text-embedding-004 configuration
-EMBEDDING_MODEL = "text-embedding-004"
-EMBEDDING_DIMENSION = 768  # Output dimension for text-embedding-004
+# Gemini embedding configuration.
+#
+# gemini-embedding-2 replaces text-embedding-004, which Google retired (the v1beta
+# endpoint now returns 404 NOT_FOUND for it).
+#
+# The dimension MUST be requested explicitly: the model defaults to a larger width,
+# while rag_query_cache.query_embedding is Vector(768) (see biz2bricks_core
+# models/rag.py). At 768 this model returns unit-norm vectors, so no renormalisation
+# is needed before the pgvector cosine comparison.
+#
+# Changing the model invalidates every stored embedding - vectors from different
+# models are not comparable - so purge rag_query_cache when you change it.
+EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "gemini-embedding-2")
+EMBEDDING_DIMENSION = int(os.getenv("EMBEDDING_DIMENSION", "768"))
 
 
 async def get_query_embedding(query: str) -> List[float]:
     """
-    Generate embedding for a query using Gemini text-embedding-004.
+    Generate embedding for a query using the configured Gemini embedding model.
 
     Args:
         query: The query text to embed
 
     Returns:
-        List of floats representing the 768-dimensional embedding vector
+        List of floats representing the EMBEDDING_DIMENSION-wide embedding vector
 
     Raises:
         Exception: If embedding generation fails
@@ -52,7 +68,10 @@ async def get_query_embedding(query: str) -> List[float]:
         # Generate embedding using Gemini
         result = client.models.embed_content(
             model=EMBEDDING_MODEL,
-            contents=query
+            contents=query,
+            config=types.EmbedContentConfig(
+                output_dimensionality=EMBEDDING_DIMENSION
+            ),
         )
 
         # Extract embedding values
@@ -75,14 +94,17 @@ def get_query_embedding_sync(query: str) -> List[float]:
         query: The query text to embed
 
     Returns:
-        List of floats representing the 768-dimensional embedding vector
+        List of floats representing the EMBEDDING_DIMENSION-wide embedding vector
     """
     try:
         client = get_client()
 
         result = client.models.embed_content(
             model=EMBEDDING_MODEL,
-            contents=query
+            contents=query,
+            config=types.EmbedContentConfig(
+                output_dimensionality=EMBEDDING_DIMENSION
+            ),
         )
 
         embedding = result.embeddings[0].values
