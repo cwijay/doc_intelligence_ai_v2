@@ -736,6 +736,7 @@ agent.shutdown(wait=True)
 - `scripts/migrate_documents_status.py`: Data migration utility
 - `scripts/clean_all_data.py`: Clean all data utility
 - `scripts/fix_cache_relevance.py`: Cache relevance fixes
+- `scripts/local_exec/`: Run locally against the `b2blocal-postgres` container the backend API repo owns, with Cloud SQL off and GCS still remote. `setup_local.sh` once, then `ai_server.sh start|stop|status|logs` (port 8001) or `start_local.sh` for the foreground. See `scripts/local_exec/README.md`.
 
 **Tests:**
 - `tests/unit/`: Unit tests for agents, API routers, and storage

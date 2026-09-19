@@ -55,6 +55,7 @@ coverage.xml
 # Environments
 .env
 .env.*
+.env_*
 .venv
 env/
 venv/
@@ -117,3 +118,6 @@ service-account*.json
 # Database
 *.db
 *.sqlite3
+
+# Local execution runtime state (pid/port/log)
+scripts/local_exec/.run/

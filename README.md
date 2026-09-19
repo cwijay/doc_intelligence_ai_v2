@@ -131,12 +131,154 @@ API docs available at `/docs` (Swagger) and `/redoc` when server is running.
 
 ## Running Modes
 
+Four supported setups:
+
+| Mode | Database | Storage | Config file | How to run |
+|------|----------|---------|-------------|------------|
+| Local dev, no DB | disabled | GCS (or local) | `.env` | `uvicorn src.main:app --reload --port 8001` |
+| **Local app → local Postgres** | `b2blocal-postgres` (Docker) | GCS (GCP) | `scripts/local_exec/.env.local` | `./scripts/local_exec/ai_server.sh start` |
+| Local app → GCP | Cloud SQL (GCP) | GCS (GCP) | `.env.local-gcp` | `./scripts/start_local_gcp.sh` |
+| Cloud Run (dev/prod) | Cloud SQL (GCP) | GCS (GCP) | Secret Manager + cloudbuild | `gcloud builds submit --config cloudbuild.yaml` |
+
+The local-Postgres mode is the cheapest way to develop: it removes the need for
+Cloud Run and Cloud SQL day to day, while documents stay in the real GCS bucket.
+
 ### Local Development (No Database)
 
 ```bash
 # Add to .env
 DATABASE_ENABLED=false
 ```
+
+### Local App → GCP Resources (hybrid)
+
+Runs the FastAPI server on your laptop but talks to the real Cloud SQL instance
+and GCS buckets in `biz2bricks-dev-v1`. Useful for debugging prod data issues
+without a full Cloud Run redeploy.
+
+**One-time setup:**
+
+```bash
+# Install + log in to gcloud
+gcloud auth login
+gcloud auth application-default login
+gcloud config set project biz2bricks-dev-v1
+```
+
+Application Default Credentials (ADC) are used by the Cloud SQL Python
+Connector, the GCS client, and the Gemini / Vertex SDKs. The launcher bails
+early if `~/.config/gcloud/application_default_credentials.json` is missing.
+
+**Env file (`.env.local-gcp`):**
+
+A pre-configured file already exists at the repo root. Key entries:
+
+```dotenv
+CLOUD_SQL_INSTANCE=biz2bricks-dev-v1:us-central1:doc-intelligence-db
+DATABASE_NAME=doc_intelligence
+DATABASE_USER=postgres
+DATABASE_PASSWORD=<dev-password>
+USE_CLOUD_SQL_CONNECTOR=true
+CLOUD_SQL_IP_TYPE=PUBLIC           # laptop only; VPC deploys use PRIVATE
+GCS_BUCKET=biz2bricks-dev-v1-document-store
+```
+
+Edit passwords / API keys in place. `.env*` is already in `.gitignore`.
+
+**Start the server:**
+
+```bash
+# First run — also apply any pending schema migrations (e.g. agent_builder tables)
+./scripts/start_local_gcp.sh --migrate
+
+# Normal start
+./scripts/start_local_gcp.sh
+
+# Inspect the remote DB without starting the server
+./scripts/start_local_gcp.sh --db-status
+
+# Override port
+PORT=8080 ./scripts/start_local_gcp.sh
+```
+
+The script:
+
+1. Verifies gcloud ADC credentials exist
+2. Sources `.env.local-gcp` and exports it
+3. Activates `.venv`
+4. Optionally runs `scripts/apply_agent_builder_schema.py` (`--migrate`)
+5. Launches `uvicorn src.main:app --reload` on port 8001
+
+API docs: http://localhost:8001/docs
+
+### Local App → Local Postgres (no GCP spend)
+
+Runs the FastAPI server and its database entirely on your laptop. Documents
+still live in the real GCS bucket, exactly as the backend API does — object
+storage is billed per use, not per hour, so there is nothing to save by
+emulating it, and local runs then see the same documents as deployed ones.
+
+**This service owns no infrastructure.** The backend API repo
+(`doc_intelligence_backend_api_v2.0`) runs `b2blocal-postgres`, which holds the
+shared `biz2bricks_core` schema. Both services read the same database, so these
+scripts join that stack rather than starting a second Postgres. That is why
+there is no compose file here.
+
+**One-time setup:**
+
+```bash
+# Brings up b2blocal-postgres via the backend repo if it is not already running,
+# asserts pgvector, reconciles the schema, seeds tiers, writes .env.local
+./scripts/local_exec/setup_local.sh
+```
+
+It generates `scripts/local_exec/.env.local` from `.env.local-gcp`, stripping
+every Cloud SQL and database setting — your API keys, model choices and GCS
+settings carry over unchanged. The file deliberately holds **no database
+password**: that is read live from the backend repo's `.env.local` on every
+start, so a password rotated there cannot leave this service failing against a
+stale copy.
+
+Set `B2B_BACKEND_REPO` if the backend repo lives outside `../`.
+
+**Run the server:**
+
+```bash
+# Background, with start/stop control
+./scripts/local_exec/ai_server.sh start
+./scripts/local_exec/ai_server.sh status     # pid, port, component health
+./scripts/local_exec/ai_server.sh logs -f
+./scripts/local_exec/ai_server.sh restart
+./scripts/local_exec/ai_server.sh stop
+
+# Foreground instead (Ctrl+C to stop)
+./scripts/local_exec/start_local.sh
+```
+
+Port 8001, because the backend API holds 8000. Override with `--port`.
+
+`ai_server.sh start` waits for `/health` before reporting success, so a server
+that dies on a bad credential surfaces the error instead of a false green.
+`stop` stops only this service — `b2blocal-postgres` is shared with the backend,
+so it is left running; use the backend's `stop_infra.sh` to stop it too.
+
+**Calling the API** — both headers are required, since `get_org_id` rejects an
+organization with no user attached:
+
+```bash
+curl http://127.0.0.1:8001/api/v1/ingest/files \
+  -H 'X-Organization-ID: <org-uuid>' \
+  -H 'X-User-Email: <user-email>'
+```
+
+`setup_local.sh` prints a working pair from your database when it finishes.
+
+Full detail: [`scripts/local_exec/README.md`](scripts/local_exec/README.md).
+
+**On cost:** this removes the *need* for Cloud Run and Cloud SQL in development,
+not the *spend*. A Cloud SQL instance bills by the hour whether or not anything
+connects to it. To actually save money, stop the instance and drop Cloud Run to
+zero min-instances — see `scripts/gcp/teardown.sh`.
 
 ### Production (Cloud SQL)
 
@@ -167,6 +309,27 @@ python scripts/db_setup.py reset
 
 # Print SQL schema without executing
 python scripts/db_setup.py sql
+```
+
+### Schema migrations (agent_builder tables)
+
+The Cloud SQL instance is shared with `agent_builder_v1`, which adds three
+tables: `agent_definitions`, `agent_versions`, `agent_runs`. The migration is
+tracked in `scripts/migrations/agent_builder_schema.sql` (idempotent `CREATE
+TABLE IF NOT EXISTS`).
+
+```bash
+# Apply via the start script (preferred)
+./scripts/start_local_gcp.sh --migrate
+
+# Apply standalone (requires .env.local-gcp or .env_dev loaded)
+python scripts/apply_agent_builder_schema.py
+
+# Print the SQL without running it
+python scripts/apply_agent_builder_schema.py --dry-run
+
+# Verify the tables exist
+python scripts/apply_agent_builder_schema.py --verify
 ```
 
 ## Testing
@@ -701,6 +864,36 @@ Key dependencies from `requirements.txt`:
 ## GCP Deployment
 
 This section covers deploying the AI API to Google Cloud Run.
+
+### TL;DR — deploy dev
+
+Assumes prerequisites (below) are done and secrets are already in Secret Manager.
+
+```bash
+# 1. Smoke-test locally against the same Cloud SQL + GCS the deploy will use
+./scripts/start_local_gcp.sh
+# hit http://localhost:8001/health, run through the endpoints you care about
+
+# 2. Apply any pending schema migrations to Cloud SQL
+./scripts/start_local_gcp.sh --migrate   # or: python scripts/apply_agent_builder_schema.py
+
+# 3. Deploy to the dev Cloud Run service
+gcloud builds submit --config cloudbuild.yaml
+
+# 4. Verify
+SERVICE_URL=$(gcloud run services describe document-intelligence-ai-api-dev \
+  --region=us-central1 --format="value(status.url)")
+curl "$SERVICE_URL/health"
+```
+
+For prod, swap the last step:
+
+```bash
+gcloud builds submit --config cloudbuild.yaml \
+  --substitutions=_ENV=prod,_SERVICE_NAME=document-intelligence-ai-api-prod,_SECRET_SUFFIX=-prod
+```
+
+Full details below.
 
 ### Prerequisites
 

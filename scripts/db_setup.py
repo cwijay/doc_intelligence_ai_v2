@@ -113,7 +113,11 @@ async def get_connection(database: str = "postgres"):
 
 
 async def close_connection(conn, connector):
-    """Close database connection and connector."""
+    """Close database connection and connector.
+
+    Use connector.close_async() to properly release the aiohttp ClientSession;
+    the sync close() leaks it and prints "Unclosed client session" warnings.
+    """
     if conn:
         try:
             await conn.close()
@@ -121,7 +125,11 @@ async def close_connection(conn, connector):
             pass
     if connector:
         try:
-            connector.close()
+            close_async = getattr(connector, "close_async", None)
+            if close_async is not None:
+                await close_async()
+            else:
+                connector.close()
         except Exception:
             pass
 

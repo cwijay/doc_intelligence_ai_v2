@@ -1,0 +1,3082 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Biz2Bricks Platform Architecture — Complete 14-Section Blueprint</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        html, body {
+            font-family: 'Google Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            color: #202124;
+            background-color: #f8f9fa;
+            line-height: 1.6;
+        }
+
+        header {
+            background: linear-gradient(135deg, #1A73E8 0%, #34A853 100%);
+            color: white;
+            padding: 3rem 2rem;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            margin-bottom: 2rem;
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            font-weight: 500;
+        }
+
+        header p {
+            font-size: 1.1rem;
+            opacity: 0.95;
+        }
+
+        .container {
+            display: flex;
+            max-width: 1400px;
+            margin: 0 auto;
+            gap: 2rem;
+            padding: 0 2rem 2rem 2rem;
+        }
+
+        nav {
+            position: sticky;
+            top: 1.5rem;
+            width: 280px;
+            min-width: 280px;
+            background: white;
+            border-radius: 10px;
+            padding: 1.75rem;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            height: fit-content;
+            max-height: 92vh;
+            overflow-y: auto;
+        }
+
+        nav h3 {
+            font-size: 0.95rem;
+            text-transform: uppercase;
+            letter-spacing: 0.6px;
+            color: #1A73E8;
+            margin-bottom: 1.25rem;
+            font-weight: 700;
+            padding-bottom: 0.75rem;
+            border-bottom: 2px solid #e8eaed;
+        }
+
+        nav ul {
+            list-style: none;
+        }
+
+        nav li {
+            margin-bottom: 0.4rem;
+        }
+
+        nav a {
+            display: block;
+            color: #3c4043;
+            text-decoration: none;
+            padding: 0.6rem 0.85rem;
+            border-radius: 6px;
+            font-size: 0.95rem;
+            font-weight: 500;
+            transition: all 0.2s;
+            border-left: 3px solid transparent;
+        }
+
+        nav a:hover {
+            background-color: #e8f0fe;
+            color: #1A73E8;
+            border-left-color: #1A73E8;
+        }
+
+        main {
+            flex: 1;
+        }
+
+        section {
+            background: white;
+            border-radius: 8px;
+            padding: 2rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+
+        section h2 {
+            font-size: 1.8rem;
+            color: #1A73E8;
+            margin-bottom: 1.5rem;
+            padding-bottom: 0.75rem;
+            border-bottom: 3px solid #34A853;
+        }
+
+        section h3 {
+            font-size: 1.3rem;
+            color: #202124;
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+        }
+
+        section h4 {
+            font-size: 1.05rem;
+            color: #3c4043;
+            margin-top: 1rem;
+            margin-bottom: 0.5rem;
+        }
+
+        p {
+            margin-bottom: 1rem;
+            color: #5f6368;
+        }
+
+        .card {
+            background: white;
+            border-left: 4px solid #1A73E8;
+            border-radius: 4px;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+        }
+
+        .card.info {
+            background: #f1f3f4;
+            border-left-color: #1A73E8;
+        }
+
+        .card.success {
+            background: #f1f5f4;
+            border-left-color: #34A853;
+        }
+
+        .card.warning {
+            background: #fef7e0;
+            border-left-color: #fbbc04;
+        }
+
+        .card-title {
+            font-weight: 600;
+            color: #202124;
+            margin-bottom: 0.5rem;
+            font-size: 1.05rem;
+        }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin: 1.5rem 0;
+        }
+
+        @media (max-width: 1000px) {
+            .grid-2 {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        pre {
+            background-color: #282c34;
+            color: #abb2bf;
+            padding: 1.25rem;
+            border-radius: 6px;
+            overflow-x: auto;
+            margin: 1rem 0;
+            font-family: 'Fira Code', 'Source Code Pro', monospace;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        code {
+            font-family: 'Fira Code', 'Source Code Pro', monospace;
+        }
+
+        .keyword { color: #c678dd; }
+        .string { color: #98c379; }
+        .comment { color: #5c6370; font-style: italic; }
+        .function { color: #61afef; }
+        .type { color: #e06c75; }
+        .decorator { color: #56b6c2; }
+        .number { color: #d19a66; }
+        .attr { color: #e06c75; }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1.5rem 0;
+            font-size: 0.95rem;
+        }
+
+        table th {
+            background-color: #1A73E8;
+            color: white;
+            padding: 0.75rem;
+            text-align: left;
+            font-weight: 600;
+        }
+
+        table td {
+            padding: 0.75rem;
+            border-bottom: 1px solid #e8eaed;
+        }
+
+        table tr:nth-child(even) {
+            background-color: #f8f9fa;
+        }
+
+        .vertical-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .vertical-list li {
+            padding: 0.75rem 0;
+            padding-left: 1.5rem;
+            position: relative;
+        }
+
+        .vertical-list li:before {
+            content: "▸";
+            position: absolute;
+            left: 0;
+            color: #34A853;
+            font-weight: bold;
+        }
+
+        .industry-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 1.5rem;
+            margin: 1.5rem 0;
+        }
+
+        .industry-card {
+            background: linear-gradient(135deg, #f8f9fa 0%, #f1f3f4 100%);
+            border: 2px solid #e8eaed;
+            border-radius: 8px;
+            padding: 1.5rem;
+            text-align: center;
+        }
+
+        .industry-card .icon {
+            font-size: 2.5rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .industry-card h4 {
+            margin-top: 0;
+            margin-bottom: 0.5rem;
+        }
+
+        .industry-card p {
+            font-size: 0.9rem;
+            margin: 0;
+        }
+
+        .mermaid {
+            display: flex;
+            justify-content: center;
+            margin: 1.5rem 0;
+            background: #f8f9fa;
+            padding: 1rem;
+            border-radius: 6px;
+        }
+
+        .sql-highlight {
+            background-color: #f8f9fa;
+            border-left: 4px solid #34A853;
+            padding: 1rem;
+            margin: 1rem 0;
+            border-radius: 4px;
+        }
+
+        .implementation-note {
+            background: #fff3cd;
+            border-left: 4px solid #fbbc04;
+            padding: 1rem;
+            margin: 1.5rem 0;
+            border-radius: 4px;
+            font-size: 0.95rem;
+        }
+
+        .implementation-note strong {
+            color: #856404;
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: #9aa0a6;
+            font-size: 0.9rem;
+            border-top: 1px solid #e8eaed;
+            margin-top: 3rem;
+        }
+
+        .section-intro {
+            background: linear-gradient(135deg, #e8f0fe 0%, #e6f4ea 100%);
+            padding: 1rem;
+            border-radius: 6px;
+            margin-bottom: 1.5rem;
+            border-left: 4px solid #1A73E8;
+        }
+
+        .architecture-highlight {
+            background: #e6f4ea;
+            padding: 0.25rem 0.5rem;
+            border-radius: 3px;
+            color: #137333;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Biz2Bricks Platform Architecture</h1>
+        <p>Document Intelligence SaaS for SMBs — Generic, Multi-Tenant, Industry-Agnostic</p>
+        <p style="font-size: 0.9rem; margin-top: 1rem;">Complete Technical Blueprint — All 14 Sections</p>
+    </header>
+
+    <div class="container">
+        <nav>
+            <h3>Navigation</h3>
+            <ul>
+                <li><a href="#section-1">§1: Vision & Architecture</a></li>
+                <li><a href="#section-2">§2: Domain Abstraction</a></li>
+                <li><a href="#section-3">§3: Industry Templates</a></li>
+                <li><a href="#section-4">§4: Agent Architecture</a></li>
+                <li><a href="#section-5">§5: Gemini RAG</a></li>
+                <li><a href="#section-6">§6: Next.js Frontend</a></li>
+                <li><a href="#section-7">§7: API Layer (BFF)</a></li>
+                <li><a href="#section-8">§8: GCP Infrastructure</a></li>
+                <li><a href="#section-9">§9: Tenant Onboarding</a></li>
+                <li><a href="#section-10">§10: Security & Pricing</a></li>
+                <li><a href="#section-11">§11: Hybrid Query Router</a></li>
+                <li><a href="#section-12">§12: Text-to-SQL Engine</a></li>
+                <li><a href="#section-13">§13: Hybrid Execution & Chat UI</a></li>
+                <li><a href="#section-14">§14: Safety & Smart Suggestions</a></li>
+            </ul>
+        </nav>
+
+        <main>
+            <!-- SECTION 1 -->
+            <section id="section-1">
+                <h2>Section 1: Platform Vision & Architecture Overview</h2>
+
+                <div class="section-intro">
+                    <strong>Core Mission:</strong> Turn every SMB's messy documents into actionable intelligence.
+                </div>
+
+                <h3>Value Proposition</h3>
+                <p>Biz2Bricks simplifies enterprise document intelligence for small-to-medium businesses across all industries. The platform automates the entire intelligence pipeline:</p>
+
+                <div class="grid-2">
+                    <div class="card info">
+                        <div class="card-title">Upload Documents</div>
+                        <p>Self-service onboarding. Tenants sign up, pick their industry template, and start uploading documents immediately.</p>
+                    </div>
+                    <div class="card info">
+                        <div class="card-title">AI Extraction</div>
+                        <p>Gemini 3 Flash processes documents (OCR, form recognition, handwriting) and extracts structured data using industry-specific schemas.</p>
+                    </div>
+                    <div class="card info">
+                        <div class="card-title">Agent Analysis</div>
+                        <p>LangChain DeepAgents apply pattern detection, trend analysis, and anomaly detection tailored to each industry's workflows.</p>
+                    </div>
+                    <div class="card info">
+                        <div class="card-title">Intelligence Dashboard</div>
+                        <p>Real-time dashboards surface KPIs, reports, and insights. Tenants can Q&A their documents via Gemini File Search RAG.</p>
+                    </div>
+                </div>
+
+                <h3>Launch Verticals (Equal Priority)</h3>
+                <div class="industry-grid">
+                    <div class="industry-card">
+                        <div class="icon">🏭</div>
+                        <h4>Food Manufacturing</h4>
+                        <p>Orders, QC records, HACCP logs, production tracking, traceability.</p>
+                    </div>
+                    <div class="industry-card">
+                        <div class="icon">👔</div>
+                        <h4>Recruitment Agencies</h4>
+                        <p>CVs, job descriptions, interview scorecards, contracts, compliance.</p>
+                    </div>
+                    <div class="industry-card">
+                        <div class="icon">🛍️</div>
+                        <h4>Retail</h4>
+                        <p>Purchase orders, invoices, receipts, inventory, supplier performance.</p>
+                    </div>
+                    <div class="industry-card">
+                        <div class="icon">🏠</div>
+                        <h4>Real Estate</h4>
+                        <p>Listings, contracts, appraisals, inspections, leases, market analysis.</p>
+                    </div>
+                </div>
+
+                <h3>High-Level System Architecture</h3>
+                <p>The platform is built on <span class="architecture-highlight">GCP</span> with industry-agnostic core services that adapt via configuration:</p>
+
+                <div class="mermaid">
+graph TB
+    subgraph Frontend
+        NextJS[Next.js 15 SPA]
+    end
+
+    subgraph API_Orchestration[API and Orchestration]
+        APIGw[API Gateway - Cloud Run]
+        Orch[Agent Orchestrator - DeepAgents]
+    end
+
+    subgraph Doc_Processing[Document Processing]
+        Ingestion[Document Ingestion Pipeline]
+        Gemini3F[Gemini 3 Flash - OCR and Extraction]
+    end
+
+    subgraph Industry_Agents[Industry Agents]
+        IA[Industry-Specific Agent Pipelines]
+    end
+
+    subgraph Data_Knowledge[Data and Knowledge]
+        GCS[GCS - Document Storage]
+        SQL[Cloud SQL - Structured Data]
+        FSS[Gemini File Search - Knowledge Stores]
+    end
+
+    subgraph Analytics
+        AnalyticsEng[Analytics Engine]
+        Dashboard[Dashboards and Reports]
+    end
+
+    NextJS --> APIGw
+    APIGw --> Orch
+    APIGw --> Ingestion
+    Ingestion --> Gemini3F
+    Gemini3F --> SQL
+    Gemini3F --> GCS
+    Orch --> IA
+    SQL --> FSS
+    SQL --> AnalyticsEng
+    AnalyticsEng --> Dashboard
+    FSS --> IA
+                </div>
+
+                <h3>Architectural Principles</h3>
+                <ul class="vertical-list">
+                    <li><strong>Industry-Agnostic Core:</strong> The extraction, analysis, and reporting engines are generic. Industry-specific behavior is driven by configuration (document type schemas, workflows, dashboards) loaded from templates.</li>
+                    <li><strong>Template-Driven Configuration:</strong> Each industry has a pre-built template bundle (document types, extraction prompts, workflows, dashboard widgets). Tenants inherit these on signup and can customize via custom fields.</li>
+                    <li><strong>Schema-Extensible Design:</strong> Tenants can add custom fields to any document type without rebuilding the core system. The extraction pipeline merges base schema with custom fields at runtime.</li>
+                    <li><strong>Self-Service by Default:</strong> No manual onboarding. Tenants sign up, pick their industry, and start uploading. The system guides them with sample documents and pre-loaded workflows.</li>
+                    <li><strong>Multi-Tenant Isolation:</strong> Row-level security (RLS) in Cloud SQL, per-tenant GCS buckets, per-tenant Gemini File Search Stores. Complete data isolation.</li>
+                    <li><strong>AI-First Document Intelligence:</strong> Gemini 3 Flash is the workhorse for OCR, extraction, and initial analysis. File Search Store enables RAG for domain-specific Q&A. LangChain DeepAgents orchestrate multi-step workflows.</li>
+                </ul>
+
+                <h3>Technology Stack Summary</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Layer</th>
+                            <th>Technology</th>
+                            <th>Purpose</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Frontend</td>
+                            <td>Next.js 15</td>
+                            <td>Self-service SPA, real-time dashboards, Q&A interface</td>
+                        </tr>
+                        <tr>
+                            <td>API & Orchestration</td>
+                            <td>Cloud Run, LangChain DeepAgents</td>
+                            <td>Stateless microservices, agent routing, workflow orchestration</td>
+                        </tr>
+                        <tr>
+                            <td>Document AI</td>
+                            <td>Gemini 3 Flash</td>
+                            <td>OCR, form recognition, structured extraction with JSON schema validation</td>
+                        </tr>
+                        <tr>
+                            <td>Data Store</td>
+                            <td>Cloud SQL (PostgreSQL)</td>
+                            <td>Structured extracted data, audit logs, RLS for multi-tenancy</td>
+                        </tr>
+                        <tr>
+                            <td>File Storage</td>
+                            <td>Google Cloud Storage</td>
+                            <td>Per-tenant buckets for raw documents, processed PDFs, exports</td>
+                        </tr>
+                        <tr>
+                            <td>Knowledge Base</td>
+                            <td>Gemini File Search Store</td>
+                            <td>Per-tenant RAG, semantic search, Q&A on tenant's documents</td>
+                        </tr>
+                    </tbody>
+                </table>
+            </section>
+
+            <!-- SECTION 2 -->
+            <section id="section-2">
+                <h2>Section 2: Domain Abstraction Model</h2>
+
+                <div class="section-intro">
+                    <strong>Why This Section Matters:</strong> This is the core innovation that makes Biz2Bricks truly generic. Instead of building separate code paths for Food, Recruitment, Retail, and Real Estate, we define a configuration-driven abstraction layer. All industries use the same extraction and analysis code; only the schemas and prompts differ.
+                </div>
+
+                <h3>Document Type Registry</h3>
+                <p>Every document type (invoice, CV, PO, listing, etc.) is a <span class="architecture-highlight">configuration object</span>, not hard-coded logic. This allows the system to scale to infinite document types without code changes.</p>
+
+                <pre><span class="comment"># Core document type definition — works for ALL industries</span>
+<span class="keyword">@dataclass</span>
+<span class="keyword">class</span> <span class="type">DocumentTypeDefinition</span>:
+    type_id: <span class="type">str</span>                    <span class="comment"># e.g., "invoice", "cv", "listing", "po"</span>
+    display_name: <span class="type">str</span>               <span class="comment"># e.g., "Invoice", "CV/Resume", "Job Listing"</span>
+    industry_id: <span class="type">str</span>                <span class="comment"># e.g., "food", "recruitment", "retail", "real_estate"</span>
+    base_schema: <span class="type">dict</span>               <span class="comment"># JSON Schema for core extractable fields</span>
+    custom_fields: <span class="type">list</span>[<span class="type">CustomField</span>] <span class="comment"># Tenant-added fields</span>
+    extraction_prompt: <span class="type">str</span>          <span class="comment"># Gemini prompt template for this doc type</span>
+    validation_rules: <span class="type">list</span>[<span class="type">Rule</span>]    <span class="comment"># Business rules (e.g., total = sum of items)</span>
+    icon: <span class="type">str</span>                       <span class="comment"># UI icon identifier</span>
+    tags: <span class="type">list</span>[<span class="type">str</span>]                 <span class="comment"># Searchable tags, e.g., ["compliance", "qa"]</span></pre>
+
+                <h3>Extraction Schema System</h3>
+                <p>The extraction schema is a JSON Schema that defines the structure Gemini will produce. The same extraction engine works for all document types — only the schema changes.</p>
+
+                <h4>Example: Universal Invoice Schema</h4>
+                <p>This schema works across Food (for ingredient orders), Retail (for supplier invoices), and any other industry:</p>
+
+                <pre><span class="comment"># Generic invoice schema — used by food, retail, etc.</span>
+<span class="type">INVOICE_SCHEMA</span> = {
+    <span class="string">"type"</span>: <span class="string">"object"</span>,
+    <span class="string">"properties"</span>: {
+        <span class="string">"vendor_name"</span>: {<span class="string">"type"</span>: <span class="string">"string"</span>},
+        <span class="string">"invoice_number"</span>: {<span class="string">"type"</span>: <span class="string">"string"</span>},
+        <span class="string">"invoice_date"</span>: {<span class="string">"type"</span>: <span class="string">"string"</span>, <span class="string">"format"</span>: <span class="string">"date"</span>},
+        <span class="string">"due_date"</span>: {<span class="string">"type"</span>: <span class="string">"string"</span>, <span class="string">"format"</span>: <span class="string">"date"</span>},
+        <span class="string">"line_items"</span>: {
+            <span class="string">"type"</span>: <span class="string">"array"</span>,
+            <span class="string">"items"</span>: {
+                <span class="string">"type"</span>: <span class="string">"object"</span>,
+                <span class="string">"properties"</span>: {
+                    <span class="string">"description"</span>: {<span class="string">"type"</span>: <span class="string">"string"</span>},
+                    <span class="string">"quantity"</span>: {<span class="string">"type"</span>: <span class="string">"number"</span>},
+                    <span class="string">"unit_price"</span>: {<span class="string">"type"</span>: <span class="string">"number"</span>},
+                    <span class="string">"total"</span>: {<span class="string">"type"</span>: <span class="string">"number"</span>}
+                },
+                <span class="string">"required"</span>: [<span class="string">"description"</span>, <span class="string">"quantity"</span>]
+            }
+        },
+        <span class="string">"subtotal"</span>: {<span class="string">"type"</span>: <span class="string">"number"</span>},
+        <span class="string">"tax"</span>: {<span class="string">"type"</span>: <span class="string">"number"</span>},
+        <span class="string">"total"</span>: {<span class="string">"type"</span>: <span class="string">"number"</span>}
+    },
+    <span class="string">"required"</span>: [<span class="string">"vendor_name"</span>, <span class="string">"invoice_number"</span>, <span class="string">"total"</span>]
+}</pre>
+
+                <h3>Custom Field Extension</h3>
+                <p>Tenants can add fields without touching the core schema. A retail business might add "supplier_code", a food manufacturer might add "lot_number":</p>
+
+                <pre><span class="keyword">class</span> <span class="type">CustomField</span>:
+    field_name: <span class="type">str</span>        <span class="comment"># e.g., "lot_number", "visa_status", "supplier_code"</span>
+    field_type: <span class="type">str</span>        <span class="comment"># "string", "number", "date", "enum", "boolean"</span>
+    enum_values: <span class="type">list</span>[<span class="type">str</span>] <span class="comment"># For enum types: ["approved", "rejected", "pending"]</span>
+    required: <span class="type">bool</span>
+    extraction_hint: <span class="type">str</span>   <span class="comment"># Helps Gemini, e.g., "Look for batch number in top-left"</span></pre>
+
+                <h3>PostgreSQL Schema for Document Type Registry</h3>
+                <p>This schema enables the entire configuration-driven abstraction:</p>
+
+                <div class="sql-highlight">
+                    <pre><span class="keyword">CREATE TABLE</span> document_types (
+    id <span class="type">UUID</span> <span class="keyword">PRIMARY KEY</span> <span class="keyword">DEFAULT</span> gen_random_uuid(),
+    tenant_id <span class="type">UUID</span> <span class="keyword">NOT NULL REFERENCES</span> tenants(id),
+    industry_id <span class="type">TEXT NOT NULL</span>,
+    type_key <span class="type">TEXT NOT NULL</span>,          <span class="comment">-- 'invoice', 'cv', 'listing', 'po', etc.</span>
+    display_name <span class="type">TEXT NOT NULL</span>,
+    base_schema <span class="type">JSONB NOT NULL</span>,      <span class="comment">-- Full JSON Schema</span>
+    extraction_prompt <span class="type">TEXT NOT NULL</span>,
+    validation_rules <span class="type">JSONB</span> <span class="keyword">DEFAULT</span> <span class="string">'[]'</span>,
+    icon <span class="type">TEXT</span> <span class="keyword">DEFAULT</span> <span class="string">'file'</span>,
+    is_system <span class="type">BOOLEAN</span> <span class="keyword">DEFAULT</span> <span class="keyword">false</span>, <span class="comment">-- true = from template, false = tenant-created</span>
+    created_at <span class="type">TIMESTAMPTZ</span> <span class="keyword">DEFAULT</span> <span class="keyword">now</span>(),
+    <span class="keyword">UNIQUE</span>(tenant_id, type_key)
+);
+
+<span class="keyword">CREATE TABLE</span> custom_fields (
+    id <span class="type">UUID</span> <span class="keyword">PRIMARY KEY</span> <span class="keyword">DEFAULT</span> gen_random_uuid(),
+    document_type_id <span class="type">UUID NOT NULL REFERENCES</span> document_types(id) <span class="keyword">ON DELETE CASCADE</span>,
+    field_name <span class="type">TEXT NOT NULL</span>,
+    field_type <span class="type">TEXT NOT NULL</span> <span class="keyword">CHECK</span> (field_type <span class="keyword">IN</span> (<span class="string">'string'</span>, <span class="string">'number'</span>, <span class="string">'date'</span>, <span class="string">'enum'</span>, <span class="string">'boolean'</span>)),
+    enum_values <span class="type">JSONB</span>,
+    required <span class="type">BOOLEAN</span> <span class="keyword">DEFAULT</span> <span class="keyword">false</span>,
+    extraction_hint <span class="type">TEXT</span>,
+    sort_order <span class="type">INT</span> <span class="keyword">DEFAULT</span> 0,
+    <span class="keyword">UNIQUE</span>(document_type_id, field_name)
+);</pre>
+                </div>
+
+                <h3>Entity Relationship Diagram</h3>
+                <p>The data model shows how tenants, document types, and custom fields are interconnected:</p>
+
+                <div class="mermaid">
+                    erDiagram
+                    TENANTS ||--o{ DOCUMENT_TYPES : owns
+                    DOCUMENT_TYPES ||--o{ CUSTOM_FIELDS : extends
+                    DOCUMENT_TYPES ||--o{ DOCUMENTS : defines
+                    DOCUMENTS ||--o{ EXTRACTED_DATA : produces
+                    TENANTS ||--o{ GCS_BUCKETS : owns
+                    TENANTS ||--o{ FILE_SEARCH_STORES : owns
+
+                    TENANTS {
+                        uuid id
+                        string company_name
+                        string industry_id
+                        jsonb settings
+                    }
+
+                    DOCUMENT_TYPES {
+                        uuid id
+                        uuid tenant_id
+                        string type_key
+                        string display_name
+                        jsonb base_schema
+                        string extraction_prompt
+                        boolean is_system
+                    }
+
+                    CUSTOM_FIELDS {
+                        uuid id
+                        uuid document_type_id
+                        string field_name
+                        string field_type
+                        string extraction_hint
+                    }
+
+                    DOCUMENTS {
+                        uuid id
+                        uuid document_type_id
+                        string gcs_path
+                        timestamp created_at
+                    }
+
+                    EXTRACTED_DATA {
+                        uuid id
+                        uuid document_id
+                        jsonb data
+                        jsonb validation_errors
+                    }
+                </div>
+
+                <h3>Industry-Specific Schemas: Side-by-Side</h3>
+                <p>The same core extraction logic handles all of these. Only the schema and prompt differ:</p>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Industry</th>
+                            <th>Document Type</th>
+                            <th>Core Fields</th>
+                            <th>Custom Fields Example</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Food Manufacturing</strong></td>
+                            <td>Handwritten Order</td>
+                            <td>customer, items, qty, date</td>
+                            <td>lot_number, expiry_date, allergens</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Recruitment</strong></td>
+                            <td>CV/Resume</td>
+                            <td>name, email, phone, education, experience</td>
+                            <td>visa_status, availability_date, salary_expectation</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Retail</strong></td>
+                            <td>Purchase Order</td>
+                            <td>supplier, items, qty, unit_price, total</td>
+                            <td>supplier_code, incoterms, payment_terms, warehouse_location</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Real Estate</strong></td>
+                            <td>Property Listing</td>
+                            <td>address, price, bedrooms, bathrooms, sqft</td>
+                            <td>hoa_fee, property_type, year_built, school_district</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div class="implementation-note">
+                    <strong>Implementation Note:</strong> At runtime, when extracting a document, the system queries <code>document_types</code> and <code>custom_fields</code> tables for the tenant, merges the base_schema with custom field definitions, and passes the combined schema to Gemini. This enables zero-downtime addition of custom fields — no code deploy required.
+                </div>
+            </section>
+
+            <!-- SECTION 3 -->
+            <section id="section-3">
+                <h2>Section 3: Industry Template System</h2>
+
+                <div class="section-intro">
+                    <strong>Purpose:</strong> Templates are pre-configured bundles that activate when a tenant selects their industry at signup. A template includes all document types, extraction prompts, workflows, dashboards, and sample data for that industry. This enables instant self-service onboarding.
+                </div>
+
+                <h3>Template Registry Structure</h3>
+                <p>Each template is a self-contained configuration object that defines everything needed for an industry:</p>
+
+                <pre><span class="keyword">@dataclass</span>
+<span class="keyword">class</span> <span class="type">IndustryTemplate</span>:
+    industry_id: <span class="type">str</span>          <span class="comment"># "food_manufacturing", "recruitment", "retail", "real_estate"</span>
+    display_name: <span class="type">str</span>
+    description: <span class="type">str</span>
+    document_types: <span class="type">list</span>[<span class="type">DocumentTypeDefinition</span>]
+    workflow_definitions: <span class="type">list</span>[<span class="type">WorkflowDefinition</span>]
+    dashboard_widgets: <span class="type">list</span>[<span class="type">WidgetDefinition</span>]
+    report_templates: <span class="type">list</span>[<span class="type">ReportTemplate</span>]
+    sample_documents: <span class="type">list</span>[<span class="type">str</span>]  <span class="comment"># GCS paths for onboarding demo</span></pre>
+
+                <h3>Food Manufacturing Template</h3>
+                <div class="card success">
+                    <div class="card-title">Key Focus</div>
+                    <p>Order fulfillment, quality assurance, food safety compliance (HACCP), lot traceability, production efficiency.</p>
+                </div>
+
+                <h4>Document Types</h4>
+                <ul class="vertical-list">
+                    <li><strong>Handwritten Orders:</strong> Customer orders received on paper, often with special instructions.</li>
+                    <li><strong>QC Records:</strong> Quality control test results, pass/fail, inspector notes.</li>
+                    <li><strong>HACCP Logs:</strong> Hazard Analysis & Critical Control Point documentation (regulatory).</li>
+                    <li><strong>Production Work Orders:</strong> Internal production schedules and assignments.</li>
+                    <li><strong>Invoices:</strong> Billing documents (generic schema with food-specific custom fields).</li>
+                    <li><strong>Certificates of Analysis:</strong> Lab test results for ingredients or final products.</li>
+                </ul>
+
+                <h4>Key Workflows</h4>
+                <ul class="vertical-list">
+                    <li><strong>Order-to-Production:</strong> Upload handwritten order → Extract customer/items → Validate → Create production work order → Track fulfillment.</li>
+                    <li><strong>QC Compliance Check:</strong> Ingest QC records → Extract results → Cross-check against HACCP requirements → Flag non-conformances.</li>
+                    <li><strong>Lot Traceability:</strong> Extract lot numbers from QC, invoices, CoA → Build traceability graph → Support recall investigations.</li>
+                </ul>
+
+                <h4>Dashboard Widgets</h4>
+                <ul class="vertical-list">
+                    <li>Daily production volume (items processed)</li>
+                    <li>QC pass rates by product line</li>
+                    <li>Order fulfillment time (days from order to shipment)</li>
+                    <li>HACCP compliance status (red/yellow/green)</li>
+                    <li>Lot traceability audit trail</li>
+                </ul>
+
+                <h3>Recruitment Template</h3>
+                <div class="card success">
+                    <div class="card-title">Key Focus</div>
+                    <p>Candidate pipeline, job matching, compliance (visa sponsorship), placement rates, time-to-hire metrics.</p>
+                </div>
+
+                <h4>Document Types</h4>
+                <ul class="vertical-list">
+                    <li><strong>CVs/Resumes:</strong> Candidate profiles with skills, experience, education.</li>
+                    <li><strong>Job Descriptions:</strong> Open role requirements and qualifications.</li>
+                    <li><strong>Interview Scorecards:</strong> Interviewer feedback, ratings, pass/fail decisions.</li>
+                    <li><strong>Offer Letters:</strong> Final offer details, salary, benefits, start date.</li>
+                    <li><strong>Client Contracts:</strong> Agreements with hiring companies (placement fee, exclusivity, SLA).</li>
+                </ul>
+
+                <h4>Key Workflows</h4>
+                <ul class="vertical-list">
+                    <li><strong>CV-to-Job Matching:</strong> Upload CV → Extract skills/experience → Compare against open JDs → Rank candidates → Surface top matches.</li>
+                    <li><strong>Pipeline Analytics:</strong> Track candidates through stages (screening, interview, offer) → Identify bottlenecks → Calculate time-to-hire.</li>
+                    <li><strong>Compliance Tracking:</strong> Extract visa requirements from CVs and JDs → Flag mismatches → Generate compliance reports.</li>
+                </ul>
+
+                <h4>Dashboard Widgets</h4>
+                <ul class="vertical-list">
+                    <li>Active candidates in pipeline (by stage)</li>
+                    <li>Open roles and urgency</li>
+                    <li>Time-to-hire (average days)</li>
+                    <li>Placement rate (offers accepted / offers made)</li>
+                    <li>Skill demand heat map</li>
+                </ul>
+
+                <h3>Retail Template</h3>
+                <div class="card success">
+                    <div class="card-title">Key Focus</div>
+                    <p>Inventory management, supplier relationships, procurement efficiency, margin analysis, payment terms compliance.</p>
+                </div>
+
+                <h4>Document Types</h4>
+                <ul class="vertical-list">
+                    <li><strong>Purchase Orders:</strong> Orders placed with suppliers for inventory.</li>
+                    <li><strong>Sales Receipts:</strong> Point-of-sale transactions, customer purchases.</li>
+                    <li><strong>Inventory Records:</strong> Stock levels, warehouse transfers, cycle counts.</li>
+                    <li><strong>Supplier Invoices:</strong> Bills from vendors (with payment terms, discounts).</li>
+                    <li><strong>Returns/Credits:</strong> Defective goods returned, credit memos issued.</li>
+                </ul>
+
+                <h4>Key Workflows</h4>
+                <ul class="vertical-list">
+                    <li><strong>Inventory Reconciliation:</strong> Compare POs, receipts, inventory records → Flag discrepancies → Identify shrinkage.</li>
+                    <li><strong>Margin Analysis:</strong> Link supplier invoice cost to sales price → Calculate actual margin by category → Identify low-margin items.</li>
+                    <li><strong>Supplier Performance:</strong> Track PO lead time, quality issues (returns), payment terms compliance → Scorecard.</li>
+                </ul>
+
+                <h4>Dashboard Widgets</h4>
+                <ul class="vertical-list">
+                    <li>Sales trends (week-over-week, category breakdown)</li>
+                    <li>Inventory levels by category and location</li>
+                    <li>Margin by product category</li>
+                    <li>Supplier scorecard (timeliness, quality, cost)</li>
+                    <li>Days inventory outstanding (DIO)</li>
+                </ul>
+
+                <h3>Real Estate Template</h3>
+                <div class="card success">
+                    <div class="card-title">Key Focus</div>
+                    <p>Listing pipeline, transaction management, market analysis, compliance documentation, deal analytics.</p>
+                </div>
+
+                <h4>Document Types</h4>
+                <ul class="vertical-list">
+                    <li><strong>Property Listings:</strong> MLS listings, property details, photos, descriptions.</li>
+                    <li><strong>Purchase Contracts:</strong> Offers and executed contracts, terms and contingencies.</li>
+                    <li><strong>Inspection Reports:</strong> Home inspections, defects, repair estimates.</li>
+                    <li><strong>Appraisals:</strong> Professional property valuations.</li>
+                    <li><strong>Lease Agreements:</strong> Rental contracts (for investment properties).</li>
+                </ul>
+
+                <h4>Key Workflows</h4>
+                <ul class="vertical-list">
+                    <li><strong>Listing-to-Close Pipeline:</strong> Create listing → Track showings → Process offers → Execute contract → Monitor inspection/appraisal → Close. Extract each milestone.</li>
+                    <li><strong>Market Analysis:</strong> Extract listing data (address, price, sqft, bedrooms) → Analyze price per sqft trends → Identify hot neighborhoods.</li>
+                    <li><strong>Compliance Documentation:</strong> Extract seller disclosures, inspection findings → Ensure all compliance items are addressed before close.</li>
+                </ul>
+
+                <h4>Dashboard Widgets</h4>
+                <ul class="vertical-list">
+                    <li>Active listings (by status, price range)</li>
+                    <li>Days on market by neighborhood</li>
+                    <li>Average sale price per sqft (market trends)</li>
+                    <li>Pipeline value (contracts in progress)</li>
+                    <li>Close rate and average close timeline</li>
+                </ul>
+
+                <h3>Template Comparison Table</h3>
+                <p>Quick reference showing how templates differ by industry:</p>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Industry</th>
+                            <th>Primary Focus</th>
+                            <th># Document Types</th>
+                            <th>Key Workflow 1</th>
+                            <th>Key Metric 1</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Food Mfg</strong></td>
+                            <td>Compliance, Traceability</td>
+                            <td>6</td>
+                            <td>Order-to-Production</td>
+                            <td>QC Pass Rate</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Recruitment</strong></td>
+                            <td>Talent Pipeline, Matching</td>
+                            <td>5</td>
+                            <td>CV-to-Job Matching</td>
+                            <td>Time-to-Hire</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Retail</strong></td>
+                            <td>Inventory, Margins</td>
+                            <td>5</td>
+                            <td>Inventory Reconciliation</td>
+                            <td>Margin by Category</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Real Estate</strong></td>
+                            <td>Pipeline, Market Analysis</td>
+                            <td>5</td>
+                            <td>Listing-to-Close</td>
+                            <td>Days on Market</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div class="implementation-note">
+                    <strong>Self-Service Onboarding Flow:</strong> (1) Tenant signs up, (2) selects industry, (3) template is loaded and applied to their tenant context, (4) document types and extraction prompts are inserted into their tenant's document_types table, (5) sample documents are shown for training, (6) tenant uploads their first real document and the system works end-to-end.
+                </div>
+            </section>
+
+            <!-- SECTION 4 -->
+            <section id="section-4">
+                <h2>Section 4: Generic Agent Architecture (DeepAgents)</h2>
+
+                <div class="section-intro">
+                    <strong>Core Principle:</strong> The agent system is industry-agnostic at its core. Every agent is generic. Industry-specific behavior comes from configuration (schemas, prompts, workflows) loaded at runtime. This is how we avoid code duplication across verticals.
+                </div>
+
+                <h3>Agent Types</h3>
+                <p>Five specialist agents work together to deliver end-to-end document intelligence:</p>
+
+                <div class="grid-2">
+                    <div class="card info">
+                        <div class="card-title">1. Document Ingestion Agent</div>
+                        <p>Handles upload, file type detection, OCR via Gemini 3 Flash, structured extraction using document type schema, validation against business rules, and storage.</p>
+                    </div>
+                    <div class="card info">
+                        <div class="card-title">2. Analysis Agent</div>
+                        <p>Performs pattern detection, trend analysis, anomaly detection, and insight generation. Works with configurable workflows specific to the document type.</p>
+                    </div>
+                    <div class="card info">
+                        <div class="card-title">3. Report Generation Agent</div>
+                        <p>Creates formatted analysis reports, exports to PDF/XLSX, applies branding, and schedules recurring reports based on report templates.</p>
+                    </div>
+                    <div class="card info">
+                        <div class="card-title">4. Knowledge Agent</div>
+                        <p>RAG-powered Q&A using Gemini File Search Store. Tenants ask questions about their documents; agent searches tenant's knowledge base and synthesizes answers.</p>
+                    </div>
+                </div>
+
+                <h3>Configurable Agent Factory</h3>
+                <p>Instead of hardcoding agent behavior, we use a factory that assembles agents based on tenant's industry template and custom configuration. This enables multi-tenancy and extensibility:</p>
+
+                <pre><span class="keyword">from</span> langchain_deepagents <span class="keyword">import</span> create_deep_agent, SubAgentMiddleware
+
+<span class="keyword">def</span> <span class="function">create_tenant_orchestrator</span>(tenant_id: <span class="type">str</span>, industry_id: <span class="type">str</span>):
+    <span class="string">"""Factory that builds a tenant-specific orchestrator based on their industry template."""</span>
+    template = <span class="function">load_industry_template</span>(industry_id)
+    custom_fields = <span class="function">load_custom_fields</span>(tenant_id)
+
+    <span class="comment"># Build extraction tools dynamically from document type schemas</span>
+    extraction_tools = []
+    <span class="keyword">for</span> doc_type <span class="keyword">in</span> template.document_types:
+        schema = <span class="function">merge_schema</span>(
+            doc_type.base_schema,
+            custom_fields.<span class="function">get</span>(doc_type.type_key, [])
+        )
+        extraction_tools.<span class="function">append</span>(
+            <span class="function">build_extraction_tool</span>(
+                doc_type=doc_type,
+                schema=schema,
+                prompt_template=doc_type.extraction_prompt,
+            )
+        )
+
+    <span class="comment"># Build analysis tools from workflow definitions</span>
+    analysis_tools = [
+        <span class="function">build_analysis_tool</span>(workflow)
+        <span class="keyword">for</span> workflow <span class="keyword">in</span> template.workflow_definitions
+    ]
+
+    <span class="comment"># Generic agents that work across all industries</span>
+    ingestion_agent = <span class="function">create_deep_agent</span>(
+        model=<span class="string">"gemini-3-flash"</span>,
+        name=<span class="string">f"ingestion_{tenant_id}"</span>,
+        tools=extraction_tools + [store_document, classify_document],
+        instructions=INGESTION_SYSTEM_PROMPT.<span class="function">format</span>(industry=industry_id),
+    )
+
+    analysis_agent = <span class="function">create_deep_agent</span>(
+        model=<span class="string">"gemini-3-flash"</span>,
+        name=<span class="string">f"analysis_{tenant_id}"</span>,
+        tools=analysis_tools + [query_documents, generate_chart],
+        instructions=ANALYSIS_SYSTEM_PROMPT.<span class="function">format</span>(industry=industry_id),
+    )
+
+    knowledge_agent = <span class="function">create_deep_agent</span>(
+        model=<span class="string">"gemini-3-flash"</span>,
+        name=<span class="string">f"knowledge_{tenant_id}"</span>,
+        tools=[rag_query, semantic_search],
+        instructions=KNOWLEDGE_SYSTEM_PROMPT,
+    )
+
+    report_agent = <span class="function">create_deep_agent</span>(
+        model=<span class="string">"gemini-3-flash"</span>,
+        name=<span class="string">f"report_{tenant_id}"</span>,
+        tools=[build_report, export_pdf, export_xlsx],
+        instructions=REPORT_SYSTEM_PROMPT,
+    )
+
+    <span class="comment"># Orchestrator delegates to specialist agents</span>
+    orchestrator = <span class="function">create_deep_agent</span>(
+        model=<span class="string">"gemini-3-flash"</span>,
+        name=<span class="string">f"orchestrator_{tenant_id}"</span>,
+        tools=[],  <span class="comment"># Uses SubAgentMiddleware for delegation</span>
+        middleware=[
+            SubAgentMiddleware(agents={
+                <span class="string">"ingestion"</span>: ingestion_agent,
+                <span class="string">"analysis"</span>: analysis_agent,
+                <span class="string">"knowledge"</span>: knowledge_agent,
+                <span class="string">"report"</span>: report_agent,
+            }),
+            TenantContextMiddleware(tenant_id=tenant_id),
+        ],
+        instructions=ORCHESTRATOR_PROMPT.<span class="function">format</span>(
+            industry=template.display_name,
+            doc_types=<span class="string">", "</span>.<span class="function">join</span>(dt.display_name <span class="keyword">for</span> dt <span class="keyword">in</span> template.document_types),
+        ),
+    )
+
+    <span class="keyword">return</span> orchestrator</pre>
+
+                <h3>Generic Extraction Tool</h3>
+                <p>This tool works for ANY document type. It takes the document type's schema and extraction prompt, calls Gemini 3 Flash with JSON schema validation, and returns structured data:</p>
+
+                <pre><span class="keyword">from</span> google <span class="keyword">import</span> genai
+<span class="keyword">from</span> google.genai <span class="keyword">import</span> types
+
+<span class="keyword">def</span> <span class="function">build_extraction_tool</span>(
+    doc_type: <span class="type">DocumentTypeDefinition</span>,
+    schema: <span class="type">dict</span>,
+    prompt_template: <span class="type">str</span>
+):
+    <span class="string">"""Build a Gemini-powered extraction tool for any document type."""</span>
+
+    client = genai.<span class="type">Client</span>(vertexai=<span class="keyword">True</span>, project=<span class="string">"biz2bricks-prod"</span>, location=<span class="string">"us-central1"</span>)
+
+    <span class="keyword">async def</span> <span class="function">extract</span>(file_bytes: <span class="type">bytes</span>, mime_type: <span class="type">str</span>) -> <span class="type">dict</span>:
+        prompt = prompt_template.<span class="function">format</span>(
+            doc_type=doc_type.display_name,
+            field_descriptions=<span class="function">schema_to_field_descriptions</span>(schema),
+        )
+
+        response = <span class="keyword">await</span> client.aio.models.<span class="function">generate_content</span>(
+            model=<span class="string">"gemini-3-flash"</span>,
+            contents=[
+                types.<span class="type">Part</span>.<span class="function">from_bytes</span>(data=file_bytes, mime_type=mime_type),
+                types.<span class="type">Part</span>.<span class="function">from_text</span>(text=prompt),
+            ],
+            config=types.<span class="type">GenerateContentConfig</span>(
+                response_mime_type=<span class="string">"application/json"</span>,
+                response_json_schema=schema,
+                thinking_config=types.<span class="type">ThinkingConfig</span>(thinking_level=<span class="string">"medium"</span>),
+            ),
+        )
+
+        extracted = json.<span class="function">loads</span>(response.text)
+
+        <span class="comment"># Run validation rules</span>
+        errors = <span class="function">validate_extraction</span>(extracted, doc_type.validation_rules)
+
+        <span class="keyword">return</span> {
+            <span class="string">"data"</span>: extracted,
+            <span class="string">"errors"</span>: errors,
+            <span class="string">"confidence"</span>: response.usage_metadata
+        }
+
+    extract.<span class="attr">__name__</span> = <span class="string">f"extract_{doc_type.type_key}"</span>
+    extract.<span class="attr">__doc__</span> = <span class="string">f"Extract structured data from {doc_type.display_name} documents"</span>
+    <span class="keyword">return</span> extract</pre>
+
+                <h3>Agent Workflow Diagram</h3>
+                <p>How documents flow through the agent system from upload to intelligence:</p>
+
+                <div class="mermaid">
+graph LR
+    Upload[Document Upload]
+    Classify[Classifier - Detect Type]
+    Ingest[Ingestion Agent - OCR + Extract]
+    Store[Store - Cloud SQL + GCS]
+    RAG[Index - File Search Store]
+    Analysis[Analysis Agent - Patterns + Insights]
+    Report[Report Agent - PDF/XLSX]
+    Knowledge[Knowledge Agent - QA via RAG]
+    Dash[Dashboard - Visualizations]
+
+    Upload --> Classify
+    Classify --> Ingest
+    Ingest --> Store
+    Store --> RAG
+    Ingest --> Analysis
+    Analysis --> Report
+    Analysis --> Dash
+    RAG --> Knowledge
+    Knowledge --> Dash
+
+    style Upload fill:#e8f0fe
+    style Dash fill:#e6f4ea
+                </div>
+
+                <h3>System Prompts (Industry-Agnostic)</h3>
+                <p>These prompts are generic and apply to all industries. They're customized at runtime with industry and document type context:</p>
+
+                <pre><span class="type">INGESTION_SYSTEM_PROMPT</span> = <span class="string">"""You are a document ingestion specialist for {industry} businesses.
+
+Your role:
+1. Classify incoming documents by type (invoice, order, report, etc.)
+2. Extract structured data using the provided schema
+3. Validate extracted data against business rules
+4. Identify missing or low-confidence fields
+5. Store clean data in the database
+
+When extracting:
+- Be precise with dates, numbers, and amounts
+- Flag fields with low confidence
+- Report validation errors clearly
+- Ask clarification questions for ambiguous fields
+"""</span>
+
+<span class="type">ANALYSIS_SYSTEM_PROMPT</span> = <span class="string">"""You are a business analyst for {industry} companies.
+
+Your role:
+1. Analyze extracted data across documents
+2. Identify patterns, trends, and anomalies
+3. Generate actionable insights
+4. Compare performance against benchmarks
+5. Create summary reports
+
+Focus on metrics that matter to {industry}:
+- Document types tracked: {doc_types}
+- Look for: unusual values, missing data, process inefficiencies
+"""</span></pre>
+
+                <div class="implementation-note">
+                    <strong>Extensibility:</strong> New agents can be added by defining new tool sets. New document types can be supported by adding to the template (no code changes to agent logic). The factory pattern ensures agents scale with tenant complexity.
+                </div>
+            </section>
+
+            <!-- SECTION 5 -->
+            <section id="section-5">
+                <h2>Section 5: Gemini File Search Store — Multi-Tenant RAG</h2>
+
+                <div class="section-intro">
+                    <strong>Purpose:</strong> Each tenant gets their own Gemini File Search Stores for semantic search and RAG-powered Q&A over their documents. Complete isolation — Tenant A's queries never see Tenant B's data.
+                </div>
+
+                <h3>Per-Tenant Store Provisioning</h3>
+                <p>When a tenant signs up, we create separate File Search Stores for each document category (e.g., "orders", "qc_records", "invoices"). This enables efficient scoped queries:</p>
+
+                <pre><span class="keyword">from</span> google <span class="keyword">import</span> genai
+<span class="keyword">from</span> google.genai <span class="keyword">import</span> types
+
+client = genai.<span class="type">Client</span>(vertexai=<span class="keyword">True</span>, project=<span class="string">"biz2bricks-prod"</span>, location=<span class="string">"us-central1"</span>)
+
+<span class="keyword">async def</span> <span class="function">provision_tenant_rag</span>(tenant_id: <span class="type">str</span>, industry_id: <span class="type">str</span>):
+    <span class="string">"""Create File Search Stores for a new tenant — one per document category."""</span>
+    template = <span class="function">load_industry_template</span>(industry_id)
+    stores = {}
+
+    <span class="comment"># Group document types into logical categories for RAG</span>
+    categories = <span class="function">group_doc_types_by_category</span>(template.document_types)
+
+    <span class="keyword">for</span> category_name, doc_types <span class="keyword">in</span> categories.<span class="function">items</span>():
+        store = <span class="keyword">await</span> client.aio.file_search_stores.<span class="function">create</span>(
+            config=types.<span class="type">CreateFileSearchStoreConfig</span>(
+                display_name=<span class="string">f"tenant-{tenant_id}-{category_name}"</span>,
+                description=<span class="string">f"{category_name} documents for tenant {tenant_id}"</span>,
+            )
+        )
+        stores[category_name] = store.name
+
+    <span class="comment"># Save store references to database</span>
+    <span class="keyword">await</span> <span class="function">save_tenant_stores</span>(tenant_id, stores)
+    <span class="keyword">return</span> stores</pre>
+
+                <h3>Ingestion Pipeline into RAG</h3>
+                <p>After extraction, documents are indexed in the appropriate File Search Store. The Knowledge Agent can then query them:</p>
+
+                <pre><span class="keyword">async def</span> <span class="function">ingest_to_rag</span>(tenant_id: <span class="type">str</span>, category: <span class="type">str</span>, file_path: <span class="type">str</span>):
+    <span class="string">"""Upload a processed document to the tenant's RAG store."""</span>
+    stores = <span class="keyword">await</span> <span class="function">get_tenant_stores</span>(tenant_id)
+    store_name = stores[category]
+
+    <span class="keyword">await</span> client.aio.file_search_stores.<span class="function">upload</span>(
+        store_name=store_name,
+        file_path=file_path,
+    )
+
+<span class="keyword">async def</span> <span class="function">query_tenant_knowledge</span>(
+    tenant_id: <span class="type">str</span>,
+    question: <span class="type">str</span>,
+    categories: <span class="type">list</span>[<span class="type">str</span>] = <span class="keyword">None</span>
+) -> <span class="type">dict</span>:
+    <span class="string">"""Query tenant's knowledge base using Gemini File Search."""</span>
+    stores = <span class="keyword">await</span> <span class="function">get_tenant_stores</span>(tenant_id)
+
+    <span class="comment"># Select relevant stores (defaults to all if not specified)</span>
+    store_names = [stores[c] <span class="keyword">for</span> c <span class="keyword">in</span> (categories <span class="keyword">or</span> stores.<span class="function">keys</span>())]
+
+    response = <span class="keyword">await</span> client.aio.models.<span class="function">generate_content</span>(
+        model=<span class="string">"gemini-3-flash"</span>,
+        contents=question,
+        config=types.<span class="type">GenerateContentConfig</span>(
+            tools=[
+                types.<span class="type">Tool</span>(file_search=types.<span class="type">FileSearch</span>(
+                    file_search_store_names=store_names
+                ))
+            ],
+        ),
+    )
+
+    <span class="keyword">return</span> {
+        <span class="string">"answer"</span>: response.text,
+        <span class="string">"sources"</span>: [
+            {<span class="string">"file"</span>: chunk.file_name, <span class="string">"snippet"</span>: chunk.text}
+            <span class="keyword">for</span> chunk <span class="keyword">in</span> response.candidates[<span class="number">0</span>].grounding_metadata.chunks
+        ],
+    }</pre>
+
+                <h3>Multi-Tenant Isolation Architecture</h3>
+                <p>Each tenant's data is completely isolated — queries cannot cross tenant boundaries:</p>
+
+                <div class="mermaid">
+graph TB
+    subgraph TenantA[Tenant A]
+        FSS_A[File Search Store A]
+        SQL_A[Cloud SQL - Tenant A Data]
+        GCS_A[GCS Bucket - tenant-a/]
+    end
+
+    subgraph TenantB[Tenant B]
+        FSS_B[File Search Store B]
+        SQL_B[Cloud SQL - Tenant B Data]
+        GCS_B[GCS Bucket - tenant-b/]
+    end
+
+    subgraph TenantC[Tenant C]
+        FSS_C[File Search Store C]
+        SQL_C[Cloud SQL - Tenant C Data]
+        GCS_C[GCS Bucket - tenant-c/]
+    end
+
+    KnowledgeAgent[Knowledge Agent with tenant_id context]
+
+    KnowledgeAgent -->|tenant_id=A| FSS_A
+    KnowledgeAgent -->|tenant_id=B| FSS_B
+    KnowledgeAgent -->|tenant_id=C| FSS_C
+
+    style FSS_A fill:#e8f0fe
+    style FSS_B fill:#e6f4ea
+    style FSS_C fill:#fef7e0
+                </div>
+
+                <h3>Document Processing Pipeline</h3>
+                <p>The complete flow from document upload to RAG availability:</p>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Stage</th>
+                            <th>Action</th>
+                            <th>Output</th>
+                            <th>System</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>1. Upload</td>
+                            <td>Tenant uploads document (PDF, image, etc.)</td>
+                            <td>Document in GCS (temp location)</td>
+                            <td>Next.js + Cloud Run</td>
+                        </tr>
+                        <tr>
+                            <td>2. Classify</td>
+                            <td>Determine document type (invoice, order, etc.)</td>
+                            <td>Document type identified + category</td>
+                            <td>Classifier Agent</td>
+                        </tr>
+                        <tr>
+                            <td>3. OCR + Extract</td>
+                            <td>Gemini 3 Flash processes document, extracts structured data</td>
+                            <td>Extracted JSON matching schema</td>
+                            <td>Gemini 3 Flash + Ingestion Agent</td>
+                        </tr>
+                        <tr>
+                            <td>4. Validate</td>
+                            <td>Check against business rules (totals match, required fields)</td>
+                            <td>Validation errors or approval</td>
+                            <td>Ingestion Agent</td>
+                        </tr>
+                        <tr>
+                            <td>5. Store Structured</td>
+                            <td>Save extracted data to Cloud SQL</td>
+                            <td>Record in documents + extracted_data tables</td>
+                            <td>Cloud SQL</td>
+                        </tr>
+                        <tr>
+                            <td>6. Store Original</td>
+                            <td>Move original document to permanent location in GCS</td>
+                            <td>Document at gs://tenant-a/documents/...</td>
+                            <td>GCS</td>
+                        </tr>
+                        <tr>
+                            <td>7. Index in RAG</td>
+                            <td>Upload document to File Search Store for semantic search</td>
+                            <td>Indexed and searchable</td>
+                            <td>Gemini File Search</td>
+                        </tr>
+                        <tr>
+                            <td>8. Q&A Ready</td>
+                            <td>User can ask questions; Knowledge Agent queries RAG</td>
+                            <td>Answers with source citations</td>
+                            <td>Knowledge Agent + File Search</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Cross-Industry RAG Use Cases</h3>
+                <p>The same RAG system powers industry-specific insights:</p>
+
+                <div class="grid-2">
+                    <div class="card">
+                        <div class="card-title">Food Manufacturing</div>
+                        <p><strong>Question:</strong> "Show me all QC failures in the last 30 days"</p>
+                        <p><strong>Agent Action:</strong> Searches QC records store → Filters by date → Returns failures with root causes → Identifies patterns</p>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">Recruitment</div>
+                        <p><strong>Question:</strong> "Find candidates with Python experience in London"</p>
+                        <p><strong>Agent Action:</strong> Searches CV store → Extracts skills and location → Ranks by relevance → Returns matches with experience years</p>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">Retail</div>
+                        <p><strong>Question:</strong> "Which supplier has the best on-time delivery rate?"</p>
+                        <p><strong>Agent Action:</strong> Cross-queries PO and receipt stores → Calculates lead time adherence by supplier → Ranks suppliers → Shows trends</p>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">Real Estate</div>
+                        <p><strong>Question:</strong> "What's the average price per sqft in downtown listings?"</p>
+                        <p><strong>Agent Action:</strong> Searches listing store → Filters by location → Extracts price and sqft → Calculates averages → Shows comparables</p>
+                    </div>
+                </div>
+
+                <h3>RAG Scaling Considerations</h3>
+                <ul class="vertical-list">
+                    <li><strong>Store Size Management:</strong> For high-volume tenants, consider splitting categories further (e.g., "orders_2024_q1", "orders_2024_q2") to keep individual stores performant.</li>
+                    <li><strong>Document Freshness:</strong> When a document is updated or deleted, remove from RAG store and re-ingest. Track document versions.</li>
+                    <li><strong>Query Cost Optimization:</strong> Use category filtering to limit which stores are queried; don't always search all stores.</li>
+                    <li><strong>Data Privacy:</strong> File Search Stores are fully isolated per tenant. No possibility of cross-tenant leakage in RAG results.</li>
+                    <li><strong>Bulk Operations:</strong> For bulk document imports, batch ingestion to RAG (e.g., ingest 100 documents per job to avoid timeouts).</li>
+                </ul>
+
+                <div class="implementation-note">
+                    <strong>Cost Efficiency Tip:</strong> Store only the processed/formatted document in RAG (e.g., a cleaned PDF with extracted data highlighted). Don't store raw scans or intermediate files. This reduces storage costs and improves search quality.
+                </div>
+            </section>
+
+            <!-- SECTION 6 -->
+            <section id="section-6">
+                <h2>Section 6: Next.js 15 Frontend — Self-Service UI</h2>
+
+                <div class="section-intro">
+                    <strong>Core Principle:</strong> The UI is completely generic and adapts based on the tenant's industry template. NOT hard-coded for any single vertical. All pages fetch configuration from the backend and render dynamically.
+                </div>
+
+                <h3>Tech Stack</h3>
+                <ul class="vertical-list">
+                    <li><strong>Next.js 15 App Router:</strong> Server and client components, route groups, streaming</li>
+                    <li><strong>Tailwind CSS:</strong> Utility-first styling for rapid UI development</li>
+                    <li><strong>shadcn/ui:</strong> Accessible, reusable component library</li>
+                    <li><strong>Framer Motion:</strong> Smooth animations for dashboards and transitions</li>
+                    <li><strong>Server-Sent Events (SSE):</strong> Real-time streaming for AI chat and widget data</li>
+                </ul>
+
+                <h3>Core Pages (All Industry-Adaptive)</h3>
+                <div class="grid-2">
+                    <div class="card info">
+                        <div class="card-title">/dashboard</div>
+                        <p>Industry-specific widgets loaded from template config. Widgets are rendered dynamically based on <code>dashboard_widgets</code> from the tenant's template.</p>
+                    </div>
+                    <div class="card info">
+                        <div class="card-title">/documents</div>
+                        <p>Upload, browse, search documents. Document type filters change per industry. Drag-and-drop upload with auto-classification.</p>
+                    </div>
+                    <div class="card info">
+                        <div class="card-title">/chat</div>
+                        <p>Natural language Q&A interface to query the Knowledge Agent (RAG). Shows sources and citations. SSE streaming for real-time responses.</p>
+                    </div>
+                    <div class="card info">
+                        <div class="card-title">/reports</div>
+                        <p>Auto-generated and custom reports. Export to PDF/XLSX. Report templates vary by industry.</p>
+                    </div>
+                    <div class="card info">
+                        <div class="card-title">/settings/document-types</div>
+                        <p>Tenant management of document types and custom fields. Visual schema builder UI.</p>
+                    </div>
+                </div>
+
+                <h3>Adaptive Dashboard Component</h3>
+                <p>The dashboard page is completely generic. It loads widget configurations from the tenant's template and renders them dynamically:</p>
+
+                <pre><span class="comment">// app/dashboard/page.tsx</span>
+<span class="keyword">import</span> { DashboardGrid } <span class="keyword">from</span> <span class="string">'@/components/dashboard-grid'</span>
+<span class="keyword">import</span> { getServerSession } <span class="keyword">from</span> <span class="string">'next-auth'</span>
+<span class="keyword">import</span> { getTenantConfig } <span class="keyword">from</span> <span class="string">'@/lib/tenant'</span>
+
+<span class="keyword">export default async function</span> <span class="function">DashboardPage</span>() {
+  <span class="keyword">const</span> session = <span class="keyword">await</span> <span class="function">getServerSession</span>()
+  <span class="keyword">const</span> config = <span class="keyword">await</span> <span class="function">getTenantConfig</span>(session.tenant_id)
+
+  <span class="comment">// Widgets are defined by the industry template</span>
+  <span class="keyword">const</span> widgets = config.dashboard_widgets
+
+  <span class="keyword">return</span> (
+    &lt;<span class="keyword">div</span> className=<span class="string">"p-6 space-y-6"</span>&gt;
+      &lt;<span class="keyword">h1</span> className=<span class="string">"text-2xl font-semibold"</span>&gt;
+        {config.industry_display_name} Dashboard
+      &lt;/<span class="keyword">h1</span>&gt;
+      &lt;<span class="type">DashboardGrid</span> widgets={widgets} tenantId={session.tenant_id} /&gt;
+    &lt;/<span class="keyword">div</span>&gt;
+  )
+}</pre>
+
+                <pre><span class="comment">// components/dashboard-grid.tsx</span>
+<span class="string">'use client'</span>
+<span class="keyword">import</span> { motion } <span class="keyword">from</span> <span class="string">'framer-motion'</span>
+<span class="keyword">import</span> { MetricCard } <span class="keyword">from</span> <span class="string">'./widgets/metric-card'</span>
+<span class="keyword">import</span> { ChartWidget } <span class="keyword">from</span> <span class="string">'./widgets/chart-widget'</span>
+<span class="keyword">import</span> { TableWidget } <span class="keyword">from</span> <span class="string">'./widgets/table-widget'</span>
+
+<span class="keyword">const</span> <span class="type">WIDGET_MAP</span>: Record&lt;<span class="type">string</span>, React.FC&lt;<span class="keyword">any</span>&gt;&gt; = {
+  metric: MetricCard,
+  chart: ChartWidget,
+  table: TableWidget,
+}
+
+<span class="keyword">export function</span> <span class="function">DashboardGrid</span>({ widgets, tenantId }: Props) {
+  <span class="keyword">return</span> (
+    &lt;<span class="keyword">div</span> className=<span class="string">"grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4"</span>&gt;
+      {widgets.<span class="function">map</span>((widget, i) =&gt; {
+        <span class="keyword">const</span> Component = <span class="type">WIDGET_MAP</span>[widget.type]
+        <span class="keyword">return</span> (
+          &lt;<span class="type">motion</span>.<span class="keyword">div</span>
+            key={widget.id}
+            initial={{ opacity: <span class="number">0</span>, y: <span class="number">20</span> }}
+            animate={{ opacity: <span class="number">1</span>, y: <span class="number">0</span> }}
+            transition={{ delay: i * <span class="number">0.1</span> }}
+          &gt;
+            &lt;<span class="type">Component</span>
+              config={widget.config}
+              tenantId={tenantId}
+              dataEndpoint={`/api/widgets/${widget.id}/data`}
+            /&gt;
+          &lt;/<span class="type">motion</span>.<span class="keyword">div</span>&gt;
+        )
+      })}
+    &lt;/<span class="keyword">div</span>&gt;
+  )
+}</pre>
+
+                <h3>Document Upload with Auto-Classification</h3>
+                <p>Drag-and-drop upload that automatically classifies documents and triggers extraction:</p>
+
+                <pre><span class="comment">// components/document-upload.tsx</span>
+<span class="string">'use client'</span>
+<span class="keyword">import</span> { useCallback, useState } <span class="keyword">from</span> <span class="string">'react'</span>
+<span class="keyword">import</span> { useDropzone } <span class="keyword">from</span> <span class="string">'react-dropzone'</span>
+<span class="keyword">import</span> { motion, AnimatePresence } <span class="keyword">from</span> <span class="string">'framer-motion'</span>
+
+<span class="keyword">export function</span> <span class="function">DocumentUpload</span>() {
+  <span class="keyword">const</span> [uploads, setUploads] = useState&lt;Upload[]&gt;([])
+
+  <span class="keyword">const</span> onDrop = <span class="function">useCallback</span>(<span class="keyword">async</span> (files: File[]) =&gt; {
+    <span class="keyword">for</span> (<span class="keyword">const</span> file <span class="keyword">of</span> files) {
+      <span class="keyword">const</span> upload: Upload = { file, status: <span class="string">'uploading'</span>, progress: <span class="number">0</span> }
+      <span class="function">setUploads</span>(prev =&gt; [...prev, upload])
+
+      <span class="keyword">const</span> formData = <span class="keyword">new</span> FormData()
+      formData.<span class="function">append</span>(<span class="string">'file'</span>, file)
+
+      <span class="comment">// Upload triggers AI classification + extraction</span>
+      <span class="keyword">const</span> res = <span class="keyword">await</span> <span class="function">fetch</span>(<span class="string">'/api/documents/upload'</span>, {
+        method: <span class="string">'POST'</span>,
+        body: formData,
+      })
+
+      <span class="keyword">const</span> result = <span class="keyword">await</span> res.<span class="function">json</span>()
+
+      <span class="function">setUploads</span>(prev =&gt; prev.<span class="function">map</span>(u =&gt;
+        u.file === file
+          ? { ...u, status: <span class="string">'complete'</span>, result }
+          : u
+      ))
+    }
+  }, [])
+
+  <span class="keyword">const</span> { getRootProps, getInputProps, isDragActive } = <span class="function">useDropzone</span>({ onDrop })
+
+  <span class="keyword">return</span> (
+    &lt;<span class="keyword">div</span>&gt;
+      &lt;<span class="keyword">div</span> {...getRootProps()} className=<span class="string">"border-2 border-dashed rounded-xl p-12 text-center"</span>&gt;
+        &lt;<span class="keyword">input</span> {...getInputProps()} /&gt;
+        &lt;<span class="keyword">p</span>&gt;Drop documents here — AI will classify automatically&lt;/<span class="keyword">p</span>&gt;
+      &lt;/<span class="keyword">div</span>&gt;
+    &lt;/<span class="keyword">div</span>&gt;
+  )
+}</pre>
+
+                <h3>AI Chat with SSE Streaming</h3>
+                <p>Real-time Q&A using Server-Sent Events for streaming responses:</p>
+
+                <pre><span class="comment">// components/ai-chat.tsx</span>
+<span class="string">'use client'</span>
+<span class="keyword">import</span> { useState } <span class="keyword">from</span> <span class="string">'react'</span>
+
+<span class="keyword">export function</span> <span class="function">AIChat</span>() {
+  <span class="keyword">const</span> [messages, setMessages] = useState&lt;Message[]&gt;([])
+  <span class="keyword">const</span> [streaming, setStreaming] = useState(<span class="keyword">false</span>)
+
+  <span class="keyword">const</span> sendMessage = <span class="keyword">async</span> (input: <span class="type">string</span>) =&gt; {
+    <span class="keyword">const</span> userMsg = { role: <span class="string">'user'</span>, content: input }
+    <span class="function">setMessages</span>(prev =&gt; [...prev, userMsg])
+    <span class="function">setStreaming</span>(<span class="keyword">true</span>)
+
+    <span class="keyword">const</span> response = <span class="keyword">await</span> <span class="function">fetch</span>(<span class="string">'/api/chat'</span>, {
+      method: <span class="string">'POST'</span>,
+      headers: { <span class="string">'Content-Type'</span>: <span class="string">'application/json'</span> },
+      body: JSON.<span class="function">stringify</span>({ message: input }),
+    })
+
+    <span class="keyword">const</span> reader = response.body!.<span class="function">getReader</span>()
+    <span class="keyword">const</span> decoder = <span class="keyword">new</span> TextDecoder()
+    <span class="keyword">let</span> assistantMsg = { role: <span class="string">'assistant'</span>, content: <span class="string">''</span>, sources: [] }
+
+    <span class="keyword">while</span> (<span class="keyword">true</span>) {
+      <span class="keyword">const</span> { done, value } = <span class="keyword">await</span> reader.<span class="function">read</span>()
+      <span class="keyword">if</span> (done) <span class="keyword">break</span>
+
+      <span class="keyword">const</span> chunk = <span class="function">decoder</span>.<span class="function">decode</span>(value)
+      <span class="keyword">const</span> lines = chunk.<span class="function">split</span>(<span class="string">'\n'</span>).<span class="function">filter</span>(l =&gt; l.<span class="function">startsWith</span>(<span class="string">'data: '</span>))
+
+      <span class="keyword">for</span> (<span class="keyword">const</span> line <span class="keyword">of</span> lines) {
+        <span class="keyword">const</span> data = JSON.<span class="function">parse</span>(line.<span class="function">slice</span>(<span class="number">6</span>))
+        <span class="keyword">if</span> (data.type === <span class="string">'text'</span>) {
+          assistantMsg.content += data.content
+        }
+        <span class="function">setMessages</span>(prev =&gt; [...prev.<span class="function">slice</span>(<span class="number">0</span>, -<span class="number">1</span>), assistantMsg])
+      }
+    }
+
+    <span class="function">setStreaming</span>(<span class="keyword">false</span>)
+  }
+
+  <span class="keyword">return</span> <span class="comment">/* Chat UI with message bubbles and sources */</span>
+}</pre>
+
+                <h3>Custom Field Schema Builder</h3>
+                <p>UI for tenants to add custom fields to document types without touching code:</p>
+
+                <pre><span class="comment">// components/schema-builder.tsx</span>
+<span class="string">'use client'</span>
+<span class="keyword">import</span> { useState } <span class="keyword">from</span> <span class="string">'react'</span>
+<span class="keyword">import</span> { Button } <span class="keyword">from</span> <span class="string">'@/components/ui/button'</span>
+<span class="keyword">import</span> { Input } <span class="keyword">from</span> <span class="string">'@/components/ui/input'</span>
+
+<span class="keyword">export function</span> <span class="function">SchemaBuilder</span>({ documentType, existingFields, onSave }: Props) {
+  <span class="keyword">const</span> [fields, setFields] = useState(existingFields)
+
+  <span class="keyword">const</span> addField = () =&gt; {
+    <span class="function">setFields</span>([...fields, {
+      field_name: <span class="string">''</span>,
+      field_type: <span class="string">'string'</span>,
+      required: <span class="keyword">false</span>,
+      extraction_hint: <span class="string">''</span>,
+    }])
+  }
+
+  <span class="keyword">return</span> (
+    &lt;<span class="keyword">div</span> className=<span class="string">"space-y-4"</span>&gt;
+      &lt;<span class="keyword">h3</span> className=<span class="string">"font-medium"</span>&gt;Custom Fields for {documentType.display_name}&lt;/<span class="keyword">h3</span>&gt;
+      &lt;<span class="keyword">p</span> className=<span class="string">"text-sm text-gray-500"</span>&gt;
+        Add fields specific to your business. The AI will extract these from uploaded documents.
+      &lt;/<span class="keyword">p</span>&gt;
+
+      {fields.<span class="function">map</span>((field, i) =&gt; (
+        &lt;<span class="keyword">div</span> key={i} className=<span class="string">"grid grid-cols-4 gap-3 p-3 bg-gray-50 rounded-lg"</span>&gt;
+          &lt;<span class="type">Input</span>
+            placeholder=<span class="string">"Field name"</span>
+            value={field.field_name}
+            onChange={e =&gt; <span class="function">updateField</span>(i, <span class="string">'field_name'</span>, e.target.value)}
+          /&gt;
+          &lt;<span class="type">Select</span>
+            value={field.field_type}
+            options={[<span class="string">'string'</span>, <span class="string">'number'</span>, <span class="string">'date'</span>, <span class="string">'enum'</span>]}
+          /&gt;
+          &lt;<span class="type">Input</span>
+            placeholder=<span class="string">"Extraction hint"</span>
+            value={field.extraction_hint}
+          /&gt;
+          &lt;<span class="type">Button</span> onClick={() =&gt; <span class="function">removeField</span>(i)}&gt;Remove&lt;/<span class="type">Button</span>&gt;
+        &lt;/<span class="keyword">div</span>&gt;
+      ))}
+
+      &lt;<span class="type">Button</span> onClick={addField}&gt;+ Add Custom Field&lt;/<span class="type">Button</span>&gt;
+      &lt;<span class="type">Button</span> onClick={() =&gt; <span class="function">onSave</span>(fields)}&gt;Save Schema&lt;/<span class="type">Button</span>&gt;
+    &lt;/<span class="keyword">div</span>&gt;
+  )
+}</pre>
+
+                <h3>Frontend Architecture Diagram</h3>
+                <div class="mermaid">
+graph TB
+    User[User Browser]
+    NextApp[Next.js 15 App Router]
+
+    subgraph Pages
+        Dashboard[/dashboard - dynamic widgets]
+        Documents[/documents - upload and browse]
+        Chat[/chat - AI QA]
+        Reports[/reports - export]
+        Settings[/settings - schema builder]
+    end
+
+    subgraph Components
+        DashboardGrid[DashboardGrid - adaptive]
+        UploadComp[DocumentUpload - drag-drop]
+        ChatUI[ChatUI - SSE stream]
+        SchemaBuilder[SchemaBuilder - custom fields]
+    end
+
+    API[Next.js API Routes - BFF layer]
+
+    User --> NextApp
+    NextApp --> Dashboard
+    NextApp --> Documents
+    NextApp --> Chat
+    NextApp --> Reports
+    NextApp --> Settings
+
+    Dashboard --> DashboardGrid
+    Documents --> UploadComp
+    Chat --> ChatUI
+    Settings --> SchemaBuilder
+
+    Dashboard --> API
+    Documents --> API
+    Chat --> API
+    Reports --> API
+    Settings --> API
+
+    style Dashboard fill:#e8f0fe
+    style Chat fill:#e6f4ea
+    style Settings fill:#fef7e0
+                </div>
+
+                <div class="implementation-note">
+                    <strong>Key Design Pattern:</strong> All pages use tenant context from NextAuth.js session to fetch configuration and data. The same code renders completely different UIs for Food Manufacturing vs Recruitment vs Retail, based on template configuration loaded at runtime. Zero hard-coded industry logic.
+                </div>
+            </section>
+
+            <!-- SECTION 7 -->
+            <section id="section-7">
+                <h2>Section 7: API Layer — Next.js API Routes as BFF</h2>
+
+                <div class="section-intro">
+                    <strong>Purpose:</strong> All API routes in <code>app/api/</code> act as a Backend-for-Frontend (BFF). They handle tenant context injection, request validation, and proxying to backend services (Cloud Run agents, databases, etc.).
+                </div>
+
+                <h3>Tenant Context Injection via Middleware</h3>
+                <p>Every request is enriched with tenant context via middleware, ensuring all downstream services know which tenant is making the request:</p>
+
+                <pre><span class="comment">// middleware.ts</span>
+<span class="keyword">import</span> { NextResponse } <span class="keyword">from</span> <span class="string">'next/server'</span>
+<span class="keyword">import</span> { getToken } <span class="keyword">from</span> <span class="string">'next-auth/jwt'</span>
+<span class="keyword">import type</span> { NextRequest } <span class="keyword">from</span> <span class="string">'next/server'</span>
+
+<span class="keyword">export async function</span> <span class="function">middleware</span>(request: NextRequest) {
+  <span class="keyword">const</span> token = <span class="keyword">await</span> <span class="function">getToken</span>({ req: request })
+
+  <span class="keyword">if</span> (!token?.tenant_id) {
+    <span class="keyword">return</span> NextResponse.<span class="function">redirect</span>(<span class="keyword">new</span> <span class="type">URL</span>(<span class="string">'/login'</span>, request.url))
+  }
+
+  <span class="comment">// Inject tenant context into headers for all downstream services</span>
+  <span class="keyword">const</span> headers = <span class="keyword">new</span> Headers(request.headers)
+  headers.<span class="function">set</span>(<span class="string">'x-tenant-id'</span>, token.tenant_id)
+  headers.<span class="function">set</span>(<span class="string">'x-tenant-industry'</span>, token.industry_id)
+  headers.<span class="function">set</span>(<span class="string">'x-user-role'</span>, token.role)
+
+  <span class="keyword">return</span> NextResponse.<span class="function">next</span>({ headers })
+}</pre>
+
+                <h3>Key API Routes</h3>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Route</th>
+                            <th>Method</th>
+                            <th>Purpose</th>
+                            <th>Backend Service</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><code>POST /api/documents/upload</code></td>
+                            <td>POST</td>
+                            <td>Upload file to GCS, trigger ingestion agent</td>
+                            <td>Cloud Run Agent</td>
+                        </tr>
+                        <tr>
+                            <td><code>GET /api/documents</code></td>
+                            <td>GET</td>
+                            <td>List documents (RLS filtered by tenant)</td>
+                            <td>Cloud SQL</td>
+                        </tr>
+                        <tr>
+                            <td><code>POST /api/chat</code></td>
+                            <td>POST</td>
+                            <td>Stream Knowledge Agent response via SSE</td>
+                            <td>Cloud Run Agent</td>
+                        </tr>
+                        <tr>
+                            <td><code>GET /api/widgets/:id/data</code></td>
+                            <td>GET</td>
+                            <td>Fetch widget data for dashboards</td>
+                            <td>Cloud SQL</td>
+                        </tr>
+                        <tr>
+                            <td><code>GET /api/reports</code></td>
+                            <td>GET</td>
+                            <td>List and generate reports</td>
+                            <td>Cloud Run Agent</td>
+                        </tr>
+                        <tr>
+                            <td><code>PUT /api/settings/document-types/:id</code></td>
+                            <td>PUT</td>
+                            <td>Update document type custom fields</td>
+                            <td>Cloud SQL</td>
+                        </tr>
+                        <tr>
+                            <td><code>POST /api/settings/document-types</code></td>
+                            <td>POST</td>
+                            <td>Create new document type</td>
+                            <td>Cloud SQL</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Cloud Run Backend Integration</h3>
+                <p>The BFF proxies requests to Cloud Run agent services. Each service authenticates via IAM:</p>
+
+                <pre><span class="comment">// lib/agent-client.ts</span>
+<span class="keyword">const</span> <span class="type">AGENT_SERVICE_URL</span> = process.env.<span class="type">AGENT_SERVICE_URL</span>
+
+<span class="keyword">export async function</span> <span class="function">invokeAgent</span>(
+  tenantId: <span class="type">string</span>,
+  agentType: <span class="string">'ingestion'</span> | <span class="string">'analysis'</span> | <span class="string">'knowledge'</span> | <span class="string">'report'</span>,
+  payload: <span class="keyword">any</span>
+) {
+  <span class="keyword">const</span> idToken = <span class="keyword">await</span> <span class="function">getIdToken</span>() <span class="comment">// For Cloud Run IAM auth</span>
+
+  <span class="keyword">const</span> response = <span class="keyword">await</span> <span class="function">fetch</span>(
+    `${<span class="type">AGENT_SERVICE_URL</span>}/agents/${agentType}/invoke`,
+    {
+      method: <span class="string">'POST'</span>,
+      headers: {
+        <span class="string">'Authorization'</span>: `Bearer ${idToken}`,
+        <span class="string">'Content-Type'</span>: <span class="string">'application/json'</span>,
+        <span class="string">'X-Tenant-ID'</span>: tenantId,
+      },
+      body: JSON.<span class="function">stringify</span>(payload),
+    }
+  )
+
+  <span class="keyword">return</span> response
+}</pre>
+
+                <h3>Document Upload Handler Example</h3>
+                <pre><span class="comment">// app/api/documents/upload/route.ts</span>
+<span class="keyword">import</span> { NextRequest, NextResponse } <span class="keyword">from</span> <span class="string">'next/server'</span>
+<span class="keyword">import</span> { storage } <span class="keyword">from</span> <span class="string">'@/lib/gcs'</span>
+<span class="keyword">import</span> { invokeAgent } <span class="keyword">from</span> <span class="string">'@/lib/agent-client'</span>
+
+<span class="keyword">export async function</span> <span class="function">POST</span>(request: NextRequest) {
+  <span class="keyword">const</span> tenantId = request.headers.<span class="function">get</span>(<span class="string">'x-tenant-id'</span>)!
+  <span class="keyword">const</span> formData = <span class="keyword">await</span> request.<span class="function">formData</span>()
+  <span class="keyword">const</span> file = formData.<span class="function">get</span>(<span class="string">'file'</span>) <span class="keyword">as</span> File
+
+  <span class="comment">// Upload to GCS with tenant-scoped path</span>
+  <span class="keyword">const</span> gcsPath = `tenants/${tenantId}/uploads/${Date.<span class="function">now</span>()}-${file.name}`
+  <span class="keyword">const</span> buffer = <span class="keyword">await</span> file.<span class="function">arrayBuffer</span>()
+  <span class="keyword">await</span> storage.<span class="function">bucket</span>().<span class="function">file</span>(gcsPath).<span class="function">save</span>(buffer)
+
+  <span class="comment">// Trigger ingestion agent asynchronously</span>
+  <span class="keyword">await</span> <span class="function">invokeAgent</span>(tenantId, <span class="string">'ingestion'</span>, {
+    gcs_path: gcsPath,
+    file_name: file.name,
+    mime_type: file.type,
+  })
+
+  <span class="keyword">return</span> NextResponse.<span class="function">json</span>({ success: <span class="keyword">true</span> })
+}</pre>
+
+                <h3>API Request Flow Diagram</h3>
+                <div class="mermaid">
+                    sequenceDiagram
+                    participant Browser as Browser
+                    participant NextAPI as Next.js API
+                    participant Middleware as Middleware
+                    participant CloudRun as Cloud Run Agent
+                    participant CloudSQL as Cloud SQL
+                    participant GCS as GCS
+
+                    Browser->>NextAPI: POST /api/documents/upload
+                    NextAPI->>Middleware: Check session & inject headers
+                    Middleware->>NextAPI: x-tenant-id, x-user-role
+                    NextAPI->>GCS: Upload file to tenant bucket
+                    GCS->>NextAPI: File stored at gcs_path
+                    NextAPI->>CloudRun: Invoke ingestion agent
+                    CloudRun->>CloudSQL: Extract & store structured data
+                    CloudSQL->>NextAPI: Document record created
+                    NextAPI->>Browser: { document_id, status }
+                </div>
+
+                <div class="implementation-note">
+                    <strong>Security:</strong> The middleware ensures every request carries tenant context. Cloud SQL RLS policies enforce row-level isolation. Cloud Run services validate the x-tenant-id header before processing. GCS paths are tenant-scoped, so even storage is isolated.
+                </div>
+            </section>
+
+            <!-- SECTION 8 -->
+            <section id="section-8">
+                <h2>Section 8: GCP Infrastructure — Multi-Tenant Terraform</h2>
+
+                <div class="section-intro">
+                    <strong>Deployment Model:</strong> Complete production infrastructure defined as code using Terraform. Everything runs on GCP with built-in multi-tenancy isolation.
+                </div>
+
+                <h3>Core Infrastructure Components</h3>
+                <ul class="vertical-list">
+                    <li><strong>Cloud Run:</strong> Next.js frontend + Agent service with auto-scaling (min/max instances)</li>
+                    <li><strong>Cloud SQL PostgreSQL 16:</strong> RLS-enabled for row-level tenant isolation</li>
+                    <li><strong>GCS Buckets:</strong> Per-tenant prefix isolation (gs://biz2bricks-docs/tenants/{tenant_id}/)</li>
+                    <li><strong>Pub/Sub Topics:</strong> Event streaming for document.uploaded, extraction.complete, analysis.ready</li>
+                    <li><strong>Cloud Tasks:</strong> Async job processing and retries</li>
+                    <li><strong>Memorystore Redis:</strong> Caching, rate limiting, session storage</li>
+                    <li><strong>Secret Manager:</strong> API keys, DB credentials, encrypted at rest</li>
+                    <li><strong>Cloud CDN + Load Balancer:</strong> Global distribution and DDoS protection</li>
+                    <li><strong>Artifact Registry:</strong> Container image storage</li>
+                </ul>
+
+                <h3>Terraform: Key Resources</h3>
+
+                <h4>Cloud SQL with RLS</h4>
+                <pre><span class="comment"># Cloud SQL instance with RLS enabled</span>
+<span class="keyword">resource</span> <span class="string">"google_sql_database_instance"</span> <span class="string">"main"</span> {
+  name             = <span class="string">"biz2bricks-db"</span>
+  database_version = <span class="string">"POSTGRES_16"</span>
+  region           = var.region
+
+  settings {
+    tier              = <span class="string">"db-custom-4-16384"</span>
+    availability_type = <span class="string">"REGIONAL"</span>
+
+    database_flags {
+      name  = <span class="string">"cloudsql.iam_authentication"</span>
+      value = <span class="string">"on"</span>
+    }
+
+    backup_configuration {
+      enabled                        = <span class="keyword">true</span>
+      point_in_time_recovery_enabled = <span class="keyword">true</span>
+    }
+
+    ip_configuration {
+      ipv4_enabled    = <span class="keyword">false</span>
+      private_network = google_compute_network.vpc.id
+    }
+  }
+}</pre>
+
+                <h4>Cloud Run — Agent Service (Auto-Scaling)</h4>
+                <pre><span class="comment"># Cloud Run service for LangChain agents</span>
+<span class="keyword">resource</span> <span class="string">"google_cloud_run_v2_service"</span> <span class="string">"agent_service"</span> {
+  name     = <span class="string">"biz2bricks-agents"</span>
+  location = var.region
+
+  template {
+    scaling {
+      min_instance_count = <span class="number">1</span>
+      max_instance_count = <span class="number">50</span>
+    }
+
+    containers {
+      image = <span class="string">"${var.region}-docker.pkg.dev/${var.project}/biz2bricks/agent-service:latest"</span>
+
+      env {
+        name = <span class="string">"DB_CONNECTION"</span>
+        value_source {
+          secret_key_ref {
+            secret  = google_secret_manager_secret.db_url.id
+            version = <span class="string">"latest"</span>
+          }
+        }
+      }
+
+      env { name = <span class="string">"GCS_BUCKET"</span> value = google_storage_bucket.documents.name }
+      env { name = <span class="string">"REDIS_HOST"</span> value = google_redis_instance.cache.host }
+
+      resources {
+        limits = { cpu = <span class="string">"4"</span>, memory = <span class="string">"8Gi"</span> }
+      }
+    }
+
+    vpc_access {
+      connector = google_vpc_access_connector.connector.id
+      egress    = <span class="string">"PRIVATE_RANGES_ONLY"</span>
+    }
+  }
+}</pre>
+
+                <h4>Cloud Run — Next.js Frontend</h4>
+                <pre><span class="comment"># Cloud Run service for Next.js app</span>
+<span class="keyword">resource</span> <span class="string">"google_cloud_run_v2_service"</span> <span class="string">"frontend"</span> {
+  name     = <span class="string">"biz2bricks-web"</span>
+  location = var.region
+
+  template {
+    scaling {
+      min_instance_count = <span class="number">2</span>
+      max_instance_count = <span class="number">20</span>
+    }
+
+    containers {
+      image = <span class="string">"${var.region}-docker.pkg.dev/${var.project}/biz2bricks/web:latest"</span>
+
+      env { name = <span class="string">"AGENT_SERVICE_URL"</span> value = google_cloud_run_v2_service.agent_service.uri }
+      env { name = <span class="string">"NEXTAUTH_URL"</span> value = <span class="string">"https://app.biz2bricks.ai"</span> }
+
+      resources {
+        limits = { cpu = <span class="string">"2"</span>, memory = <span class="string">"4Gi"</span> }
+      }
+    }
+  }
+}</pre>
+
+                <h4>Pub/Sub for Async Document Processing</h4>
+                <pre><span class="comment"># Pub/Sub topic for document events</span>
+<span class="keyword">resource</span> <span class="string">"google_pubsub_topic"</span> <span class="string">"document_events"</span> {
+  name = <span class="string">"document-events"</span>
+}
+
+<span class="comment"># Subscription: ingestion worker processes uploaded documents</span>
+<span class="keyword">resource</span> <span class="string">"google_pubsub_subscription"</span> <span class="string">"ingestion_worker"</span> {
+  name  = <span class="string">"ingestion-worker"</span>
+  topic = google_pubsub_topic.document_events.name
+
+  push_config {
+    push_endpoint = <span class="string">"${google_cloud_run_v2_service.agent_service.uri}/webhooks/pubsub"</span>
+    oidc_token {
+      service_account_email = google_service_account.pubsub_invoker.email
+    }
+  }
+
+  filter = <span class="string">"attributes.event_type = \"document.uploaded\""</span>
+}</pre>
+
+                <h3>GCS Bucket Policy for Tenant Isolation</h3>
+                <pre><span class="comment"># GCS bucket with IAM-based tenant isolation</span>
+<span class="keyword">resource</span> <span class="string">"google_storage_bucket"</span> <span class="string">"documents"</span> {
+  name     = <span class="string">"biz2bricks-docs"</span>
+  location = var.region
+}
+
+<span class="comment"># IAM condition: agents can only access their tenant's prefix</span>
+<span class="keyword">resource</span> <span class="string">"google_storage_bucket_iam_member"</span> <span class="string">"agent_access"</span> {
+  bucket = google_storage_bucket.documents.name
+  role   = <span class="string">"roles/storage.objectAdmin"</span>
+  member = <span class="string">"serviceAccount:${google_service_account.agent_sa.email}"</span>
+
+  condition {
+    title       = <span class="string">"Tenant scoped access"</span>
+    description = <span class="string">"Agents can only access objects in their tenant prefix"</span>
+    expression  = <span class="string">"resource.name.startsWith('projects/_/buckets/biz2bricks-docs/o/tenants/' + resource.matchTag('tenant_id'))"</span>
+  }
+}</pre>
+
+                <h3>Infrastructure Architecture Diagram</h3>
+                <div class="mermaid">
+graph TB
+    Users[Users]
+    LB[Cloud Load Balancer]
+    CDN[Cloud CDN]
+
+    subgraph Compute
+        NextWeb[Cloud Run - Next.js 2-20 instances]
+        AgentSvc[Cloud Run - Agent Service 1-50 instances]
+    end
+
+    subgraph DataLayer[Data]
+        CloudSQL[Cloud SQL PostgreSQL 16 with RLS]
+        GCSBkt[GCS Buckets - tenant-scoped]
+        Redis[Memorystore Redis - Cache + Rate Limit]
+    end
+
+    subgraph Messaging
+        PubSub[Pub/Sub Topics]
+        TaskQueue[Cloud Tasks - Async Jobs]
+    end
+
+    subgraph Security
+        Secrets[Secret Manager - API Keys]
+        VPCNet[VPC - Private Network]
+    end
+
+    Users -->|HTTPS| LB
+    LB --> CDN
+    CDN --> NextWeb
+    NextWeb --> CloudSQL
+    NextWeb --> GCSBkt
+    NextWeb --> AgentSvc
+    AgentSvc --> CloudSQL
+    AgentSvc --> GCSBkt
+    AgentSvc --> PubSub
+    AgentSvc --> Redis
+    PubSub --> TaskQueue
+    NextWeb -.->|secrets| Secrets
+    AgentSvc -.->|secrets| Secrets
+    CloudSQL -.->|private| VPCNet
+    AgentSvc -.->|private| VPCNet
+
+    style NextWeb fill:#e8f0fe
+    style AgentSvc fill:#e6f4ea
+    style CloudSQL fill:#f0f0f0
+                </div>
+
+                <div class="implementation-note">
+                    <strong>Scaling Strategy:</strong> Cloud Run scales independently for frontend (user traffic) and agents (document processing). PubSub decouples uploads from processing, allowing agents to scale based on queue depth. Redis caches tenant configs to reduce database load.
+                </div>
+            </section>
+
+            <!-- SECTION 9 -->
+            <section id="section-9">
+                <h2>Section 9: Self-Service Tenant Onboarding</h2>
+
+                <div class="section-intro">
+                    <strong>Critical for GTM:</strong> The onboarding flow is completely self-service. Zero manual provisioning. A user can sign up, select their industry, and start uploading documents in under 5 minutes.
+                </div>
+
+                <h3>Onboarding Steps</h3>
+                <div class="grid-2">
+                    <div class="card success">
+                        <div class="card-title">1. Sign Up</div>
+                        <p>Email/Google SSO via NextAuth.js. Create account, verify email.</p>
+                    </div>
+                    <div class="card success">
+                        <div class="card-title">2. Pick Industry</div>
+                        <p>4-card selector (Food, Recruitment, Retail, Real Estate) with descriptions.</p>
+                    </div>
+                    <div class="card success">
+                        <div class="card-title">3. Company Profile</div>
+                        <p>Name, company size, timezone, optional preferences.</p>
+                    </div>
+                    <div class="card success">
+                        <div class="card-title">4. Auto-Provision</div>
+                        <p>Create tenant record, GCS bucket, File Search Stores, load template.</p>
+                    </div>
+                    <div class="card success">
+                        <div class="card-title">5. Sample Documents</div>
+                        <p>Show 1-2 sample docs for their industry. User can skip or upload their own.</p>
+                    </div>
+                    <div class="card success">
+                        <div class="card-title">6. AI Extraction Demo</div>
+                        <p>Show real-time extraction from sample → "Wow moment" → convince user of value.</p>
+                    </div>
+                    <div class="card success">
+                        <div class="card-title">7. Customize</div>
+                        <p>Add custom fields, tweak dashboard. Optional, can skip.</p>
+                    </div>
+                    <div class="card success">
+                        <div class="card-title">8. Dashboard</div>
+                        <p>Land on empty dashboard. User sees their industry-specific layout, ready to upload.</p>
+                    </div>
+                </div>
+
+                <h3>Provisioning Pipeline (Python/Async)</h3>
+                <p>This function runs at signup and completes the entire tenant setup in under 30 seconds:</p>
+
+                <pre><span class="keyword">async def</span> <span class="function">onboard_tenant</span>(signup_data: SignupData) -&gt; Tenant:
+    <span class="string">"""Full tenant provisioning — runs in &lt;30 seconds."""</span>
+
+    <span class="comment"># 1. Create tenant record</span>
+    tenant = <span class="keyword">await</span> db.execute(<span class="string">"""
+        INSERT INTO tenants (name, industry_id, owner_email, plan)
+        VALUES (:name, :industry, :email, 'starter')
+        RETURNING *
+    """</span>, signup_data.<span class="function">dict</span>())
+
+    <span class="comment"># 2. Load industry template</span>
+    template = <span class="function">load_industry_template</span>(signup_data.industry_id)
+
+    <span class="comment"># 3. Create document types from template</span>
+    <span class="keyword">for</span> doc_type <span class="keyword">in</span> template.document_types:
+        <span class="keyword">await</span> db.execute(<span class="string">"""
+            INSERT INTO document_types (tenant_id, industry_id, type_key, display_name,
+                base_schema, extraction_prompt, validation_rules, icon, is_system)
+            VALUES (:tenant_id, :industry_id, :type_key, :display_name,
+                :base_schema, :extraction_prompt, :validation_rules, :icon, true)
+        """</span>, {**doc_type.<span class="function">dict</span>(), <span class="string">"tenant_id"</span>: tenant.id})
+
+    <span class="comment"># 4. Provision Gemini File Search Stores (one per doc category)</span>
+    stores = <span class="keyword">await</span> <span class="function">provision_tenant_rag</span>(tenant.id, signup_data.industry_id)
+
+    <span class="comment"># 5. Create dashboard configuration</span>
+    <span class="keyword">await</span> db.execute(<span class="string">"""
+        INSERT INTO dashboard_configs (tenant_id, widgets)
+        VALUES (:tenant_id, :widgets)
+    """</span>, {<span class="string">"tenant_id"</span>: tenant.id, <span class="string">"widgets"</span>: json.<span class="function">dumps</span>(template.dashboard_widgets)})
+
+    <span class="comment"># 6. Log onboarding event</span>
+    <span class="keyword">await</span> <span class="function">log_event</span>(
+        tenant_id=tenant.id,
+        event=<span class="string">"tenant.onboarded"</span>,
+        metadata={<span class="string">"industry"</span>: signup_data.industry_id, <span class="string">"plan"</span>: <span class="string">"starter"</span>}
+    )
+
+    <span class="keyword">return</span> tenant</pre>
+
+                <h3>Frontend Onboarding Flow Component</h3>
+                <pre><span class="comment">// app/onboard/page.tsx</span>
+<span class="string">'use client'</span>
+<span class="keyword">import</span> { useState } <span class="keyword">from</span> <span class="string">'react'</span>
+<span class="keyword">import { useRouter } from 'next/navigation'</span>
+
+<span class="type">INDUSTRIES</span> = [
+  { id: <span class="string">'food'</span>, name: <span class="string">'Food Manufacturing'</span>, icon: <span class="string">'🏭'</span> },
+  { id: <span class="string">'recruitment'</span>, name: <span class="string">'Recruitment'</span>, icon: <span class="string">'👔'</span> },
+  { id: <span class="string">'retail'</span>, name: <span class="string">'Retail'</span>, icon: <span class="string">'🛍️'</span> },
+  { id: <span class="string">'real_estate'</span>, name: <span class="string">'Real Estate'</span>, icon: <span class="string">'🏠'</span> },
+]
+
+<span class="keyword">export default function</span> <span class="function">OnboardPage</span>() {
+  <span class="keyword">const</span> [step, setStep] = useState(1)
+  <span class="keyword">const</span> [selectedIndustry, setSelectedIndustry] = useState<span class="keyword">null</span>
+  <span class="keyword">const</span> router = <span class="function">useRouter</span>()
+
+  <span class="keyword">const</span> handleSelectIndustry = <span class="keyword">async</span> (industryId: <span class="type">string</span>) =&gt; {
+    <span class="function">setSelectedIndustry</span>(industryId)
+    <span class="keyword">const</span> res = <span class="keyword">await</span> <span class="function">fetch</span>(<span class="string">'/api/onboard'</span>, {
+      method: <span class="string">'POST'</span>,
+      body: JSON.<span class="function">stringify</span>({ industry_id: industryId }),
+    })
+
+    <span class="keyword">if</span> (res.ok) {
+      router.<span class="function">push</span>(<span class="string">'/dashboard'</span>)
+    }
+  }
+
+  <span class="keyword">return</span> (
+    &lt;<span class="keyword">div</span> className=<span class="string">"max-w-4xl mx-auto p-8"</span>&gt;
+      &lt;<span class="keyword">h1</span> className=<span class="string">"text-3xl font-bold mb-8"</span>&gt;Pick Your Industry&lt;/<span class="keyword">h1</span>&gt;
+      &lt;<span class="keyword">div</span> className=<span class="string">"grid grid-cols-1 md:grid-cols-2 gap-4"</span>&gt;
+        {<span class="type">INDUSTRIES</span>.<span class="function">map</span>(industry =&gt; (
+          &lt;<span class="keyword">button</span>
+            key={industry.id}
+            onClick={() =&gt; <span class="function">handleSelectIndustry</span>(industry.id)}
+            className=<span class="string">"p-8 border-2 rounded-lg hover:border-blue-500 cursor-pointer"</span>
+          &gt;
+            &lt;<span class="keyword">div</span> className=<span class="string">"text-4xl mb-4"</span>&gt;{industry.icon}&lt;/<span class="keyword">div</span>&gt;
+            &lt;<span class="keyword">h3</span> className=<span class="string">"font-semibold text-lg"</span>&gt;{industry.name}&lt;/<span class="keyword">h3</span>&gt;
+          &lt;/<span class="keyword">button</span>&gt;
+        ))}
+      &lt;/<span class="keyword">div</span>&gt;
+    &lt;/<span class="keyword">div</span>&gt;
+  )
+}</pre>
+
+                <h3>Onboarding Sequence Diagram</h3>
+                <div class="mermaid">
+                    sequenceDiagram
+                    participant User as User
+                    participant Frontend as Next.js Frontend
+                    participant API as API Route
+                    participant DB as Cloud SQL
+                    participant GCS as GCS
+                    participant RAG as File Search
+
+                    User->>Frontend: Sign up + select industry
+                    Frontend->>API: POST /api/onboard { industry_id }
+                    API->>DB: INSERT tenant record
+                    DB->>API: tenant_id
+                    API->>DB: INSERT document_types from template
+                    API->>RAG: Create File Search Stores
+                    API->>DB: INSERT dashboard config
+                    API->>Frontend: { success, tenant_id }
+                    Frontend->>User: Redirect to /dashboard
+                    User->>Frontend: Dashboard loads
+                    Frontend->>API: GET /api/dashboard config
+                    API->>DB: Fetch tenant config
+                    Frontend->>User: Render dashboard widgets
+                </div>
+
+                <h3>Time-to-Value Metric</h3>
+                <div class="card warning">
+                    <div class="card-title">Target SLA</div>
+                    <p><strong>&lt;5 minutes</strong> from signup to first AI-extracted document visible on dashboard.</p>
+                    <p style="margin-top: 0.75rem; font-size: 0.9rem;">
+                        1 min: Signup. 1 min: Industry selection + auto-provision. 2 min: Upload sample doc + AI extracts. 1 min: See results.
+                    </p>
+                </div>
+
+                <div class="implementation-note">
+                    <strong>Zero-Touch Onboarding:</strong> No manual approval, no support email, no waiting. The moment a user picks their industry, the system creates everything needed. They land on a working dashboard within 60 seconds.
+                </div>
+            </section>
+
+            <!-- SECTION 10 -->
+            <section id="section-10">
+                <h2>Section 10: Security, Compliance & Pricing</h2>
+
+                <div class="section-intro">
+                    <strong>Multi-Layer Security:</strong> Network isolation, application-level RBAC, data encryption at rest and in transit, comprehensive audit logging. Compliance-ready for SOC 2 and GDPR.
+                </div>
+
+                <h3>Three-Tier Security Model</h3>
+                <div class="grid-2">
+                    <div class="card">
+                        <div class="card-title">Network Layer</div>
+                        <p><strong>VPC:</strong> Private Cloud SQL, no public IPs. <strong>Cloud Run:</strong> IAM-authenticated only. <strong>Cloud CDN:</strong> DDoS protection via Google Edge Network.</p>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">Application Layer</div>
+                        <p><strong>NextAuth.js:</strong> JWT-based sessions. <strong>Tenant Context Middleware:</strong> Injects tenant_id into every request. <strong>RBAC:</strong> owner/admin/member/viewer roles with granular permissions.</p>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">Data Layer</div>
+                        <p><strong>RLS in PostgreSQL:</strong> Row-level security enforced at database level. <strong>GCS IAM:</strong> Per-tenant bucket prefixes with condition-based access. <strong>AES-256:</strong> Encryption at rest.</p>
+                    </div>
+                </div>
+
+                <h3>RBAC System</h3>
+                <p>Fine-grained role-based access control with 4 roles:</p>
+
+                <pre><span class="keyword">CREATE TABLE</span> tenant_users (
+    id <span class="type">UUID</span> <span class="keyword">PRIMARY KEY</span> <span class="keyword">DEFAULT</span> gen_random_uuid(),
+    tenant_id <span class="type">UUID</span> <span class="keyword">NOT NULL REFERENCES</span> tenants(id),
+    user_id <span class="type">UUID</span> <span class="keyword">NOT NULL REFERENCES</span> users(id),
+    role <span class="type">TEXT</span> <span class="keyword">NOT NULL</span> <span class="keyword">CHECK</span> (role <span class="keyword">IN</span> (<span class="string">'owner'</span>, <span class="string">'admin'</span>, <span class="string">'member'</span>, <span class="string">'viewer'</span>)),
+    invited_by <span class="type">UUID</span> <span class="keyword">REFERENCES</span> users(id),
+    created_at <span class="type">TIMESTAMPTZ</span> <span class="keyword">DEFAULT</span> <span class="keyword">now</span>(),
+    <span class="keyword">UNIQUE</span>(tenant_id, user_id)
+);</pre>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Role</th>
+                            <th>Upload Documents</th>
+                            <th>View Documents</th>
+                            <th>Create Reports</th>
+                            <th>Manage Users</th>
+                            <th>Manage Settings</th>
+                            <th>Delete Tenant</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Owner</strong></td>
+                            <td>✓</td>
+                            <td>✓</td>
+                            <td>✓</td>
+                            <td>✓</td>
+                            <td>✓</td>
+                            <td>✓</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Admin</strong></td>
+                            <td>✓</td>
+                            <td>✓</td>
+                            <td>✓</td>
+                            <td>✓</td>
+                            <td>✓</td>
+                            <td>✗</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Member</strong></td>
+                            <td>✓</td>
+                            <td>✓</td>
+                            <td>✓</td>
+                            <td>✗</td>
+                            <td>✗</td>
+                            <td>✗</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Viewer</strong></td>
+                            <td>✗</td>
+                            <td>✓</td>
+                            <td>✓</td>
+                            <td>✗</td>
+                            <td>✗</td>
+                            <td>✗</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Pricing Tiers</h3>
+                <p>Simple, transparent pricing scaled to tenant usage. All plans include multi-user access and industry-specific features:</p>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Feature</th>
+                            <th>Starter<br/>$49/mo</th>
+                            <th>Growth<br/>$149/mo</th>
+                            <th>Enterprise<br/>Custom</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Documents/month</strong></td>
+                            <td>500</td>
+                            <td>2,500</td>
+                            <td>Unlimited</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Users</strong></td>
+                            <td>3</td>
+                            <td>15</td>
+                            <td>Unlimited</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Custom fields per doc type</strong></td>
+                            <td>5</td>
+                            <td>20</td>
+                            <td>Unlimited</td>
+                        </tr>
+                        <tr>
+                            <td><strong>AI chat queries/mo</strong></td>
+                            <td>100</td>
+                            <td>1,000</td>
+                            <td>Unlimited</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Storage</strong></td>
+                            <td>5 GB</td>
+                            <td>25 GB</td>
+                            <td>Custom</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Reports</strong></td>
+                            <td>Basic</td>
+                            <td>Advanced + scheduled</td>
+                            <td>Custom templates</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Support</strong></td>
+                            <td>Email</td>
+                            <td>Email + chat</td>
+                            <td>Dedicated CSM</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Gemini AI tokens (monthly)</strong></td>
+                            <td>5M</td>
+                            <td>25M</td>
+                            <td>Volume pricing</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Usage Metering via BigQuery</h3>
+                <p>Usage is tracked in real-time and aggregated for billing. Tenants can see their usage dashboard:</p>
+
+                <pre><span class="comment">-- BigQuery: Monthly usage metrics per tenant</span>
+<span class="keyword">SELECT</span>
+  tenant_id,
+  <span class="keyword">COUNT</span>(<span class="keyword">DISTINCT</span> document_id) <span class="keyword">AS</span> documents_count,
+  <span class="keyword">COUNT</span>(<span class="keyword">CASE WHEN</span> event = <span class="string">'chat_query'</span> <span class="keyword">THEN</span> <span class="number">1</span> <span class="keyword">END</span>) <span class="keyword">AS</span> chat_queries,
+  <span class="keyword">SUM</span>(tokens_used) <span class="keyword">AS</span> total_tokens,
+  <span class="keyword">SUM</span>(storage_bytes) / <span class="keyword">POWER</span>(<span class="number">10</span>, <span class="number">9</span>) <span class="keyword">AS</span> storage_gb
+<span class="keyword">FROM</span> `biz2bricks.usage_logs.events`
+<span class="keyword">WHERE</span> <span class="keyword">DATE</span>(timestamp) <span class="keyword">BETWEEN</span>
+  <span class="keyword">DATE_TRUNC</span>(<span class="keyword">CURRENT_DATE</span>(), <span class="keyword">MONTH</span>) <span class="keyword">AND</span> <span class="keyword">CURRENT_DATE</span>()
+<span class="keyword">GROUP BY</span> tenant_id</pre>
+
+                <h3>Compliance & Data Residency</h3>
+                <ul class="vertical-list">
+                    <li><strong>SOC 2 Type II:</strong> On-track for certification. Comprehensive audit logging, access controls, incident response procedures.</li>
+                    <li><strong>GDPR:</strong> Regional Cloud SQL deployments (EU data stays in EU). Data export/deletion on tenant request.</li>
+                    <li><strong>Audit Logging:</strong> All document uploads, deletions, user actions logged to Cloud Logging. 1-year retention.</li>
+                    <li><strong>Data Encryption:</strong> AES-256 at rest in GCS and Cloud SQL. TLS 1.3 in transit. Keys in Google Cloud KMS (customer-managed if Enterprise).</li>
+                    <li><strong>Backup & Recovery:</strong> Cloud SQL automated backups every 6 hours. Point-in-time recovery up to 35 days. Tested quarterly.</li>
+                </ul>
+
+                <h3>Compliance Readiness Checklist</h3>
+                <div class="card info">
+                    <div class="card-title">Security Controls</div>
+                    <ul class="vertical-list">
+                        <li>Multi-factor authentication (NextAuth.js + optional TOTP)</li>
+                        <li>Row-level security in database</li>
+                        <li>API rate limiting (Memorystore Redis)</li>
+                        <li>CORS configured per environment</li>
+                        <li>CSFR tokens on all state-changing endpoints</li>
+                        <li>Secrets rotated quarterly via Secret Manager</li>
+                    </ul>
+                </div>
+
+                <div class="card info">
+                    <div class="card-title">Monitoring & Logging</div>
+                    <ul class="vertical-list">
+                        <li>Cloud Logging for all API requests, agent actions, database changes</li>
+                        <li>Cloud Monitoring for infrastructure alerts (CPU, memory, RLS violations)</li>
+                        <li>BigQuery export of logs for long-term analysis</li>
+                        <li>Monthly security audit reports generated automatically</li>
+                    </ul>
+                </div>
+
+                <h3>Business Model & Unit Economics</h3>
+                <p>Biz2Bricks targets SMBs (10-500 employees) across 4 verticals. The self-service, configuration-driven approach enables low CAC and high unit economics:</p>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Metric</th>
+                            <th>Target</th>
+                            <th>Notes</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Customer Acquisition Cost (CAC)</strong></td>
+                            <td>$200-300</td>
+                            <td>Organic/content marketing + free tier, self-serve signup</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Lifetime Value (LTV)</strong></td>
+                            <td>$3,500-5,000</td>
+                            <td>$99 ARPU × 4-year retention (36 months)</td>
+                        </tr>
+                        <tr>
+                            <td><strong>LTV/CAC Ratio</strong></td>
+                            <td>12-20x</td>
+                            <td>Healthy SaaS business</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Gross Margin</strong></td>
+                            <td>70%</td>
+                            <td>Gemini API costs + Cloud Run hosting = ~30% COGS</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Churn (Monthly)</strong></td>
+                            <td>&lt;3%</td>
+                            <td>Strong product-market fit, low switching costs</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Net Revenue Retention</strong></td>
+                            <td>110%</td>
+                            <td>Expansion revenue from upsell to Growth/Enterprise tiers</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div class="implementation-note">
+                    <strong>Go-To-Market Strategy:</strong> Launch with self-serve freemium (500 docs/mo, 1 user). Target vertical SMB communities via communities, events, and content. Build integrations with industry-standard tools (e.g., Zoho for retail, LinkedIn Recruiter API for recruitment). Drive organic word-of-mouth through measurable ROI (e.g., "70% faster order processing" for food manufacturers).
+                </div>
+            </section>
+
+            <!-- SECTION 11 -->
+            <section id="section-11">
+                <h2>Section 11: Hybrid Query Intelligence — Router Architecture</h2>
+
+                <div class="section-intro">
+                    <strong>Problem Statement:</strong> Biz2Bricks tenants have two complementary data sources: structured extracted data in Cloud SQL and unstructured document content in Gemini File Search. Users need a single natural language interface that intelligently routes questions to the best data source(s) and synthesizes coherent answers.
+                </div>
+
+                <h3>The Query Spectrum</h3>
+                <p>User questions fall along a spectrum from purely structured to purely unstructured. The router classifies each into one of three routes:</p>
+
+                <div class="mermaid">
+graph TB
+    Question[User Question]
+    Router[Query Router - Gemini 3 Flash]
+
+    subgraph SQL_Path[SQL Path]
+        SchemaLookup[Schema Registry Lookup]
+        SQLGen[SQL Generation]
+        SQLValidate[SQL Validation + Sanitization]
+        SQLExec[Execute on Cloud SQL]
+        SQLFormat[Format Results]
+    end
+
+    subgraph RAG_Path[RAG Path]
+        StoreSelect[Select File Search Stores]
+        RAGQuery[Query Gemini File Search]
+        RAGCite[Extract Citations]
+    end
+
+    Synthesizer[Result Synthesizer]
+    Response[Final Response with Sources]
+
+    Question --> Router
+    Router -->|sql_only| SchemaLookup
+    Router -->|rag_only| StoreSelect
+    Router -->|hybrid| SchemaLookup
+    Router -->|hybrid| StoreSelect
+
+    SchemaLookup --> SQLGen
+    SQLGen --> SQLValidate
+    SQLValidate --> SQLExec
+    SQLExec --> SQLFormat
+
+    StoreSelect --> RAGQuery
+    RAGQuery --> RAGCite
+
+    SQLFormat --> Synthesizer
+    RAGCite --> Synthesizer
+    Synthesizer --> Response
+                </div>
+
+                <h3>Router Implementation</h3>
+                <p>The router uses Gemini 3 Flash with structured output mode to classify queries reliably:</p>
+
+                <pre><code><span class="keyword">from</span> google <span class="keyword">import</span> genai
+<span class="keyword">from</span> google.genai <span class="keyword">import</span> types
+<span class="keyword">from</span> pydantic <span class="keyword">import</span> BaseModel
+<span class="keyword">from</span> enum <span class="keyword">import</span> Enum
+
+<span class="keyword">class</span> <span class="type">QueryRoute</span>(str, Enum):
+    SQL_ONLY = <span class="string">"sql_only"</span>
+    RAG_ONLY = <span class="string">"rag_only"</span>
+    HYBRID = <span class="string">"hybrid"</span>
+
+<span class="keyword">class</span> <span class="type">RouterDecision</span>(BaseModel):
+    route: QueryRoute
+    reasoning: str
+    sql_question: str | None = None
+    rag_question: str | None = None
+    confidence: float
+
+client = genai.Client(vertexai=True, project=<span class="string">"biz2bricks-prod"</span>, location=<span class="string">"us-central1"</span>)
+
+ROUTER_PROMPT = <span class="string">"""You are a query router for a document intelligence platform.
+
+Given a user's natural language question, decide which data source(s) to query:
+
+**sql_only** — Use when the question asks for aggregations, filtering, sorting, ranking, or comparisons answerable from structured fields.
+
+**rag_only** — Use when the question asks for specific content, qualitative information, or context not extracted into structured fields.
+
+**hybrid** — Use when the question needs BOTH structured filtering AND document context.
+
+Available structured fields for this tenant:
+{schema_description}
+
+Available document types in RAG:
+{rag_store_descriptions}
+
+User question: {question}
+
+Return your decision as JSON."""</span>
+
+<span class="decorator">@app.post</span>(<span class="string">"/route"</span>)
+<span class="keyword">async def</span> <span class="function">route_query</span>(tenant_id: str, question: str) -> RouterDecision:
+    schema_desc = <span class="keyword">await</span> get_tenant_schema_description(tenant_id)
+    rag_desc = <span class="keyword">await</span> get_tenant_rag_description(tenant_id)
+
+    response = <span class="keyword">await</span> client.aio.models.generate_content(
+        model=<span class="string">"gemini-3-flash"</span>,
+        contents=ROUTER_PROMPT.format(
+            schema_description=schema_desc,
+            rag_store_descriptions=rag_desc,
+            question=question,
+        ),
+        config=types.GenerateContentConfig(
+            response_mime_type=<span class="string">"application/json"</span>,
+            response_json_schema=RouterDecision.model_json_schema(),
+        ),
+    )
+
+    <span class="keyword">return</span> RouterDecision.model_validate_json(response.text)</code></pre>
+
+                <div class="implementation-note">
+                    <strong>Implementation Note:</strong> The router uses Gemini's structured output mode to ensure consistent, parseable responses. The prompt explicitly defines the three routes and provides schema context so Gemini can make informed routing decisions without custom parsing logic.
+                </div>
+            </section>
+
+            <!-- SECTION 12 -->
+            <section id="section-12">
+                <h2>Section 12: Text-to-SQL Engine</h2>
+
+                <div class="section-intro">
+                    <strong>Core Challenge:</strong> Each tenant's database schema is dynamic, with base extracted fields and custom JSONB columns that vary. The SQL generator must understand the tenant's schema at generation time and produce safe, validated queries.
+                </div>
+
+                <h3>Schema Registry</h3>
+                <p>The Schema Registry builds a natural-language description of each tenant's data model, embedded in the SQL generation prompt:</p>
+
+                <pre><code><span class="keyword">async def</span> <span class="function">get_tenant_schema_description</span>(tenant_id: str) -> str:
+    <span class="string">"""Build natural language schema description for SQL generator."""</span>
+
+    doc_types = <span class="keyword">await</span> db.fetch_all(<span class="string">"""
+        SELECT dt.type_key, dt.display_name, dt.base_schema,
+               json_agg(json_build_object(
+                   'name', cf.field_name,
+                   'type', cf.field_type,
+                   'hint', cf.extraction_hint
+               )) FILTER (WHERE cf.id IS NOT NULL) AS custom_fields
+        FROM document_types dt
+        LEFT JOIN custom_fields cf ON cf.document_type_id = dt.id
+        WHERE dt.tenant_id = :tenant_id
+        GROUP BY dt.id
+    """</span>, {<span class="string">"tenant_id"</span>: tenant_id})
+
+    lines = [<span class="string">"## Database Schema"</span>, <span class="string">""</span>]
+    lines.append(<span class="string">"### Core Tables"</span>)
+    lines.append(<span class="string">"- `documents` (id, tenant_id, document_type_id, gcs_path, status, created_at)"</span>)
+    lines.append(<span class="string">"- `extracted_data` (id, document_id, tenant_id, data JSONB, validation_errors, extracted_at)"</span>)
+    lines.append(<span class="string">""</span>)
+
+    <span class="keyword">for</span> dt <span class="keyword">in</span> doc_types:
+        lines.append(<span class="string">f"### Document Type: {dt['display_name']} (type_key='{dt['type_key']}')"</span>)
+
+        schema = dt[<span class="string">'base_schema'</span>]
+        <span class="keyword">if</span> <span class="string">'properties'</span> <span class="keyword">in</span> schema:
+            lines.append(<span class="string">"Base fields in `extracted_data.data`:"</span>)
+            <span class="keyword">for</span> field_name, field_def <span class="keyword">in</span> schema[<span class="string">'properties'</span>].items():
+                field_type = field_def.get(<span class="string">'type'</span>, <span class="string">'string'</span>)
+                lines.append(<span class="string">f"  - `data->>'{field_name}'` ({field_type})"</span>)
+
+        <span class="keyword">if</span> dt[<span class="string">'custom_fields'</span>]:
+            lines.append(<span class="string">"Custom fields (tenant-added):"</span>)
+            <span class="keyword">for</span> cf <span class="keyword">in</span> dt[<span class="string">'custom_fields'</span>]:
+                hint = cf[<span class="string">'hint'</span>] <span class="keyword">or</span> <span class="string">'no hint'</span>
+                lines.append(<span class="string">f"  - `data->>'{cf['name']}'` ({cf['type']}) — {hint}"</span>)
+
+        lines.append(<span class="string">""</span>)
+
+    <span class="keyword">return</span> <span class="string">"\n"</span>.join(lines)</code></pre>
+
+                <h3>SQL Generation with Gemini</h3>
+
+                <pre><code>SQL_GENERATION_PROMPT = <span class="string">"""You are a PostgreSQL expert. Generate a query to answer:
+
+CRITICAL RULES:
+1. ALWAYS include WHERE tenant_id = :tenant_id (multi-tenant system)
+2. For JSONB: use data->>'field_name' for text, (data->>'field_name')::numeric for numbers
+3. For JSONB arrays: use jsonb_array_elements(data->'array_field') AS elem
+4. NEVER use DELETE, UPDATE, INSERT, DROP, ALTER — only SELECT
+5. ALWAYS limit to 100 rows unless aggregating
+6. For dates: (data->>'date_field')::date
+
+{schema_description}
+
+Question: {question}
+
+Return only the SQL query."""</span>
+
+<span class="keyword">async def</span> <span class="function">generate_sql</span>(tenant_id: str, question: str, schema_desc: str) -> str:
+    response = <span class="keyword">await</span> client.aio.models.generate_content(
+        model=<span class="string">"gemini-3-flash"</span>,
+        contents=SQL_GENERATION_PROMPT.format(
+            schema_description=schema_desc,
+            question=question,
+        ),
+        config=types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(thinking_level=<span class="string">"medium"</span>),
+        ),
+    )
+
+    sql = response.text.strip()
+    <span class="keyword">if</span> sql.startswith(<span class="string">"```"</span>):
+        sql = sql.split(<span class="string">"\n"</span>, <span class="number">1</span>)[<span class="number">1</span>].rsplit(<span class="string">"```"</span>, <span class="number">1</span>)[<span class="number">0</span>].strip()
+
+    <span class="keyword">return</span> sql</code></pre>
+
+                <h3>SQL Validation & Sanitization</h3>
+                <p>Before execution, SQL is validated using sqlglot to prevent injection and ensure only safe SELECT statements run:</p>
+
+                <pre><code><span class="keyword">import</span> sqlglot
+
+<span class="keyword">def</span> <span class="function">validate_sql</span>(sql: str, tenant_id: str) -> str:
+    <span class="string">"""Validate and sanitize generated SQL before execution."""</span>
+
+    <span class="comment"># 1. Parse with sqlglot to ensure valid SQL</span>
+    <span class="keyword">try</span>:
+        parsed = sqlglot.parse_one(sql, dialect=<span class="string">"postgres"</span>)
+    <span class="keyword">except</span> sqlglot.errors.ParseError <span class="keyword">as</span> e:
+        <span class="keyword">raise</span> SQLValidationError(<span class="string">f"Invalid SQL syntax: {e}"</span>)
+
+    <span class="comment"># 2. Reject any non-SELECT statements</span>
+    <span class="keyword">if</span> <span class="keyword">not</span> <span class="keyword">isinstance</span>(parsed, sqlglot.exp.Select):
+        <span class="keyword">raise</span> SQLValidationError(<span class="string">"Only SELECT statements are allowed"</span>)
+
+    <span class="comment"># 3. Check for dangerous operations</span>
+    dangerous_ops = (
+        sqlglot.exp.Delete, sqlglot.exp.Update, sqlglot.exp.Insert,
+        sqlglot.exp.Drop, sqlglot.exp.Alter, sqlglot.exp.Create,
+    )
+    <span class="keyword">for</span> node <span class="keyword">in</span> parsed.walk():
+        <span class="keyword">if</span> <span class="keyword">isinstance</span>(node, dangerous_ops):
+            <span class="keyword">raise</span> SQLValidationError(<span class="string">f"Forbidden operation: {type(node).__name__}"</span>)
+
+    <span class="comment"># 4. Ensure tenant_id filter exists</span>
+    <span class="keyword">if</span> <span class="string">"tenant_id"</span> <span class="keyword">not</span> <span class="keyword">in</span> sql.lower():
+        <span class="keyword">raise</span> SQLValidationError(<span class="string">"Query must include tenant_id filter"</span>)
+
+    <span class="comment"># 5. Add LIMIT if not present</span>
+    <span class="keyword">if</span> <span class="keyword">not</span> parsed.find(sqlglot.exp.Limit):
+        sql = <span class="string">f"SELECT * FROM ({sql}) _limited LIMIT 100"</span>
+
+    <span class="keyword">return</span> sql</code></pre>
+
+                <div class="card warning">
+                    <strong>Safety Guardrails:</strong> All SQL queries have a 5-second execution timeout and 100-row limit (unless aggregating). This prevents runaway queries from consuming resources. Parameterized tenant_id ensures no string interpolation. RLS at the database level provides defense-in-depth.
+                </div>
+            </section>
+
+            <!-- SECTION 13 -->
+            <section id="section-13">
+                <h2>Section 13: Hybrid Execution, Synthesis & Chat UI</h2>
+
+                <div class="section-intro">
+                    <strong>Design Pattern:</strong> For hybrid queries, both SQL and RAG paths execute in parallel. A Synthesizer then merges results into a coherent response that combines quantitative data with qualitative context.
+                </div>
+
+                <h3>Parallel Execution</h3>
+
+                <pre><code><span class="keyword">import</span> asyncio
+
+<span class="keyword">async def</span> <span class="function">execute_hybrid_query</span>(
+    tenant_id: str,
+    question: str,
+    router_decision: RouterDecision,
+    schema_desc: str,
+) -> dict:
+    <span class="string">"""Execute both SQL and RAG paths in parallel, then synthesize."""</span>
+
+    <span class="comment"># Run both paths concurrently</span>
+    sql_task = execute_sql_path(tenant_id, router_decision.sql_question, schema_desc)
+    rag_task = execute_rag_query(tenant_id, router_decision.rag_question)
+
+    sql_result, rag_result = <span class="keyword">await</span> asyncio.gather(sql_task, rag_task)
+
+    <span class="comment"># Synthesize results</span>
+    synthesis = <span class="keyword">await</span> synthesize_results(
+        question=question,
+        sql_result=sql_result,
+        rag_result=rag_result,
+    )
+
+    <span class="keyword">return</span> synthesis</code></pre>
+
+                <h3>Result Synthesis</h3>
+
+                <pre><code>SYNTHESIS_PROMPT = <span class="string">"""You are a BI assistant. The user asked a question requiring both structured data and document search.
+
+**User's question:** {question}
+
+**Structured data results (SQL):**
+{sql_results}
+
+**Document search results (RAG):**
+{rag_results}
+
+Combine these into a single, clear response:
+1. Lead with the quantitative answer from SQL
+2. Enrich with qualitative context from documents
+3. Cite specific documents for claims
+4. Format with clear sections if complex"""</span>
+
+<span class="keyword">async def</span> <span class="function">synthesize_results</span>(question: str, sql_result: dict, rag_result: dict) -> dict:
+    response = <span class="keyword">await</span> client.aio.models.generate_content(
+        model=<span class="string">"gemini-3-flash"</span>,
+        contents=SYNTHESIS_PROMPT.format(
+            question=question,
+            sql_results=format_sql_results(sql_result),
+            rag_results=format_rag_results(rag_result),
+        ),
+        config=types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(thinking_level=<span class="string">"high"</span>),
+        ),
+    )
+
+    <span class="keyword">return</span> {
+        <span class="string">"answer"</span>: response.text,
+        <span class="string">"sql_data"</span>: sql_result.get(<span class="string">"rows"</span>),
+        <span class="string">"sql_query"</span>: sql_result.get(<span class="string">"sql"</span>),
+        <span class="string">"rag_sources"</span>: rag_result.get(<span class="string">"sources"</span>),
+        <span class="string">"route"</span>: <span class="string">"hybrid"</span>,
+    }</code></pre>
+
+                <h3>Next.js Chat UI Component</h3>
+                <p>The chat interface displays results in tabbed format with both SQL results and RAG citations:</p>
+
+                <pre><code><span class="comment">// components/query-result.tsx</span>
+<span class="string">'use client'</span>
+<span class="keyword">import</span> { useState } <span class="keyword">from</span> <span class="string">'react'</span>
+<span class="keyword">import</span> { motion, AnimatePresence } <span class="keyword">from</span> <span class="string">'framer-motion'</span>
+
+<span class="keyword">type</span> <span class="type">Tab</span> = <span class="string">'answer'</span> | <span class="string">'sql'</span> | <span class="string">'sources'</span>
+
+<span class="keyword">export function</span> <span class="function">QueryResult</span>({ answer, sqlQuery, sqlRows, ragSources, route }) {
+    <span class="keyword">const</span> [activeTab, setActiveTab] = useState&lt;Tab&gt;(<span class="string">'answer'</span>)
+
+    <span class="keyword">const</span> tabs = [
+        { id: <span class="string">'answer'</span>, label: <span class="string">'Answer'</span>, available: <span class="keyword">true</span> },
+        { id: <span class="string">'sql'</span>, label: <span class="string">`SQL Results (${sqlRows?.length || 0})`</span>, available: !!sqlQuery },
+        { id: <span class="string">'sources'</span>, label: <span class="string">`Sources (${ragSources?.length || 0})`</span>, available: !!ragSources?.length },
+    ]
+
+    <span class="keyword">return</span> (
+        &lt;<span class="keyword">div</span> className=<span class="string">"rounded-xl border bg-white shadow-sm"</span>&gt;
+            &lt;<span class="keyword">div</span> className=<span class="string">"px-4 pt-3"</span>&gt;
+                &lt;<span class="keyword">span</span> className={<span class="string">`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium
+                  ${route === 'hybrid' ? 'bg-purple-100 text-purple-800' : ''}`</span>}&gt;
+                    {route === <span class="string">'hybrid'</span> ? <span class="string">'SQL + Documents'</span> : <span class="string">''</span>}
+                &lt;/<span class="keyword">span</span>&gt;
+            &lt;/<span class="keyword">div</span>&gt;
+
+            &lt;<span class="keyword">div</span> className=<span class="string">"flex gap-1 px-4 pt-3 border-b"</span>&gt;
+                {tabs.filter(t =&gt; t.available).map(tab =&gt; (
+                    &lt;<span class="keyword">button</span>
+                        key={tab.id}
+                        onClick={() =&gt; setActiveTab(tab.id)}
+                        className=<span class="string">`px-4 py-2 text-sm font-medium rounded-t-lg`</span>
+                    &gt;
+                        {tab.label}
+                    &lt;/<span class="keyword">button</span>&gt;
+                ))}
+            &lt;/<span class="keyword">div</span>&gt;
+
+            &lt;<span class="type">AnimatePresence</span>&gt;
+                &lt;<span class="type">motion.div</span> key={activeTab} className=<span class="string">"p-4"</span>&gt;
+                    {activeTab === <span class="string">'answer'</span> &amp;&amp; &lt;<span class="keyword">div</span> dangerouslySetInnerHTML={{ __html: answer }} /&gt;}
+                    {activeTab === <span class="string">'sql'</span> &amp;&amp; sqlQuery &amp;&amp; (
+                        &lt;<span class="keyword">div</span> className=<span class="string">"space-y-4"</span>&gt;
+                            &lt;<span class="keyword">pre</span> className=<span class="string">"bg-gray-900 text-green-400 p-3 rounded-lg text-sm"</span>&gt;{sqlQuery}&lt;/<span class="keyword">pre</span>&gt;
+                            {sqlRows &amp;&amp; (
+                                &lt;<span class="keyword">table</span> className=<span class="string">"min-w-full divide-y divide-gray-200"</span>&gt;
+                                    &lt;<span class="keyword">thead</span>&gt;
+                                        &lt;<span class="keyword">tr</span>&gt;
+                                            {Object.keys(sqlRows[0] || {}).map(col =&gt; (
+                                                &lt;<span class="keyword">th</span> key={col} className=<span class="string">"px-3 py-2 text-left"</span>&gt;{col}&lt;/<span class="keyword">th</span>&gt;
+                                            ))}
+                                        &lt;/<span class="keyword">tr</span>&gt;
+                                    &lt;/<span class="keyword">thead</span>&gt;
+                                    &lt;<span class="keyword">tbody</span>&gt;
+                                        {sqlRows.map((row, i) =&gt; (
+                                            &lt;<span class="keyword">tr</span> key={i}&gt;
+                                                {Object.values(row).map((val, j) =&gt; (
+                                                    &lt;<span class="keyword">td</span> key={j} className=<span class="string">"px-3 py-2"</span>&gt;{String(val)}&lt;/<span class="keyword">td</span>&gt;
+                                                ))}
+                                            &lt;/<span class="keyword">tr</span>&gt;
+                                        ))}
+                                    &lt;/<span class="keyword">tbody</span>&gt;
+                                &lt;/<span class="keyword">table</span>&gt;
+                            )}
+                        &lt;/<span class="keyword">div</span>&gt;
+                    )}
+                    {activeTab === <span class="string">'sources'</span> &amp;&amp; ragSources &amp;&amp; (
+                        &lt;<span class="keyword">div</span> className=<span class="string">"space-y-3"</span>&gt;
+                            {ragSources.map((source, i) =&gt; (
+                                &lt;<span class="keyword">div</span> key={i} className=<span class="string">"p-3 bg-gray-50 rounded-lg"</span>&gt;
+                                    &lt;<span class="keyword">p</span> className=<span class="string">"font-medium"</span>&gt;{source.file_name}&lt;/<span class="keyword">p</span>&gt;
+                                    &lt;<span class="keyword">p</span> className=<span class="string">"text-sm text-gray-600 mt-1"</span>&gt;{source.snippet}&lt;/<span class="keyword">p</span>&gt;
+                                    &lt;<span class="keyword">span</span> className=<span class="string">"text-xs text-gray-400"</span>&gt;Relevance: {Math.round(source.relevance_score * 100)}%&lt;/<span class="keyword">span</span>&gt;
+                                &lt;/<span class="keyword">div</span>&gt;
+                            ))}
+                        &lt;/<span class="keyword">div</span>&gt;
+                    )}
+                &lt;/<span class="type">motion.div</span>&gt;
+            &lt;/<span class="type">AnimatePresence</span>&gt;
+        &lt;/<span class="keyword">div</span>&gt;
+    )
+}</code></pre>
+
+                <h3>Chat API Route with SSE Streaming</h3>
+
+                <pre><code><span class="comment">// app/api/chat/route.ts</span>
+<span class="keyword">export async function</span> <span class="function">POST</span>(req: NextRequest) {
+    <span class="keyword">const</span> { message } = <span class="keyword">await</span> req.json()
+    <span class="keyword">const</span> tenantId = req.headers.get(<span class="string">'x-tenant-id'</span>)!
+
+    <span class="keyword">const</span> stream = <span class="keyword">new</span> <span class="type">ReadableStream</span>({
+        <span class="keyword">async</span> start(controller) {
+            <span class="comment">// 1. Route the query</span>
+            controller.enqueue(encoder.encode(<span class="string">`data: ${JSON.stringify({ type: 'status', content: 'Analyzing...' })}\n\n`</span>))
+
+            <span class="keyword">const</span> routeResponse = <span class="keyword">await</span> invokeAgent(tenantId, <span class="string">'query_intelligence'</span>, {
+                action: <span class="string">'route'</span>,
+                question: message,
+            })
+
+            <span class="comment"># 2. Execute and 3. Stream result</span>
+            <span class="keyword">const</span> result = <span class="keyword">await</span> invokeAgent(tenantId, <span class="string">'query_intelligence'</span>, {
+                action: <span class="string">'execute'</span>,
+                question: message,
+                route: routeResponse.route,
+            })
+
+            controller.enqueue(encoder.encode(<span class="string">`data: ${JSON.stringify({ type: 'answer', content: result.answer })}\n\n`</span>))
+
+            <span class="keyword">if</span> (result.sql_query) {
+                controller.enqueue(encoder.encode(<span class="string">`data: ${JSON.stringify({ type: 'sql', query: result.sql_query, rows: result.sql_data })}\n\n`</span>))
+            }
+
+            <span class="keyword">if</span> (result.rag_sources) {
+                controller.enqueue(encoder.encode(<span class="string">`data: ${JSON.stringify({ type: 'sources', sources: result.rag_sources })}\n\n`</span>))
+            }
+
+            controller.enqueue(encoder.encode(<span class="string">'data: [DONE]\n\n'</span>))
+            controller.close()
+        },
+    })
+
+    <span class="keyword">return</span> <span class="keyword">new</span> <span class="type">Response</span>(stream, {
+        headers: {
+            <span class="string">'Content-Type'</span>: <span class="string">'text/event-stream'</span>,
+            <span class="string">'Cache-Control'</span>: <span class="string">'no-cache'</span>,
+            <span class="string">'Connection'</span>: <span class="string">'keep-alive'</span>,
+        },
+    })
+}</code></pre>
+
+                <div class="card info">
+                    <strong>Progressive Display:</strong> The SSE stream allows status updates before final answers arrive. Results display progressively as each path completes, improving perceived performance.
+                </div>
+            </section>
+
+            <!-- SECTION 14 -->
+            <section id="section-14">
+                <h2>Section 14: Query Safety, Observability & Smart Suggestions</h2>
+
+                <div class="section-intro">
+                    <strong>Commitment to Reliability:</strong> Every generated SQL is validated, executed with timeouts, and logged. Observability pipelines track query health. Smart suggestions guide users toward useful queries.
+                </div>
+
+                <h3>Multi-Layer Safety</h3>
+
+                <div class="card warning">
+                    <strong>SQL Injection Prevention:</strong>
+                    <ul style="margin: 0.5rem 0 0 0;">
+                        <li>sqlglot parsing and validation (AST analysis)</li>
+                        <li>Parameterized tenant_id (never string interpolation)</li>
+                        <li>RLS (Row Level Security) as defense-in-depth</li>
+                        <li>Only SELECT statements allowed</li>
+                    </ul>
+                </div>
+
+                <h3>Safe SQL Execution with Caching</h3>
+
+                <pre><code><span class="keyword">async def</span> <span class="function">safe_execute_sql</span>(sql: str, tenant_id: str, timeout_ms: int = 5000) -> dict:
+    <span class="keyword">try</span>:
+        <span class="comment"># Validate SQL</span>
+        validated_sql = validate_sql(sql, tenant_id)
+
+        <span class="comment"># Execute with timeout</span>
+        <span class="keyword">async with</span> db.connection() <span class="keyword">as</span> conn:
+            <span class="keyword">await</span> conn.execute(<span class="string">"SET app.current_tenant = :tid"</span>, {<span class="string">"tid"</span>: tenant_id})
+            <span class="keyword">await</span> conn.execute(<span class="string">f"SET statement_timeout = {timeout_ms}"</span>)
+
+            start = time.monotonic()
+            rows = <span class="keyword">await</span> conn.fetch_all(validated_sql, {<span class="string">"tenant_id"</span>: tenant_id})
+            execution_time = time.monotonic() - start
+
+            <span class="keyword">await</span> log_query_execution(tenant_id=tenant_id, sql=validated_sql, execution_time_ms=execution_time * 1000, status=<span class="string">"success"</span>)
+
+            <span class="keyword">return</span> {
+                <span class="string">"rows"</span>: [<span class="keyword">dict</span>(r) <span class="keyword">for</span> r <span class="keyword">in</span> rows],
+                <span class="string">"sql"</span>: validated_sql,
+                <span class="string">"execution_time_ms"</span>: execution_time * 1000
+            }
+
+    <span class="keyword">except</span> asyncio.TimeoutError:
+        <span class="keyword">await</span> log_query_execution(tenant_id=tenant_id, sql=sql, status=<span class="string">"timeout"</span>)
+        <span class="keyword">return</span> {<span class="string">"error"</span>: <span class="string">"Query took too long. Try a more specific question."</span>, <span class="string">"sql"</span>: sql}
+
+    <span class="keyword">except</span> Exception <span class="keyword">as</span> e:
+        <span class="keyword">await</span> log_query_execution(tenant_id=tenant_id, sql=sql, status=<span class="string">"error"</span>, error=<span class="keyword">str</span>(e))
+        <span class="keyword">return</span> {<span class="string">"error"</span>: <span class="string">"Query execution failed. Falling back to document search."</span>, <span class="string">"sql"</span>: sql}
+
+<span class="keyword">async def</span> <span class="function">cached_sql_execute</span>(sql: str, tenant_id: str, cache_ttl: int = 300) -> dict:
+    <span class="string">"""Cache SQL results in Redis for 5 minutes."""</span>
+    cache_key = <span class="string">f"sql:{tenant_id}:{hashlib.sha256(sql.encode()).hexdigest()}"</span>
+
+    <span class="comment"># Check cache first</span>
+    cached = <span class="keyword">await</span> redis.get(cache_key)
+    <span class="keyword">if</span> cached:
+        <span class="keyword">return</span> json.loads(cached)
+
+    <span class="comment"># Execute if not cached</span>
+    result = <span class="keyword">await</span> safe_execute_sql(sql, tenant_id)
+
+    <span class="comment"># Cache successful results</span>
+    <span class="keyword">if</span> <span class="string">"error"</span> <span class="keyword">not</span> <span class="keyword">in</span> result:
+        <span class="keyword">await</span> redis.setex(cache_key, cache_ttl, json.dumps(result, default=<span class="keyword">str</span>))
+
+    <span class="keyword">return</span> result</code></pre>
+
+                <h3>Suggested Questions & Auto-Charts</h3>
+
+                <pre><code><span class="keyword">async def</span> <span class="function">generate_suggested_questions</span>(tenant_id: str) -> list[dict]:
+    <span class="string">"""Generate contextual suggestions based on tenant's data model."""</span>
+    schema_desc = <span class="keyword">await</span> get_tenant_schema_description(tenant_id)
+    doc_count = <span class="keyword">await</span> get_tenant_document_counts(tenant_id)
+
+    response = <span class="keyword">await</span> client.aio.models.generate_content(
+        model=<span class="string">"gemini-3-flash"</span>,
+        contents=<span class="string">f"""Based on this data, suggest 8 useful questions.
+Mix SQL-answerable and RAG-answerable questions.
+
+{schema_desc}
+
+Document counts: {json.dumps(doc_count)}
+
+Return as JSON array with 'question', 'route', and 'category' fields."""</span>,
+        config=types.GenerateContentConfig(
+            response_mime_type=<span class="string">"application/json"</span>,
+        ),
+    )
+
+    <span class="keyword">return</span> json.loads(response.text)
+
+<span class="keyword">def</span> <span class="function">suggest_visualization</span>(columns: list[str], rows: list[dict]) -> dict | None:
+    <span class="string">"""Analyze SQL results and suggest appropriate visualization."""</span>
+    <span class="keyword">if</span> <span class="keyword">not</span> rows <span class="keyword">or</span> len(rows) < 2:
+        <span class="keyword">return</span> None
+
+    numeric_cols = [c <span class="keyword">for</span> c <span class="keyword">in</span> columns <span class="keyword">if</span> <span class="keyword">isinstance</span>(rows[0].get(c), (int, float))]
+    text_cols = [c <span class="keyword">for</span> c <span class="keyword">in</span> columns <span class="keyword">if</span> <span class="keyword">isinstance</span>(rows[0].get(c), str)]
+    date_cols = [c <span class="keyword">for</span> c <span class="keyword">in</span> columns <span class="keyword">if</span> <span class="string">'date'</span> <span class="keyword">in</span> c.lower()]
+
+    <span class="comment"># Time series</span>
+    <span class="keyword">if</span> date_cols <span class="keyword">and</span> numeric_cols:
+        <span class="keyword">return</span> {
+            <span class="string">"type"</span>: <span class="string">"line"</span>,
+            <span class="string">"x"</span>: date_cols[0],
+            <span class="string">"y"</span>: numeric_cols[0],
+            <span class="string">"title"</span>: <span class="string">f"{numeric_cols[0]} over time"</span>
+        }
+
+    <span class="comment"># Category comparison</span>
+    <span class="keyword">if</span> text_cols <span class="keyword">and</span> numeric_cols <span class="keyword">and</span> len(rows) <= 20:
+        <span class="keyword">return</span> {
+            <span class="string">"type"</span>: <span class="string">"bar"</span>,
+            <span class="string">"x"</span>: text_cols[0],
+            <span class="string">"y"</span>: numeric_cols[0],
+            <span class="string">"title"</span>: <span class="string">f"{numeric_cols[0]} by {text_cols[0]}"</span>
+        }
+
+    <span class="keyword">return</span> None</code></pre>
+
+                <div class="card success">
+                    <strong>User Empowerment:</strong> Suggested questions and auto-charts remove friction. New users learn by example; power users quickly visualize data. The system feels helpful, not frustrating.
+                </div>
+
+                <h3>Observability & Feedback Loop</h3>
+                <p>All queries are logged with question, routing decision, generated SQL, execution metrics, and user feedback. This data flows to BigQuery and powers dashboards showing:</p>
+                <ul class="vertical-list">
+                    <li>Most-asked questions by vertical and tenant</li>
+                    <li>Route distribution (% of hybrid vs. sql_only vs. rag_only queries)</li>
+                    <li>SQL generation failure patterns and success rates</li>
+                    <li>Average execution time by question type</li>
+                    <li>User feedback trends — where is the system wrong?</li>
+                </ul>
+
+                <div class="card success">
+                    <strong>Continuous Improvement:</strong> The observability pipeline creates a feedback loop. High-failure SQL patterns inform schema updates; frequent questions inform template suggestions; user feedback drives prompt refinements.
+                </div>
+            </section>
+
+            <footer>
+                <p style="margin-bottom: 0.5rem;">Biz2Bricks Platform Architecture — Complete 14-Section Technical Blueprint</p>
+                <p style="font-size: 0.85rem; color: #9aa0a6;">Sections 1-5: Core Architecture | Sections 6-10: Implementation & Operations | Sections 11-14: Query Intelligence</p>
+            </footer>
+        </main>
+    </div>
+</body>
+</html>

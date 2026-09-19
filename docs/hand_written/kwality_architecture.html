@@ -1,0 +1,1095 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Kwality Foods — Agentic Architecture (DeepAgents + GCP)</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/mermaid/10.9.0/mermaid.min.js"></script>
+<style>
+  :root {
+    --blue: #1A73E8; --blue-light: #E8F0FE; --blue-mid: #4285F4;
+    --red: #EA4335; --green: #34A853; --amber: #FBBC04;
+    --gray-100: #F8F9FA; --gray-200: #E9ECEF; --gray-300: #DEE2E6;
+    --gray-600: #6C757D; --gray-800: #343A40; --white: #FFF;
+    --gcp-blue: #1A73E8; --gcp-green: #34A853; --gcp-yellow: #FBBC04; --gcp-red: #EA4335;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Google Sans', 'Segoe UI', system-ui, -apple-system, sans-serif; background: var(--gray-100); color: var(--gray-800); line-height: 1.6; }
+
+  .hero { background: linear-gradient(135deg, #1A73E8 0%, #174EA6 100%); color: white; padding: 3rem 2rem; text-align: center; }
+  .hero h1 { font-size: 2.2rem; font-weight: 700; margin-bottom: 0.5rem; }
+  .hero p { font-size: 1.1rem; opacity: 0.85; max-width: 700px; margin: 0 auto; }
+  .hero .badge { display: inline-block; background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3); border-radius: 20px; padding: 0.3rem 1rem; font-size: 0.85rem; margin-top: 1rem; }
+
+  .container { max-width: 1100px; margin: 0 auto; padding: 0 1.5rem; }
+
+  .nav { display: flex; gap: 0.5rem; flex-wrap: wrap; justify-content: center; padding: 1rem 0; position: sticky; top: 0; background: var(--gray-100); z-index: 10; border-bottom: 1px solid var(--gray-300); }
+  .nav a { text-decoration: none; padding: 0.4rem 1rem; border-radius: 6px; font-size: 0.85rem; font-weight: 500; color: var(--blue); background: var(--blue-light); transition: all 0.2s; }
+  .nav a:hover { background: var(--blue); color: white; }
+
+  section { margin: 2.5rem 0; }
+  section h2 { font-size: 1.5rem; color: var(--blue); border-bottom: 3px solid var(--blue-light); padding-bottom: 0.5rem; margin-bottom: 1.2rem; }
+  section h3 { font-size: 1.15rem; color: var(--gray-800); margin: 1.5rem 0 0.8rem; }
+
+  .card { background: white; border-radius: 10px; padding: 1.5rem; margin-bottom: 1.2rem; box-shadow: 0 1px 4px rgba(0,0,0,0.06); border: 1px solid var(--gray-200); }
+  .card h4 { color: var(--blue); margin-bottom: 0.6rem; font-size: 1.05rem; }
+  .card p { font-size: 0.92rem; color: var(--gray-600); }
+
+  .agent-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
+  .agent-card { background: white; border-radius: 10px; padding: 1.2rem; border-left: 4px solid var(--blue-mid); box-shadow: 0 1px 4px rgba(0,0,0,0.06); }
+  .agent-card.orchestrator { border-left-color: var(--gcp-blue); background: linear-gradient(135deg, #E8F0FE 0%, white 100%); }
+  .agent-card.ingestion { border-left-color: var(--gcp-green); }
+  .agent-card.production { border-left-color: var(--gcp-yellow); }
+  .agent-card.qc { border-left-color: var(--gcp-red); }
+  .agent-card.invoice { border-left-color: #8E44AD; }
+  .agent-card h4 { font-size: 1rem; margin-bottom: 0.4rem; }
+  .agent-card .tag { display: inline-block; font-size: 0.7rem; padding: 0.15rem 0.5rem; border-radius: 10px; font-weight: 600; margin-bottom: 0.5rem; }
+  .agent-card .tag.main { background: var(--blue-light); color: var(--blue); }
+  .agent-card .tag.sub { background: #E6F4EA; color: var(--gcp-green); }
+  .agent-card ul { font-size: 0.85rem; color: var(--gray-600); padding-left: 1.2rem; }
+  .agent-card ul li { margin-bottom: 0.3rem; }
+
+  .tool-table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
+  .tool-table th { background: var(--gcp-blue); color: white; padding: 0.7rem 1rem; text-align: left; font-weight: 600; }
+  .tool-table td { padding: 0.6rem 1rem; border-bottom: 1px solid var(--gray-200); }
+  .tool-table tr:nth-child(even) { background: var(--gray-100); }
+  .tool-table code { background: var(--gray-200); padding: 0.15rem 0.4rem; border-radius: 3px; font-size: 0.82rem; }
+
+  pre { background: #1E1E2E; color: #CDD6F4; padding: 1.2rem; border-radius: 8px; overflow-x: auto; font-size: 0.82rem; line-height: 1.5; margin: 1rem 0; }
+  pre .comment { color: #6C7086; }
+  pre .keyword { color: #CBA6F7; }
+  pre .string { color: #A6E3A1; }
+  pre .function { color: #89B4FA; }
+  pre .decorator { color: #F9E2AF; }
+  pre .type { color: #89DCEB; }
+
+  .mermaid { background: white; padding: 1.5rem; border-radius: 10px; border: 1px solid var(--gray-200); margin: 1rem 0; overflow-x: auto; }
+
+  .pattern-map { display: grid; grid-template-columns: auto 1fr 1fr; gap: 0; font-size: 0.85rem; border: 1px solid var(--gray-200); border-radius: 8px; overflow: hidden; }
+  .pattern-map .header { background: var(--gcp-blue); color: white; padding: 0.6rem 1rem; font-weight: 600; }
+  .pattern-map .cell { padding: 0.6rem 1rem; border-bottom: 1px solid var(--gray-200); }
+  .pattern-map .cell:nth-child(6n+4), .pattern-map .cell:nth-child(6n+5), .pattern-map .cell:nth-child(6n+6) { background: var(--gray-100); }
+
+  .infra-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.8rem; }
+  .infra-card { background: white; border-radius: 8px; padding: 1rem; text-align: center; border: 1px solid var(--gray-200); }
+  .infra-card .icon { font-size: 1.8rem; margin-bottom: 0.4rem; }
+  .infra-card h5 { font-size: 0.9rem; color: var(--blue); margin-bottom: 0.3rem; }
+  .infra-card p { font-size: 0.78rem; color: var(--gray-600); }
+
+  .phase-timeline { position: relative; padding-left: 2rem; }
+  .phase-timeline::before { content: ''; position: absolute; left: 0.6rem; top: 0; bottom: 0; width: 2px; background: var(--blue-light); }
+  .phase { position: relative; margin-bottom: 1.5rem; }
+  .phase::before { content: ''; position: absolute; left: -1.65rem; top: 0.3rem; width: 12px; height: 12px; border-radius: 50%; background: var(--blue-mid); border: 2px solid white; }
+  .phase h4 { font-size: 1rem; color: var(--blue); }
+  .phase p { font-size: 0.88rem; color: var(--gray-600); margin-top: 0.3rem; }
+  .phase .duration { font-size: 0.78rem; color: var(--gcp-blue); font-weight: 600; }
+
+  .gcp-callout { background: linear-gradient(135deg, #E8F0FE, #E6F4EA); border-left: 4px solid var(--gcp-blue); border-radius: 8px; padding: 1rem 1.2rem; margin: 1rem 0; font-size: 0.9rem; }
+  .gcp-callout strong { color: var(--gcp-blue); }
+
+  footer { text-align: center; padding: 2rem; color: var(--gray-600); font-size: 0.82rem; border-top: 1px solid var(--gray-300); margin-top: 3rem; }
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <h1>Kwality Foods &mdash; Agentic Architecture</h1>
+  <p>Multi-agent order-to-fulfillment pipeline built on LangChain DeepAgents, deployed on Google Cloud</p>
+  <div class="badge">DeepAgents + LangGraph + Cloud Run + Gemini 3 Flash + Cloud SQL</div>
+</div>
+
+<div class="container">
+
+<nav class="nav" id="nav">
+  <a href="#overview">Overview</a>
+  <a href="#agents">Agents</a>
+  <a href="#flow">Data Flow</a>
+  <a href="#tools">Custom Tools</a>
+  <a href="#code">Code</a>
+  <a href="#infra">GCP Infrastructure</a>
+  <a href="#patterns">Pattern Coverage</a>
+  <a href="#rollout">Rollout Plan</a>
+</nav>
+
+<!-- ───────────── OVERVIEW ───────────── -->
+<section id="overview">
+  <h2>System Overview</h2>
+  <div class="card">
+    <h4>Why DeepAgents on GCP?</h4>
+    <p>The Kwality Foods pipeline is a <strong>long-horizon, multi-step workflow</strong> where a single customer order triggers production planning, quality control logging, and invoice generation &mdash; often spanning days. DeepAgents gives us: (1) a <strong>planning middleware</strong> that decomposes each order into tracked sub-tasks, (2) <strong>subagent delegation</strong> so specialized agents handle OCR, QC validation, and invoicing in isolated contexts, (3) <strong>LangGraph runtime</strong> with durable execution, checkpointing, and human-in-the-loop approval, and (4) <strong>filesystem middleware</strong> for managing batch sheets, HACCP logs, and invoice templates as working documents.</p>
+  </div>
+
+  <div class="gcp-callout">
+    <strong>GCP-Native Stack:</strong> Cloud Run for serverless agent execution &bull; Gemini 3 Flash for OCR (via Vertex AI) &bull; Cloud SQL PostgreSQL for state &bull; GCS buckets for documents &bull; Pub/Sub + Cloud Scheduler for event triggers &bull; Memorystore Redis for LangGraph checkpoints &bull; Cloud Logging + LangSmith for observability.
+  </div>
+
+  <div class="mermaid">
+graph TB
+    subgraph Triggers["Event Triggers"]
+        T1["&#x1F4F8; Order Photo<br/>(GCS upload)"]
+        T2["&#x1F4CA; Work Order PDF<br/>(ERP export)"]
+        T3["&#x1F321;&#xFE0F; Sensor Data<br/>(IoT Core MQTT)"]
+        T4["&#x23F0; Daily Schedule<br/>(Cloud Scheduler)"]
+    end
+
+    subgraph Orchestrator["&#x1F9E0; Orchestrator Agent (DeepAgent)"]
+        PLAN["TodoListMiddleware<br/>Task Planning"]
+        FS["FilesystemMiddleware<br/>Document Context"]
+        SUB["SubAgentMiddleware<br/>Delegation"]
+    end
+
+    subgraph SubAgents["Specialized Subagents"]
+        SA1["&#x1F50D; Order Ingestion<br/>Agent"]
+        SA2["&#x1F3ED; Production Planning<br/>Agent"]
+        SA3["&#x2705; QC / HACCP<br/>Agent"]
+        SA4["&#x1F4B0; Invoice<br/>Agent"]
+    end
+
+    subgraph Storage["Persistent State (GCP)"]
+        DB[("Cloud SQL<br/>PostgreSQL")]
+        GCS[("GCS Buckets<br/>Documents")]
+        CACHE[("Memorystore<br/>Redis")]
+    end
+
+    subgraph AI["AI Layer"]
+        GEMINI["Gemini 3 Flash<br/>(Vertex AI)"]
+    end
+
+    T1 --> Orchestrator
+    T2 --> Orchestrator
+    T3 --> Orchestrator
+    T4 --> Orchestrator
+
+    PLAN --> SUB
+    SUB --> SA1
+    SUB --> SA2
+    SUB --> SA3
+    SUB --> SA4
+
+    SA1 --> GEMINI
+    SA1 --> DB
+    SA2 --> DB
+    SA3 --> DB
+    SA4 --> DB
+    SA1 --> GCS
+    SA3 --> GCS
+    SA4 --> GCS
+
+    Orchestrator --> CACHE
+
+    style Orchestrator fill:#1A73E8,color:#fff,stroke:#174EA6
+    style SubAgents fill:#E8F0FE,stroke:#4285F4
+    style Storage fill:#FEF7E0,stroke:#FBBC04
+    style Triggers fill:#E6F4EA,stroke:#34A853
+    style AI fill:#FCE8E6,stroke:#EA4335
+  </div>
+</section>
+
+<!-- ───────────── AGENTS ───────────── -->
+<section id="agents">
+  <h2>Agent Inventory</h2>
+
+  <div class="agent-grid">
+    <div class="agent-card orchestrator">
+      <span class="tag main">MAIN AGENT</span>
+      <h4>Orchestrator</h4>
+      <ul>
+        <li>Receives all event triggers (GCS uploads, Pub/Sub, Cloud Scheduler)</li>
+        <li>Decomposes incoming work into sub-tasks via TodoListMiddleware</li>
+        <li>Delegates to specialized subagents via <code>task</code> tool</li>
+        <li>Runs reconciliation checks across agents' outputs</li>
+        <li>Escalates to human when confidence is low or amounts exceed thresholds</li>
+        <li>Runs on <strong>Cloud Run</strong> with Memorystore Redis checkpointing</li>
+      </ul>
+    </div>
+
+    <div class="agent-card ingestion">
+      <span class="tag sub">SUBAGENT</span>
+      <h4>Order Ingestion Agent</h4>
+      <ul>
+        <li>OCR on handwritten order images via <strong>Gemini 3 Flash</strong> (Vertex AI)</li>
+        <li>Structured output extraction with <code>response_json_schema</code></li>
+        <li>Fuzzy-matches SKU names against product catalog in Cloud SQL</li>
+        <li>Validates math (qty &times; price = line total, sum = order total)</li>
+        <li>Creates structured order record in Cloud SQL PostgreSQL</li>
+        <li><strong>Closes Pattern 1</strong></li>
+      </ul>
+    </div>
+
+    <div class="agent-card production">
+      <span class="tag sub">SUBAGENT</span>
+      <h4>Production Planning Agent</h4>
+      <ul>
+        <li>Maps customer orders &rarr; required production batches</li>
+        <li>Looks up base formula + variant ingredients per SKU from Cloud SQL</li>
+        <li>Calculates scaled batch sizes (base &times; volume multiplier)</li>
+        <li>Checks ingredient inventory for shortages</li>
+        <li>Generates work order payloads for ERP</li>
+        <li><strong>Closes Pattern 2</strong></li>
+      </ul>
+    </div>
+
+    <div class="agent-card qc">
+      <span class="tag sub">SUBAGENT</span>
+      <h4>QC / HACCP Agent</h4>
+      <ul>
+        <li>Ingests IoT sensor data via <strong>Cloud IoT Core / Pub/Sub</strong></li>
+        <li>Links readings to lot numbers and production steps in Cloud SQL</li>
+        <li>Validates CCP: fill temp &ge; 165&deg;F, Brix 46&plusmn;1&deg;</li>
+        <li>Auto-generates timestamped HACCP execution logs (PDF &rarr; GCS)</li>
+        <li>Flags deviations and triggers alerts via Cloud Tasks</li>
+        <li><strong>Closes Pattern 3</strong></li>
+      </ul>
+    </div>
+
+    <div class="agent-card invoice">
+      <span class="tag sub">SUBAGENT</span>
+      <h4>Invoice Agent</h4>
+      <ul>
+        <li>Pulls completed orders + production records from Cloud SQL</li>
+        <li>Converts production units (gallons) &rarr; customer units (cases/pouches)</li>
+        <li>Applies pricing from master price list</li>
+        <li>Generates invoice PDF &rarr; GCS with order/production/ship dates</li>
+        <li>Reconciles invoice # &rarr; order # with FK constraint</li>
+        <li><strong>Closes Pattern 5</strong></li>
+      </ul>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── DATA FLOW ───────────── -->
+<section id="flow">
+  <h2>End-to-End Data Flow</h2>
+
+  <div class="mermaid">
+sequenceDiagram
+    participant User as Factory Staff
+    participant GCS as GCS Bucket
+    participant PS as Pub/Sub
+    participant CR as Cloud Run
+    participant Orch as Orchestrator
+    participant OCR as Order Agent
+    participant Gemini as Gemini 3 Flash
+    participant Prod as Production Agent
+    participant QC as QC Agent
+    participant Inv as Invoice Agent
+    participant DB as Cloud SQL
+
+    User->>GCS: Uploads order photo
+    GCS->>PS: GCS notification
+    PS->>CR: Push subscription triggers Cloud Run
+    CR->>Orch: Initialize orchestrator
+
+    Orch->>Orch: Plan: OCR, Validate, Production, QC, Invoice
+
+    Orch->>OCR: task - Extract order from image
+    OCR->>GCS: Download image
+    OCR->>Gemini: Structured OCR extraction
+    Gemini-->>OCR: OrderExtraction JSON
+    OCR->>OCR: SKU fuzzy match + math validation
+    OCR->>DB: INSERT order record
+    OCR-->>Orch: Order 64333 created - 6 items $1165
+
+    Orch->>Prod: task - Generate work orders
+    Prod->>DB: Read product catalog + inventory
+    Prod->>Prod: Scale base formula x batch size
+    Prod->>Prod: Check ingredient availability
+    Prod-->>Orch: 4 work orders created
+
+    Note over QC: Runs on IoT Pub/Sub stream
+    QC->>QC: Ingest temperature + Brix
+    QC->>DB: Link to lot and step
+    QC->>QC: Validate CCP thresholds
+    QC-->>Orch: Lot 022511 HACCP complete
+
+    Orch->>Inv: task - Generate invoice
+    Inv->>DB: Read order + production + QC
+    Inv->>Inv: Unit conversion gal to cases
+    Inv->>GCS: Save invoice PDF
+    Inv-->>Orch: Invoice 64333 generated
+
+    Orch->>User: Notification via Cloud Tasks + SendGrid
+  </div>
+</section>
+
+<!-- ───────────── TOOLS ───────────── -->
+<section id="tools">
+  <h2>Custom Tool Definitions</h2>
+
+  <table class="tool-table">
+    <thead>
+      <tr><th>Tool</th><th>Agent</th><th>GCP Service</th><th>Description</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><code>ocr_order_image</code></td>
+        <td>Order Ingestion</td>
+        <td>Vertex AI (Gemini 3 Flash)</td>
+        <td>Sends order photo to Gemini 3 Flash with structured extraction. Returns JSON with customer, date, line items via <code>response_json_schema</code>.</td>
+      </tr>
+      <tr>
+        <td><code>match_sku</code></td>
+        <td>Order Ingestion</td>
+        <td>Cloud SQL</td>
+        <td>Fuzzy matches handwritten product names against product catalog using pg_trgm + Levenshtein in PostgreSQL.</td>
+      </tr>
+      <tr>
+        <td><code>validate_order_math</code></td>
+        <td>Order Ingestion</td>
+        <td>&mdash;</td>
+        <td>Checks qty &times; price = line total and sum(line totals) = order total. Flags discrepancies.</td>
+      </tr>
+      <tr>
+        <td><code>lookup_formula</code></td>
+        <td>Production</td>
+        <td>Cloud SQL</td>
+        <td>Retrieves base formula + variant ingredients for a given SKU from the product database.</td>
+      </tr>
+      <tr>
+        <td><code>scale_batch</code></td>
+        <td>Production</td>
+        <td>&mdash;</td>
+        <td>Multiplies base formula quantities by the target volume ratio. Validates ingredient ratios stay within tolerance.</td>
+      </tr>
+      <tr>
+        <td><code>check_inventory</code></td>
+        <td>Production</td>
+        <td>Cloud SQL</td>
+        <td>Queries current ingredient inventory. Returns shortages and reorder recommendations.</td>
+      </tr>
+      <tr>
+        <td><code>create_work_order</code></td>
+        <td>Production</td>
+        <td>ERP API</td>
+        <td>Pushes a work order payload to the ERP system via REST API.</td>
+      </tr>
+      <tr>
+        <td><code>ingest_sensor_reading</code></td>
+        <td>QC / HACCP</td>
+        <td>Pub/Sub + Cloud SQL</td>
+        <td>Receives IoT temperature/Brix data from Pub/Sub, links to active lot number and production step.</td>
+      </tr>
+      <tr>
+        <td><code>validate_ccp</code></td>
+        <td>QC / HACCP</td>
+        <td>&mdash;</td>
+        <td>Checks if sensor readings meet critical control points (fill temp &ge; 165&deg;F, Brix 46&plusmn;1&deg;).</td>
+      </tr>
+      <tr>
+        <td><code>generate_haccp_log</code></td>
+        <td>QC / HACCP</td>
+        <td>GCS</td>
+        <td>Compiles all sensor readings for a lot into a timestamped HACCP execution log (PDF to GCS).</td>
+      </tr>
+      <tr>
+        <td><code>convert_units</code></td>
+        <td>Invoice</td>
+        <td>&mdash;</td>
+        <td>Converts production gallons to customer-facing units (cases, pouches) using SKU-specific conversion factors.</td>
+      </tr>
+      <tr>
+        <td><code>generate_invoice</code></td>
+        <td>Invoice</td>
+        <td>GCS + Cloud SQL</td>
+        <td>Creates invoice with FK to order#, 3-date model, pricing from master list. Outputs PDF to GCS + DB record.</td>
+      </tr>
+      <tr>
+        <td><code>reconcile</code></td>
+        <td>Orchestrator</td>
+        <td>Cloud SQL</td>
+        <td>Cross-checks order &rarr; work orders &rarr; HACCP logs &rarr; invoice chain. Flags broken links.</td>
+      </tr>
+      <tr>
+        <td><code>notify_staff</code></td>
+        <td>Orchestrator</td>
+        <td>Cloud Tasks + SendGrid</td>
+        <td>Sends alerts via SMS/email for shortages, CCP deviations, or completed order cycles.</td>
+      </tr>
+    </tbody>
+  </table>
+</section>
+
+<!-- ───────────── CODE ───────────── -->
+<section id="code">
+  <h2>Implementation &mdash; Core Code</h2>
+
+  <h3>1. OCR Tool &mdash; Gemini 3 Flash via Vertex AI</h3>
+  <pre><span class="comment"># tools/ocr.py</span>
+<span class="keyword">from</span> langchain_core.tools <span class="keyword">import</span> tool
+<span class="keyword">from</span> google <span class="keyword">import</span> genai
+<span class="keyword">from</span> google.genai <span class="keyword">import</span> types
+<span class="keyword">from</span> google.cloud <span class="keyword">import</span> storage
+<span class="keyword">from</span> pydantic <span class="keyword">import</span> BaseModel, Field
+<span class="keyword">import</span> json
+
+<span class="comment"># Initialize Vertex AI client</span>
+client = genai.Client(vertexai=<span class="keyword">True</span>, project=<span class="string">"kwality-prod"</span>, location=<span class="string">"us-central1"</span>)
+
+<span class="keyword">class</span> <span class="type">OrderLineItem</span>(BaseModel):
+    product_name: str = Field(description=<span class="string">"Raw product name from handwriting"</span>)
+    matched_sku: str | None = Field(default=<span class="keyword">None</span>, description=<span class="string">"Matched catalog SKU"</span>)
+    quantity: int
+    unit_price: float
+    line_total: float
+
+<span class="keyword">class</span> <span class="type">OrderExtraction</span>(BaseModel):
+    customer_name: str
+    order_date: str
+    order_number: str
+    line_items: list[OrderLineItem]
+    order_total: float
+    confidence: float = Field(description=<span class="string">"0-1 OCR confidence score"</span>)
+
+EXTRACTION_PROMPT = <span class="string">"""Extract ALL order data from this handwritten receipt image.
+Return structured JSON with: customer_name, order_date (YYYY-MM-DD),
+order_number, line_items (product_name, quantity, unit_price, line_total),
+and order_total. Set confidence 0-1 based on handwriting legibility."""</span>
+
+<span class="decorator">@tool</span>
+<span class="keyword">def</span> <span class="function">ocr_order_image</span>(gcs_uri: str) -> OrderExtraction:
+    <span class="string">"""Extract structured order data from a handwritten order photo in GCS.
+    Uses Gemini 3 Flash via Vertex AI for multimodal OCR with structured output.
+    Returns OrderExtraction with customer, date, line items, and totals."""</span>
+
+    <span class="comment"># Download image from GCS</span>
+    storage_client = storage.Client()
+    bucket_name = gcs_uri.split(<span class="string">"/"</span>)[2]
+    blob_name = <span class="string">"/"</span>.join(gcs_uri.split(<span class="string">"/"</span>)[3:])
+    bucket = storage_client.bucket(bucket_name)
+    blob = bucket.blob(blob_name)
+    image_bytes = blob.download_as_bytes()
+
+    <span class="comment"># Call Gemini 3 Flash with structured output</span>
+    response = client.models.generate_content(
+        model=<span class="string">"gemini-3-flash"</span>,
+        contents=[
+            types.Part.from_bytes(data=image_bytes, mime_type=<span class="string">"image/jpeg"</span>),
+            types.Part.from_text(text=EXTRACTION_PROMPT),
+        ],
+        config=types.GenerateContentConfig(
+            response_mime_type=<span class="string">"application/json"</span>,
+            response_json_schema=OrderExtraction.model_json_schema(),
+            thinking_config=types.ThinkingConfig(thinking_level=<span class="string">"medium"</span>),
+        ),
+    )
+
+    <span class="comment"># Parse structured response</span>
+    extraction = OrderExtraction.model_validate_json(response.text)
+    <span class="keyword">return</span> extraction</pre>
+
+  <h3>2. SKU Matching Tool &mdash; Cloud SQL + pg_trgm</h3>
+  <pre><span class="comment"># tools/sku_match.py</span>
+<span class="keyword">from</span> langchain_core.tools <span class="keyword">import</span> tool
+<span class="keyword">from</span> sqlalchemy <span class="keyword">import</span> create_engine, text
+<span class="keyword">from</span> google.cloud.sql.connector <span class="keyword">import</span> Connector
+<span class="keyword">from</span> pydantic <span class="keyword">import</span> BaseModel
+
+connector = Connector()
+
+<span class="keyword">def</span> <span class="function">get_conn</span>():
+    <span class="keyword">return</span> connector.connect(
+        <span class="string">"kwality-prod:us-central1:kwality-db"</span>,
+        <span class="string">"pg8000"</span>,
+        user=<span class="string">"agent"</span>, password=SECRET, db=<span class="string">"kwality"</span>
+    )
+
+engine = create_engine(<span class="string">"postgresql+pg8000://"</span>, creator=get_conn)
+
+<span class="keyword">class</span> <span class="type">SKUMatch</span>(BaseModel):
+    raw_name: str
+    matched_sku: str
+    matched_name: str
+    similarity: float
+
+<span class="decorator">@tool</span>
+<span class="keyword">def</span> <span class="function">match_sku</span>(product_names: list[str]) -> list[SKUMatch]:
+    <span class="string">"""Fuzzy match handwritten product names against the catalog.
+    Uses PostgreSQL pg_trgm extension for trigram similarity matching."""</span>
+
+    results = []
+    <span class="keyword">with</span> engine.connect() <span class="keyword">as</span> conn:
+        <span class="keyword">for</span> name <span class="keyword">in</span> product_names:
+            row = conn.execute(text(<span class="string">"""
+                SELECT sku, name, similarity(name, :input) AS sim
+                FROM products
+                WHERE similarity(name, :input) > 0.3
+                ORDER BY sim DESC LIMIT 1
+            """</span>), {<span class="string">"input"</span>: name}).fetchone()
+
+            <span class="keyword">if</span> row:
+                results.append(SKUMatch(
+                    raw_name=name, matched_sku=row[0],
+                    matched_name=row[1], similarity=row[2]
+                ))
+    <span class="keyword">return</span> results</pre>
+
+  <h3>3. Subagent Definitions</h3>
+  <pre><span class="comment"># agents/subagents.py</span>
+<span class="keyword">from</span> deepagents.middleware.subagents <span class="keyword">import</span> SubAgent
+<span class="keyword">from</span> langchain_google_genai <span class="keyword">import</span> ChatGoogleGenerativeAI
+
+<span class="comment"># All subagents use Gemini 3 Flash for cost efficiency</span>
+gemini_flash = ChatGoogleGenerativeAI(
+    model=<span class="string">"gemini-3-flash"</span>,
+    project=<span class="string">"kwality-prod"</span>,
+    location=<span class="string">"us-central1"</span>,
+)
+
+order_ingestion_agent = SubAgent(
+    name=<span class="string">"order_ingestion"</span>,
+    model=gemini_flash,
+    description=<span class="string">"OCR handwritten orders via Gemini 3 Flash, normalize SKUs, validate math, persist to Cloud SQL"</span>,
+    system_prompt=<span class="string">"""You are the Order Ingestion Agent for Kwality Foods LLC.
+Your job: (1) OCR the order image using Gemini 3 Flash, (2) fuzzy-match
+product names to the catalog via pg_trgm, (3) validate arithmetic,
+(4) persist the structured order to Cloud SQL.
+If confidence &lt; 0.85, flag for human review instead of persisting."""</span>,
+    tools=[ocr_order_image, match_sku, validate_order_math, persist_order]
+)
+
+production_planning_agent = SubAgent(
+    name=<span class="string">"production_planning"</span>,
+    model=gemini_flash,
+    description=<span class="string">"Convert orders into scaled work orders with ingredient checks"</span>,
+    system_prompt=<span class="string">"""You are the Production Planning Agent for Kwality Foods LLC.
+Given an order, look up the base formula for each SKU, scale ingredients
+by batch size, check inventory for shortages, and create ERP work orders.
+PREMIX-PLAIN-14 is the shared base for kulfi variants. Paan Masala uses
+a separate ingredient set. All data lives in Cloud SQL."""</span>,
+    tools=[lookup_formula, scale_batch, check_inventory, create_work_order]
+)
+
+qc_haccp_agent = SubAgent(
+    name=<span class="string">"qc_haccp"</span>,
+    model=gemini_flash,
+    description=<span class="string">"Digitize QC records, validate HACCP critical control points"</span>,
+    system_prompt=<span class="string">"""You are the QC/HACCP Agent for Kwality Foods LLC.
+Ingest sensor readings from Pub/Sub, link them to lot numbers, validate:
+- Filling temperature >= 165&deg;F (CRITICAL)
+- Brix target: 46 &plusmn; 1&deg;
+- Cooking temperature: 180-200&deg;F
+Flag any deviation immediately via Cloud Tasks.
+Generate timestamped HACCP logs as PDFs to GCS."""</span>,
+    tools=[ingest_sensor_reading, validate_ccp, generate_haccp_log, flag_deviation]
+)
+
+invoice_agent = SubAgent(
+    name=<span class="string">"invoice"</span>,
+    model=gemini_flash,
+    description=<span class="string">"Generate reconciled invoices with unit conversion and 3-date model"</span>,
+    system_prompt=<span class="string">"""You are the Invoice Agent for Kwality Foods LLC.
+Pull order + production + QC data from Cloud SQL. Convert production
+gallons to customer units. Apply pricing from master price list.
+Every invoice MUST have:
+- FK reference to order number
+- Three dates: order_date, production_date, ship_date
+- Reconciliation check: invoice total == order total
+Output PDF to GCS bucket kwality-output/invoices/"""</span>,
+    tools=[convert_units, lookup_pricing, generate_invoice, reconcile_invoice]
+)</pre>
+
+  <h3>4. Orchestrator Agent</h3>
+  <pre><span class="comment"># agents/orchestrator.py</span>
+<span class="keyword">from</span> deepagents <span class="keyword">import</span> create_deep_agent
+<span class="keyword">from</span> deepagents.middleware.subagents <span class="keyword">import</span> SubAgentMiddleware
+<span class="keyword">from</span> langchain_google_genai <span class="keyword">import</span> ChatGoogleGenerativeAI
+<span class="keyword">from</span> langgraph.checkpoint.postgres <span class="keyword">import</span> PostgresSaver
+
+<span class="comment"># Cloud SQL connection for LangGraph checkpointing</span>
+checkpointer = PostgresSaver.from_conn_string(
+    <span class="string">"postgresql+pg8000://agent:***@/kwality"</span>
+    <span class="string">"?host=/cloudsql/kwality-prod:us-central1:kwality-db"</span>
+)
+
+<span class="comment"># Orchestrator uses Gemini 3 Flash for planning + delegation</span>
+orchestrator = create_deep_agent(
+    name=<span class="string">"kwality_orchestrator"</span>,
+    model=ChatGoogleGenerativeAI(
+        model=<span class="string">"gemini-3-flash"</span>,
+        project=<span class="string">"kwality-prod"</span>,
+        location=<span class="string">"us-central1"</span>,
+    ),
+
+    system_prompt=<span class="string">"""You are the Orchestrator for Kwality Foods' order-to-fulfillment
+pipeline running on Google Cloud. When triggered:
+1. Classify the event (new order photo, sensor data, daily reconciliation)
+2. Plan the sub-tasks needed using your todo list
+3. Delegate to specialized subagents
+4. Run end-to-end reconciliation after all subagents complete
+5. Notify factory staff of results or issues
+
+RULES:
+- Orders with confidence &lt; 0.85 require human approval before production
+- CCP deviations trigger IMMEDIATE alerts (do not wait for batch completion)
+- Invoice generation only starts after QC sign-off on the lot
+- Always run reconcile() as the final step"""</span>,
+
+    tools=[reconcile, notify_staff],
+
+    middleware=[
+        SubAgentMiddleware(subagents=[
+            order_ingestion_agent,
+            production_planning_agent,
+            qc_haccp_agent,
+            invoice_agent,
+        ])
+    ],
+
+    checkpointer=checkpointer,
+    interrupt_on=[<span class="string">"invoice"</span>],
+)</pre>
+
+  <h3>5. Cloud Run Service + Pub/Sub Trigger</h3>
+  <pre><span class="comment"># main.py — Cloud Run entry point</span>
+<span class="keyword">import</span> os, json, base64
+<span class="keyword">from</span> flask <span class="keyword">import</span> Flask, request
+<span class="keyword">from</span> agents.orchestrator <span class="keyword">import</span> orchestrator
+
+app = Flask(__name__)
+
+<span class="decorator">@app.route</span>(<span class="string">"/"</span>, methods=[<span class="string">"POST"</span>])
+<span class="keyword">def</span> <span class="function">handle_event</span>():
+    <span class="string">"""Triggered by Pub/Sub push subscription.
+    Events: GCS uploads, Cloud Scheduler cron, IoT sensor batches."""</span>
+
+    envelope = request.get_json()
+    pubsub_msg = envelope.get(<span class="string">"message"</span>, {})
+    data = json.loads(base64.b64decode(pubsub_msg.get(<span class="string">"data"</span>, <span class="string">""</span>)).decode())
+
+    event_type = data.get(<span class="string">"type"</span>)
+    <span class="keyword">if</span> event_type == <span class="string">"gcs_upload"</span>:
+        gcs_uri = f<span class="string">"gs://{data['bucket']}/{data['name']}"</span>
+        <span class="keyword">if</span> data[<span class="string">"name"</span>].endswith((<span class="string">".jpg"</span>, <span class="string">".jpeg"</span>, <span class="string">".png"</span>)):
+            message = f<span class="string">"New order photo uploaded: {gcs_uri}. Extract the order, "</span> \
+                      f<span class="string">"create work orders, and prepare for invoicing."</span>
+        <span class="keyword">elif</span> data[<span class="string">"name"</span>].endswith(<span class="string">".pdf"</span>):
+            message = f<span class="string">"New production document: {gcs_uri}. Parse and reconcile."</span>
+        <span class="keyword">else</span>:
+            <span class="keyword">return</span> (<span class="string">"skipped"</span>, 204)
+
+    <span class="keyword">elif</span> event_type == <span class="string">"daily_reconciliation"</span>:
+        message = <span class="string">"Run daily end-to-end reconciliation across all open orders."</span>
+
+    <span class="keyword">elif</span> event_type == <span class="string">"sensor_batch"</span>:
+        message = f<span class="string">"Process sensor readings for lot {data['lot_number']}."</span>
+
+    <span class="keyword">else</span>:
+        <span class="keyword">return</span> (<span class="string">"unknown event"</span>, 400)
+
+    <span class="comment"># Invoke with thread_id for durable checkpointed state</span>
+    thread_id = data.get(<span class="string">"thread_id"</span>, data.get(<span class="string">"name"</span>, <span class="string">"default"</span>))
+    config = {<span class="string">"configurable"</span>: {<span class="string">"thread_id"</span>: thread_id}}
+
+    result = orchestrator.invoke(
+        {<span class="string">"messages"</span>: [{<span class="string">"role"</span>: <span class="string">"user"</span>, <span class="string">"content"</span>: message}]},
+        config=config
+    )
+
+    <span class="keyword">return</span> (<span class="string">"ok"</span>, 200)
+
+<span class="keyword">if</span> __name__ == <span class="string">"__main__"</span>:
+    app.run(host=<span class="string">"0.0.0.0"</span>, port=int(os.environ.get(<span class="string">"PORT"</span>, 8080)))</pre>
+
+  <h3>6. Dockerfile (Cloud Run)</h3>
+  <pre><span class="comment"># Dockerfile</span>
+FROM python:3.12-slim
+
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY . .
+
+<span class="comment"># Cloud Run sets PORT env var</span>
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "--workers", "2", "--timeout", "300", "main:app"]</pre>
+
+  <h3>7. Terraform &mdash; Core GCP Resources</h3>
+  <pre><span class="comment"># infra/main.tf</span>
+provider <span class="string">"google"</span> {
+  project = <span class="string">"kwality-prod"</span>
+  region  = <span class="string">"us-central1"</span>
+}
+
+<span class="comment"># ── GCS Buckets ──</span>
+resource <span class="string">"google_storage_bucket"</span> <span class="string">"orders"</span> {
+  name     = <span class="string">"kwality-orders"</span>
+  location = <span class="string">"US"</span>
+  uniform_bucket_level_access = <span class="keyword">true</span>
+}
+
+resource <span class="string">"google_storage_bucket"</span> <span class="string">"output"</span> {
+  name     = <span class="string">"kwality-output"</span>
+  location = <span class="string">"US"</span>
+  uniform_bucket_level_access = <span class="keyword">true</span>
+}
+
+<span class="comment"># ── Cloud SQL PostgreSQL ──</span>
+resource <span class="string">"google_sql_database_instance"</span> <span class="string">"main"</span> {
+  name             = <span class="string">"kwality-db"</span>
+  database_version = <span class="string">"POSTGRES_16"</span>
+  region           = <span class="string">"us-central1"</span>
+
+  settings {
+    tier = <span class="string">"db-custom-2-8192"</span>  <span class="comment"># 2 vCPU, 8 GB RAM</span>
+    ip_configuration {
+      private_network = google_compute_network.vpc.id
+    }
+    database_flags {
+      name  = <span class="string">"shared_preload_libraries"</span>
+      value = <span class="string">"pg_trgm"</span>  <span class="comment"># For fuzzy SKU matching</span>
+    }
+  }
+}
+
+<span class="comment"># ── Memorystore Redis (LangGraph checkpoints) ──</span>
+resource <span class="string">"google_redis_instance"</span> <span class="string">"checkpoints"</span> {
+  name           = <span class="string">"kwality-checkpoints"</span>
+  tier           = <span class="string">"BASIC"</span>
+  memory_size_gb = 2
+  region         = <span class="string">"us-central1"</span>
+  authorized_network = google_compute_network.vpc.id
+}
+
+<span class="comment"># ── Pub/Sub Topic + Subscription ──</span>
+resource <span class="string">"google_pubsub_topic"</span> <span class="string">"events"</span> {
+  name = <span class="string">"kwality-events"</span>
+}
+
+resource <span class="string">"google_pubsub_subscription"</span> <span class="string">"cloud_run_push"</span> {
+  name  = <span class="string">"kwality-agent-push"</span>
+  topic = google_pubsub_topic.events.id
+
+  push_config {
+    push_endpoint = google_cloud_run_v2_service.agent.uri
+    oidc_token {
+      service_account_email = google_service_account.agent.email
+    }
+  }
+
+  ack_deadline_seconds = 300  <span class="comment"># 5 min for long-running agent</span>
+}
+
+<span class="comment"># ── GCS → Pub/Sub Notification ──</span>
+resource <span class="string">"google_storage_notification"</span> <span class="string">"order_upload"</span> {
+  bucket         = google_storage_bucket.orders.name
+  payload_format = <span class="string">"JSON_API_V1"</span>
+  topic          = google_pubsub_topic.events.id
+  event_types    = [<span class="string">"OBJECT_FINALIZE"</span>]
+}
+
+<span class="comment"># ── Cloud Scheduler (daily reconciliation) ──</span>
+resource <span class="string">"google_cloud_scheduler_job"</span> <span class="string">"daily_recon"</span> {
+  name     = <span class="string">"daily-reconciliation"</span>
+  schedule = <span class="string">"0 6 * * *"</span>  <span class="comment"># 6 AM daily</span>
+  time_zone = <span class="string">"America/New_York"</span>
+
+  pubsub_target {
+    topic_name = google_pubsub_topic.events.id
+    data       = base64encode(jsonencode({
+      type = <span class="string">"daily_reconciliation"</span>
+      thread_id = <span class="string">"daily-recon"</span>
+    }))
+  }
+}
+
+<span class="comment"># ── Cloud Run Service ──</span>
+resource <span class="string">"google_cloud_run_v2_service"</span> <span class="string">"agent"</span> {
+  name     = <span class="string">"kwality-agent"</span>
+  location = <span class="string">"us-central1"</span>
+
+  template {
+    containers {
+      image = <span class="string">"us-central1-docker.pkg.dev/kwality-prod/agents/kwality-agent:latest"</span>
+      resources {
+        limits = { memory = <span class="string">"4Gi"</span>, cpu = <span class="string">"2"</span> }
+      }
+      env { name = <span class="string">"PROJECT_ID"</span>  value = <span class="string">"kwality-prod"</span> }
+      env { name = <span class="string">"DB_INSTANCE"</span> value = <span class="string">"kwality-prod:us-central1:kwality-db"</span> }
+      env { name = <span class="string">"REDIS_HOST"</span>  value = google_redis_instance.checkpoints.host }
+    }
+
+    scaling {
+      min_instance_count = 0   <span class="comment"># Scale to zero when idle</span>
+      max_instance_count = 10  <span class="comment"># Burst for concurrent orders</span>
+    }
+
+    timeout = <span class="string">"600s"</span>  <span class="comment"># 10 min max per invocation</span>
+
+    vpc_access {
+      connector = google_vpc_access_connector.main.id
+    }
+
+    service_account = google_service_account.agent.email
+  }
+}
+
+<span class="comment"># ── IAM: Vertex AI access for Gemini 3 Flash ──</span>
+resource <span class="string">"google_project_iam_member"</span> <span class="string">"vertex_ai"</span> {
+  project = <span class="string">"kwality-prod"</span>
+  role    = <span class="string">"roles/aiplatform.user"</span>
+  member  = <span class="string">"serviceAccount:${google_service_account.agent.email}"</span>
+}</pre>
+</section>
+
+<!-- ───────────── INFRASTRUCTURE ───────────── -->
+<section id="infra">
+  <h2>GCP Infrastructure</h2>
+
+  <div class="mermaid">
+graph LR
+    subgraph Ingress["Ingress Layer"]
+        GCS["GCS: kwality-orders<br/>Order photos + docs"]
+        IOT["IoT Core<br/>Temperature + Brix"]
+        SCHED["Cloud Scheduler<br/>Daily cron"]
+    end
+
+    subgraph Events["Event Bus"]
+        PS["Pub/Sub<br/>kwality-events topic"]
+    end
+
+    subgraph Compute["Compute Layer"]
+        CR["Cloud Run<br/>Agent runtime<br/>0→10 instances"]
+        VERTEX["Vertex AI<br/>Gemini 3 Flash"]
+    end
+
+    subgraph Data["Data Layer"]
+        CSQL["Cloud SQL<br/>PostgreSQL 16"]
+        REDIS["Memorystore Redis<br/>Agent checkpoints"]
+        GCSOUT["GCS: kwality-output<br/>Invoices + HACCP logs"]
+    end
+
+    subgraph Observe["Observability"]
+        LOG["Cloud Logging<br/>+ Error Reporting"]
+        LS["LangSmith<br/>Agent traces"]
+    end
+
+    GCS --> PS
+    IOT --> PS
+    SCHED --> PS
+    PS --> CR
+    CR --> VERTEX
+    CR --> CSQL
+    CR --> REDIS
+    CR --> GCSOUT
+    CR --> LOG
+    CR --> LS
+
+    style Ingress fill:#E6F4EA,stroke:#34A853
+    style Events fill:#FCE8E6,stroke:#EA4335
+    style Compute fill:#E8F0FE,stroke:#4285F4
+    style Data fill:#FEF7E0,stroke:#FBBC04
+    style Observe fill:#F3E8FD,stroke:#A142F4
+  </div>
+
+  <div class="infra-grid">
+    <div class="infra-card">
+      <div class="icon">&#x1F4E6;</div>
+      <h5>Cloud Storage (GCS)</h5>
+      <p>Order photos, production docs, generated invoices, HACCP logs. Triggers Pub/Sub on upload.</p>
+    </div>
+    <div class="infra-card">
+      <div class="icon">&#x1F4E8;</div>
+      <h5>Pub/Sub</h5>
+      <p>Central event bus. GCS notifications + IoT batches + Cloud Scheduler cron all route through here.</p>
+    </div>
+    <div class="infra-card">
+      <div class="icon">&#x2601;&#xFE0F;</div>
+      <h5>Cloud Run</h5>
+      <p>Serverless agent runtime. 4 GB / 2 vCPU per instance. Scales 0&rarr;10. 10 min timeout per invocation.</p>
+    </div>
+    <div class="infra-card">
+      <div class="icon">&#x2728;</div>
+      <h5>Vertex AI &mdash; Gemini 3 Flash</h5>
+      <p>OCR for handwritten orders. Structured output via <code>response_json_schema</code>. Thinking level: medium.</p>
+    </div>
+    <div class="infra-card">
+      <div class="icon">&#x1F5C4;&#xFE0F;</div>
+      <h5>Cloud SQL PostgreSQL 16</h5>
+      <p>Source of truth: orders, lots, formulas, inventory, invoices. pg_trgm for fuzzy SKU matching.</p>
+    </div>
+    <div class="infra-card">
+      <div class="icon">&#x26A1;</div>
+      <h5>Memorystore Redis</h5>
+      <p>LangGraph checkpoint store for durable multi-day agent execution across Cloud Run invocations.</p>
+    </div>
+    <div class="infra-card">
+      <div class="icon">&#x1F4CA;</div>
+      <h5>LangSmith</h5>
+      <p>Full agent traces: token usage, tool calls, subagent delegation, Gemini latency per OCR call.</p>
+    </div>
+    <div class="infra-card">
+      <div class="icon">&#x1F514;</div>
+      <h5>Cloud Tasks + SendGrid</h5>
+      <p>Staff notifications: SMS for CCP alerts, email for invoice delivery. Retries built in.</p>
+    </div>
+  </div>
+</section>
+
+<!-- ───────────── PATTERN COVERAGE ───────────── -->
+<section id="patterns">
+  <h2>Pattern Coverage Matrix</h2>
+  <p style="font-size: 0.9rem; color: var(--gray-600); margin-bottom: 1rem;">Every pattern identified in the analysis is addressed by a specific agent, tool, and GCP service combination.</p>
+
+  <div class="pattern-map">
+    <div class="header">Pattern</div>
+    <div class="header">Solving Agent + GCP Service</div>
+    <div class="header">Key Tools</div>
+
+    <div class="cell"><strong>1. Order capture disconnect</strong></div>
+    <div class="cell">Order Ingestion Agent + <strong>Gemini 3 Flash</strong> (Vertex AI)</div>
+    <div class="cell"><code>ocr_order_image</code>, <code>match_sku</code> (pg_trgm), <code>validate_order_math</code></div>
+
+    <div class="cell"><strong>2. Formula scaling gap</strong></div>
+    <div class="cell">Production Planning Agent + <strong>Cloud SQL</strong></div>
+    <div class="cell"><code>lookup_formula</code>, <code>scale_batch</code>, <code>check_inventory</code></div>
+
+    <div class="cell"><strong>3. QC documentation gaps</strong></div>
+    <div class="cell">QC / HACCP Agent + <strong>Pub/Sub</strong> + <strong>GCS</strong></div>
+    <div class="cell"><code>ingest_sensor_reading</code>, <code>validate_ccp</code>, <code>generate_haccp_log</code></div>
+
+    <div class="cell"><strong>4. Kulfi concentration</strong></div>
+    <div class="cell">Orchestrator + <strong>Cloud SQL</strong> analytics</div>
+    <div class="cell"><code>reconcile</code> with monthly SKU volume dashboard</div>
+
+    <div class="cell"><strong>5. Invoice isolation</strong></div>
+    <div class="cell">Invoice Agent + <strong>Cloud SQL</strong> + <strong>GCS</strong></div>
+    <div class="cell"><code>convert_units</code>, <code>generate_invoice</code>, <code>reconcile_invoice</code></div>
+  </div>
+</section>
+
+<!-- ───────────── DATA MODEL ───────────── -->
+<section id="datamodel">
+  <h2>Core Data Model (Cloud SQL PostgreSQL)</h2>
+
+  <div class="gcp-callout">
+    <strong>Cloud SQL Config:</strong> PostgreSQL 16 &bull; db-custom-2-8192 (2 vCPU, 8 GB) &bull; Private IP via VPC &bull; Extensions: <code>pg_trgm</code> (fuzzy matching), <code>pgcrypto</code> (audit hashing) &bull; Automated backups with PITR
+  </div>
+
+  <div class="mermaid">
+erDiagram
+    ORDERS ||--o{ ORDER_LINES : contains
+    ORDERS ||--o{ WORK_ORDERS : triggers
+    ORDERS ||--|| INVOICES : generates
+
+    WORK_ORDERS ||--o{ LOTS : produces
+    LOTS ||--o{ HACCP_LOGS : tracked_by
+    LOTS ||--o{ SENSOR_READINGS : monitored_by
+
+    PRODUCTS ||--o{ ORDER_LINES : referenced_by
+    PRODUCTS ||--|| FORMULAS : has
+    FORMULAS ||--o{ FORMULA_INGREDIENTS : contains
+    INGREDIENTS ||--o{ FORMULA_INGREDIENTS : used_in
+    INGREDIENTS ||--|| INVENTORY : tracked_in
+
+    ORDERS {
+        int order_id PK
+        string customer_name
+        date order_date
+        float total
+        float ocr_confidence
+        string source_image_gcs
+        string status
+    }
+    ORDER_LINES {
+        int line_id PK
+        int order_id FK
+        int product_id FK
+        int quantity
+        float unit_price
+        float line_total
+    }
+    PRODUCTS {
+        int product_id PK
+        string sku
+        string name
+        string category
+        float gal_per_unit
+    }
+    WORK_ORDERS {
+        int wo_id PK
+        int order_id FK
+        int product_id FK
+        float batch_volume_gal
+        date scheduled_date
+        string erp_reference
+    }
+    LOTS {
+        int lot_id PK
+        int wo_id FK
+        string lot_number
+        string status
+    }
+    HACCP_LOGS {
+        int log_id PK
+        int lot_id FK
+        timestamp generated_at
+        string pdf_gcs_uri
+        boolean all_ccp_passed
+    }
+    INVOICES {
+        int invoice_id PK
+        int order_id FK
+        date order_date
+        date production_date
+        date ship_date
+        float total
+        string pdf_gcs_uri
+    }
+  </div>
+</section>
+
+<!-- ───────────── ROLLOUT ───────────── -->
+<section id="rollout">
+  <h2>Phased Rollout Plan</h2>
+
+  <div class="phase-timeline">
+    <div class="phase">
+      <span class="duration">Weeks 1&ndash;3</span>
+      <h4>Phase 1: GCP Foundation + Order Ingestion Agent (Pattern 1)</h4>
+      <p>Provision Cloud SQL, GCS buckets, Pub/Sub, Cloud Run. Deploy the OCR pipeline using Gemini 3 Flash via Vertex AI. Shadow mode first &mdash; agent extracts and a human verifies before data persists. Build the product catalog with pg_trgm indexes. Target: 90%+ OCR accuracy on Kwality receipts.</p>
+    </div>
+    <div class="phase">
+      <span class="duration">Weeks 4&ndash;6</span>
+      <h4>Phase 2: Production Planning Agent (Pattern 2)</h4>
+      <p>Connect order records to formula database in Cloud SQL and ERP. Implement batch scaling logic and inventory checks. Human-in-the-loop approval via LangGraph <code>interrupt_on</code>. Target: zero manual data entry for work orders.</p>
+    </div>
+    <div class="phase">
+      <span class="duration">Weeks 7&ndash;9</span>
+      <h4>Phase 3: QC / HACCP Agent (Pattern 3)</h4>
+      <p>Integrate IoT sensors via Cloud IoT Core &rarr; Pub/Sub. Build auto-generated HACCP logs (PDF to GCS). Alert pipeline via Cloud Tasks for CCP deviations. Target: 100% digital traceability from lot to sensor reading.</p>
+    </div>
+    <div class="phase">
+      <span class="duration">Weeks 10&ndash;11</span>
+      <h4>Phase 4: Invoice Agent (Pattern 5)</h4>
+      <p>Auto-generate invoices from completed order+production+QC chain. Implement unit conversion and 3-date model. FK constraint between invoice# and order# in Cloud SQL. Target: zero invoice-order mismatches.</p>
+    </div>
+    <div class="phase">
+      <span class="duration">Week 12</span>
+      <h4>Phase 5: Orchestrator + Reconciliation (All Patterns)</h4>
+      <p>Wire up the full pipeline with end-to-end reconciliation. Cloud Scheduler daily cron checks for broken links. Monthly SKU volume dashboard for Pattern 4 tracking. LangSmith + Cloud Logging for full observability.</p>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<footer>
+  Kwality Foods Agentic Architecture &mdash; DeepAgents + LangGraph + Google Cloud (Cloud Run, Cloud SQL, Vertex AI Gemini 3 Flash) &mdash; February 2026
+</footer>
+
+<script>
+  mermaid.initialize({
+    startOnLoad: true,
+    theme: 'base',
+    themeVariables: {
+      primaryColor: '#E8F0FE',
+      primaryBorderColor: '#4285F4',
+      primaryTextColor: '#1A73E8',
+      lineColor: '#4285F4',
+      secondaryColor: '#FEF7E0',
+      tertiaryColor: '#E6F4EA'
+    }
+  });
+</script>
+</body>
+</html>

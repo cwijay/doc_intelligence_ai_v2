@@ -1,0 +1,1489 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Biz2Bricks: Hybrid Query Intelligence Architecture</title>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid/dist/mermaid.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
+            color: #202124;
+            background: #f8f9fa;
+        }
+
+        header {
+            background: linear-gradient(135deg, #1A73E8 0%, #0d47a1 100%);
+            color: white;
+            padding: 3rem 2rem;
+            text-align: center;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+        }
+
+        header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+
+        header p {
+            font-size: 1.1rem;
+            opacity: 0.95;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+            display: flex;
+            gap: 2rem;
+        }
+
+        nav.sidebar {
+            width: 250px;
+            position: sticky;
+            top: 2rem;
+            height: fit-content;
+            background: white;
+            border-radius: 8px;
+            padding: 1.5rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            flex-shrink: 0;
+        }
+
+        nav.sidebar h3 {
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            color: #5f6368;
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }
+
+        nav.sidebar ul {
+            list-style: none;
+        }
+
+        nav.sidebar li {
+            margin-bottom: 0.5rem;
+        }
+
+        nav.sidebar a {
+            color: #1A73E8;
+            text-decoration: none;
+            font-size: 0.95rem;
+            padding: 0.5rem;
+            display: block;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }
+
+        nav.sidebar a:hover {
+            background: #f0f7ff;
+            color: #0d47a1;
+        }
+
+        main {
+            flex: 1;
+            min-width: 0;
+        }
+
+        section {
+            background: white;
+            border-radius: 8px;
+            padding: 2.5rem;
+            margin-bottom: 2rem;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+            scroll-margin-top: 2rem;
+        }
+
+        section h2 {
+            font-size: 1.8rem;
+            color: #1A73E8;
+            margin-bottom: 0.5rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 2px solid #e8f0fe;
+        }
+
+        .section-intro {
+            color: #5f6368;
+            margin-bottom: 1.5rem;
+            font-size: 1.05rem;
+        }
+
+        h3 {
+            font-size: 1.3rem;
+            color: #202124;
+            margin-top: 1.5rem;
+            margin-bottom: 0.75rem;
+            font-weight: 600;
+        }
+
+        h4 {
+            font-size: 1.05rem;
+            color: #3c4043;
+            margin-top: 1.2rem;
+            margin-bottom: 0.5rem;
+            font-weight: 600;
+        }
+
+        p {
+            margin-bottom: 1rem;
+            color: #3c4043;
+        }
+
+        ul, ol {
+            margin-left: 1.5rem;
+            margin-bottom: 1rem;
+        }
+
+        li {
+            margin-bottom: 0.5rem;
+        }
+
+        .card {
+            background: #f8f9fa;
+            border-left: 4px solid #1A73E8;
+            padding: 1.25rem;
+            margin: 1.5rem 0;
+            border-radius: 4px;
+        }
+
+        .card.info {
+            border-left-color: #1A73E8;
+            background: #f0f7ff;
+        }
+
+        .card.success {
+            border-left-color: #34A853;
+            background: #f0fdf4;
+        }
+
+        .card.warning {
+            border-left-color: #FBBC04;
+            background: #fef9e7;
+        }
+
+        .card strong {
+            color: #0d47a1;
+        }
+
+        .card.success strong {
+            color: #1e7e34;
+        }
+
+        .card.warning strong {
+            color: #b3890f;
+        }
+
+        pre {
+            background: #202124;
+            color: #9aa0a6;
+            padding: 1.5rem;
+            border-radius: 6px;
+            overflow-x: auto;
+            font-size: 0.9rem;
+            line-height: 1.5;
+            margin: 1.5rem 0;
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+        }
+
+        code {
+            font-family: 'Monaco', 'Menlo', 'Courier New', monospace;
+            background: #f8f9fa;
+            padding: 0.2rem 0.4rem;
+            border-radius: 3px;
+            font-size: 0.9em;
+        }
+
+        pre code {
+            background: none;
+            padding: 0;
+            color: inherit;
+        }
+
+        .keyword { color: #d291ff; }
+        .string { color: #81c995; }
+        .comment { color: #5f6368; }
+        .function { color: #a4d3ff; }
+        .type { color: #fd8a62; }
+        .decorator { color: #fdd663; }
+
+        .grid-2 {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 1.5rem;
+            margin: 1.5rem 0;
+        }
+
+        @media (max-width: 1024px) {
+            .grid-2 {
+                grid-template-columns: 1fr;
+            }
+            .container {
+                flex-direction: column;
+            }
+            nav.sidebar {
+                width: 100%;
+                position: static;
+                margin-bottom: 1rem;
+            }
+        }
+
+        .implementation-note {
+            background: #fef9e7;
+            border-left: 4px solid #FBBC04;
+            padding: 1rem;
+            margin: 1.5rem 0;
+            border-radius: 4px;
+            font-size: 0.95rem;
+        }
+
+        .implementation-note strong {
+            color: #b3890f;
+        }
+
+        .spectrum {
+            display: flex;
+            margin: 2rem 0;
+            gap: 1rem;
+            align-items: center;
+        }
+
+        .spectrum-item {
+            flex: 1;
+            background: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 6px;
+            text-align: center;
+            border: 1px solid #dadce0;
+        }
+
+        .spectrum-item.sql {
+            background: #e3f2fd;
+            border-color: #1A73E8;
+        }
+
+        .spectrum-item.hybrid {
+            background: #f3e5f5;
+            border-color: #9c27b0;
+        }
+
+        .spectrum-item.rag {
+            background: #e8f5e9;
+            border-color: #34A853;
+        }
+
+        .spectrum-item h4 {
+            margin-top: 0;
+            font-size: 0.95rem;
+        }
+
+        .spectrum-item p {
+            font-size: 0.9rem;
+            margin: 0;
+            color: #5f6368;
+        }
+
+        .arrow {
+            color: #dadce0;
+            font-size: 1.5rem;
+            flex-shrink: 0;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 1.5rem 0;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 0.75rem;
+            border-bottom: 1px solid #dadce0;
+        }
+
+        th {
+            background: #f8f9fa;
+            font-weight: 600;
+            color: #202124;
+        }
+
+        tr:hover {
+            background: #f8f9fa;
+        }
+
+        .mermaid {
+            display: flex;
+            justify-content: center;
+            margin: 2rem 0;
+            background: #f8f9fa;
+            padding: 2rem;
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            margin-right: 0.5rem;
+        }
+
+        .badge.sql {
+            background: #e3f2fd;
+            color: #1A73E8;
+        }
+
+        .badge.rag {
+            background: #e8f5e9;
+            color: #34A853;
+        }
+
+        .badge.hybrid {
+            background: #f3e5f5;
+            color: #9c27b0;
+        }
+
+        .vertical-example {
+            margin: 1.5rem 0;
+            padding: 1rem;
+            background: #f8f9fa;
+            border-left: 3px solid #1A73E8;
+            border-radius: 4px;
+        }
+
+        .vertical-example h5 {
+            margin: 0 0 0.5rem 0;
+            color: #1A73E8;
+            font-size: 0.95rem;
+            font-weight: 600;
+        }
+
+        .vertical-example p {
+            margin: 0.5rem 0;
+            font-size: 0.95rem;
+        }
+
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: #5f6368;
+            font-size: 0.9rem;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Hybrid Query Intelligence Layer</h1>
+        <p>Architecture Addendum for Biz2Bricks Document Intelligence Platform</p>
+    </header>
+
+    <div class="container">
+        <nav class="sidebar">
+            <h3>Contents</h3>
+            <ul>
+                <li><a href="#section1">The Hybrid Query Problem</a></li>
+                <li><a href="#section2">Query Router Architecture</a></li>
+                <li><a href="#section3">Text-to-SQL Engine</a></li>
+                <li><a href="#section4">RAG Query Path</a></li>
+                <li><a href="#section5">Hybrid Execution</a></li>
+                <li><a href="#section6">DeepAgents Integration</a></li>
+                <li><a href="#section7">Next.js Chat UI</a></li>
+                <li><a href="#section8">Safety & Observability</a></li>
+                <li><a href="#section9">Progressive Enhancement</a></li>
+            </ul>
+        </nav>
+
+        <main>
+            <!-- SECTION 1 -->
+            <section id="section1">
+                <h2>1. The Hybrid Query Problem</h2>
+                <p class="section-intro">
+                    The Biz2Bricks platform extracts structured data and indexes raw documents, but users need a single natural language interface to ask questions that span both. This section explains why neither text-to-SQL nor RAG alone is sufficient.
+                </p>
+
+                <h3>Structured vs. Unstructured Data</h3>
+                <p>
+                    Every Biz2Bricks tenant has two complementary data sources:
+                </p>
+
+                <div class="grid-2">
+                    <div class="card info">
+                        <strong>Structured Data (Cloud SQL)</strong>
+                        <p style="margin-top: 0.5rem; margin-bottom: 0;">
+                            Extracted fields from processed documents: amounts, dates, quantities, statuses, normalized values. Perfect for aggregation, filtering, comparison, and time-series analysis.
+                        </p>
+                        <p style="margin: 0; font-size: 0.9rem;">Examples: invoice totals, delivery dates, defect rates, candidate experience years</p>
+                    </div>
+                    <div class="card info">
+                        <strong>Unstructured Data (Gemini File Search)</strong>
+                        <p style="margin-top: 0.5rem; margin-bottom: 0;">
+                            Raw document content: paragraphs, clauses, notes, comments, inspection observations. Perfect for context, specifics, and qualitative details.
+                        </p>
+                        <p style="margin: 0; font-size: 0.9rem;">Examples: penalty clauses, temperature observations, candidate background, inspection notes</p>
+                    </div>
+                </div>
+
+                <h3>The Spectrum: SQL vs. Hybrid vs. RAG</h3>
+                <p>User questions fall along a spectrum. The router classifies each into one of three routes:</p>
+
+                <div class="spectrum">
+                    <div class="spectrum-item sql">
+                        <h4>SQL Only</h4>
+                        <p>"What's my total spend?" "Top 5 suppliers?" "Average time-to-hire?"</p>
+                    </div>
+                    <div class="arrow">→</div>
+                    <div class="spectrum-item hybrid">
+                        <h4>Hybrid</h4>
+                        <p>"Invoices over $10K that mention penalties" "Failed batches and their corrective actions"</p>
+                    </div>
+                    <div class="arrow">→</div>
+                    <div class="spectrum-item rag">
+                        <h4>RAG Only</h4>
+                        <p>"What did the audit say?" "Competitor terms?" "Inspection observations?"</p>
+                    </div>
+                </div>
+
+                <h3>Vertical Examples</h3>
+
+                <div class="vertical-example">
+                    <h5>Food Manufacturing</h5>
+                    <p><span class="badge sql">SQL</span> "Total production output for March" → Sum extracted quantities</p>
+                    <p><span class="badge rag">RAG</span> "What temperature was flagged in HACCP audit?" → Search raw audit documents</p>
+                    <p><span class="badge hybrid">HYBRID</span> "Show me all batches that failed QC and what the corrective actions were" → Find failed records, enrich with RAG for action details</p>
+                </div>
+
+                <div class="vertical-example">
+                    <h5>Recruitment</h5>
+                    <p><span class="badge sql">SQL</span> "Average time-to-hire this quarter" → Aggregate extracted dates</p>
+                    <p><span class="badge rag">RAG</span> "Which candidate mentioned Kubernetes experience?" → Full-text search CVs</p>
+                    <p><span class="badge hybrid">HYBRID</span> "Find candidates with 5+ years experience whose CVs mention leadership roles" → Filter SQL by years, then RAG for leadership mentions</p>
+                </div>
+
+                <div class="vertical-example">
+                    <h5>Retail / Distribution</h5>
+                    <p><span class="badge sql">SQL</span> "Top 5 suppliers by order volume" → Aggregate extracted quantities</p>
+                    <p><span class="badge rag">RAG</span> "What are the return policy terms from Supplier X?" → Search contracts</p>
+                    <p><span class="badge hybrid">HYBRID</span> "Suppliers with >10% defect rate — what do their contracts say about quality guarantees?" → Identify suppliers by defect rate, then retrieve contract clauses</p>
+                </div>
+
+                <div class="vertical-example">
+                    <h5>Real Estate</h5>
+                    <p><span class="badge sql">SQL</span> "Average days on market for listings above $500K" → Aggregate extracted values</p>
+                    <p><span class="badge rag">RAG</span> "What did the inspector note about the foundation?" → Search inspection reports</p>
+                    <p><span class="badge hybrid">HYBRID</span> "Properties listed over 90 days with inspection issues — show the defects" → Filter by days on market, then retrieve defect details from reports</p>
+                </div>
+
+                <div class="card success">
+                    <strong>Why Hybrid Matters:</strong> Without hybrid queries, users must perform manual multi-step research: run SQL, get IDs, then search RAG for context. With hybrid routing, we intelligently combine both paths and synthesize a complete answer in one natural language request.
+                </div>
+            </section>
+
+            <!-- SECTION 2 -->
+            <section id="section2">
+                <h2>2. Query Router Architecture</h2>
+                <p class="section-intro">
+                    Every user question flows through a Query Router that classifies it into one of three execution paths. The router uses Gemini 3 Flash to understand the question intent and the tenant's data model.
+                </p>
+
+                <h3>Router Pattern</h3>
+                <p>
+                    The router accepts a natural language question and returns a structured decision including the route type, rephrased sub-questions for each path, and confidence. This design allows the execution layer to confidently dispatch to the correct handler(s).
+                </p>
+
+                <div class="mermaid">
+graph TB
+    Question[User Question]
+    Router[Query Router - Gemini 3 Flash]
+
+    subgraph SQL_Path[SQL Path]
+        SchemaLookup[Schema Registry Lookup]
+        SQLGen[SQL Generation]
+        SQLValidate[SQL Validation + Sanitization]
+        SQLExec[Execute on Cloud SQL]
+        SQLFormat[Format Results]
+    end
+
+    subgraph RAG_Path[RAG Path]
+        StoreSelect[Select File Search Stores]
+        RAGQuery[Query Gemini File Search]
+        RAGCite[Extract Citations]
+    end
+
+    Synthesizer[Result Synthesizer]
+    Response[Final Response with Sources]
+
+    Question --> Router
+    Router -->|sql_only| SchemaLookup
+    Router -->|rag_only| StoreSelect
+    Router -->|hybrid| SchemaLookup
+    Router -->|hybrid| StoreSelect
+
+    SchemaLookup --> SQLGen
+    SQLGen --> SQLValidate
+    SQLValidate --> SQLExec
+    SQLExec --> SQLFormat
+
+    StoreSelect --> RAGQuery
+    RAGQuery --> RAGCite
+
+    SQLFormat --> Synthesizer
+    RAGCite --> Synthesizer
+    Synthesizer --> Response
+                </div>
+
+                <h3>Router Implementation</h3>
+
+                <pre><code><span class="keyword">from</span> google <span class="keyword">import</span> genai
+<span class="keyword">from</span> google.genai <span class="keyword">import</span> types
+<span class="keyword">from</span> pydantic <span class="keyword">import</span> BaseModel
+<span class="keyword">from</span> enum <span class="keyword">import</span> Enum
+
+<span class="keyword">class</span> <span class="type">QueryRoute</span>(str, Enum):
+    SQL_ONLY = <span class="string">"sql_only"</span>
+    RAG_ONLY = <span class="string">"rag_only"</span>
+    HYBRID = <span class="string">"hybrid"</span>
+
+<span class="keyword">class</span> <span class="type">RouterDecision</span>(BaseModel):
+    route: QueryRoute
+    reasoning: str
+    sql_question: str | None = None
+    rag_question: str | None = None
+    confidence: float
+
+client = genai.Client(vertexai=True, project=<span class="string">"biz2bricks-prod"</span>, location=<span class="string">"us-central1"</span>)
+
+ROUTER_PROMPT = <span class="string">"""You are a query router for a document intelligence platform.
+
+Given a user's natural language question, decide which data source(s) to query:
+
+**sql_only** — Use when the question asks for:
+- Aggregations (totals, counts, averages, min/max)
+- Filtering by specific field values (dates, amounts, status)
+- Sorting, ranking, or top-N queries
+- Comparisons between entities or time periods
+- Any question answerable from structured extracted fields
+
+**rag_only** — Use when the question asks for:
+- Specific content or wording from documents
+- Qualitative information (descriptions, notes, terms, clauses)
+- Context that wasn't extracted into structured fields
+- "What does the document say about..."
+- Free-text search across document content
+
+**hybrid** — Use when the question needs BOTH:
+- Structured filtering + document context
+- Quantitative results enriched with qualitative details
+- Questions that first filter entities, then need document-level detail
+
+Available structured fields for this tenant:
+{schema_description}
+
+Available document types in RAG:
+{rag_store_descriptions}
+
+User question: {question}
+
+Return your decision as JSON with route, reasoning, sql_question, rag_question, and confidence (0-1)."""</span>
+
+<span class="decorator">@app.post</span>(<span class="string">"/route"</span>)
+<span class="keyword">async def</span> <span class="function">route_query</span>(tenant_id: str, question: str) -> RouterDecision:
+    schema_desc = <span class="keyword">await</span> get_tenant_schema_description(tenant_id)
+    rag_desc = <span class="keyword">await</span> get_tenant_rag_description(tenant_id)
+
+    response = <span class="keyword">await</span> client.aio.models.generate_content(
+        model=<span class="string">"gemini-3-flash"</span>,
+        contents=ROUTER_PROMPT.format(
+            schema_description=schema_desc,
+            rag_store_descriptions=rag_desc,
+            question=question,
+        ),
+        config=types.GenerateContentConfig(
+            response_mime_type=<span class="string">"application/json"</span>,
+            response_json_schema=RouterDecision.model_json_schema(),
+        ),
+    )
+
+    <span class="keyword">return</span> RouterDecision.model_validate_json(response.text)</code></pre>
+
+                <div class="implementation-note">
+                    <strong>Implementation Note:</strong> The router uses Gemini's structured output mode (response_json_schema) to ensure consistent, parseable responses. The prompt explicitly defines the three routes and provides schema context so Gemini can make informed decisions. This pattern is resilient and requires no custom parsing.
+                </div>
+            </section>
+
+            <!-- SECTION 3 -->
+            <section id="section3">
+                <h2>3. Text-to-SQL Engine</h2>
+                <p class="section-intro">
+                    The SQL path converts natural language questions into safe, executable PostgreSQL queries. The core challenge: each tenant's schema is dynamic, with base fields and custom JSONB columns that vary per tenant. The engine must understand this at generation time.
+                </p>
+
+                <h3>The Dynamic Schema Challenge</h3>
+                <p>
+                    Unlike traditional databases with fixed schemas, Biz2Bricks extracts structured data into JSONB columns. A recruitment tenant might have custom fields like <code>candidate_certifications</code> or <code>visa_sponsorship_needed</code>, while a food manufacturer has <code>allergen_info</code> and <code>batch_size</code>. The SQL generator must be aware of all available fields at generation time.
+                </p>
+
+                <h3>Schema Registry</h3>
+                <p>
+                    The Schema Registry builds a natural-language description of each tenant's data model. This description is embedded in the SQL generation prompt, allowing Gemini to generate queries using the correct field names and types.
+                </p>
+
+                <pre><code><span class="keyword">async def</span> <span class="function">get_tenant_schema_description</span>(tenant_id: str) -> str:
+    <span class="string">"""Build natural language schema description for SQL generator."""</span>
+
+    doc_types = <span class="keyword">await</span> db.fetch_all(<span class="string">"""
+        SELECT dt.type_key, dt.display_name, dt.base_schema,
+               json_agg(json_build_object(
+                   'name', cf.field_name,
+                   'type', cf.field_type,
+                   'hint', cf.extraction_hint
+               )) FILTER (WHERE cf.id IS NOT NULL) AS custom_fields
+        FROM document_types dt
+        LEFT JOIN custom_fields cf ON cf.document_type_id = dt.id
+        WHERE dt.tenant_id = :tenant_id
+        GROUP BY dt.id
+    """</span>, {<span class="string">"tenant_id"</span>: tenant_id})
+
+    lines = [<span class="string">"## Database Schema"</span>, <span class="string">""</span>]
+    lines.append(<span class="string">"### Core Tables"</span>)
+    lines.append(<span class="string">"- `documents` (id, tenant_id, document_type_id, gcs_path, status, created_at)"</span>)
+    lines.append(<span class="string">"- `extracted_data` (id, document_id, tenant_id, data JSONB, validation_errors, extracted_at)"</span>)
+    lines.append(<span class="string">""</span>)
+
+    <span class="keyword">for</span> dt <span class="keyword">in</span> doc_types:
+        lines.append(<span class="string">f"### Document Type: {dt['display_name']} (type_key='{dt['type_key']}')"</span>)
+
+        schema = dt[<span class="string">'base_schema'</span>]
+        <span class="keyword">if</span> <span class="string">'properties'</span> <span class="keyword">in</span> schema:
+            lines.append(<span class="string">"Base fields in `extracted_data.data`:"</span>)
+            <span class="keyword">for</span> field_name, field_def <span class="keyword">in</span> schema[<span class="string">'properties'</span>].items():
+                field_type = field_def.get(<span class="string">'type'</span>, <span class="string">'string'</span>)
+                lines.append(<span class="string">f"  - `data->>'{field_name}'` ({field_type})"</span>)
+
+                <span class="keyword">if</span> field_type == <span class="string">'array'</span> <span class="keyword">and</span> <span class="string">'items'</span> <span class="keyword">in</span> field_def:
+                    item_props = field_def[<span class="string">'items'</span>].get(<span class="string">'properties'</span>, {})
+                    <span class="keyword">for</span> sub_name, sub_def <span class="keyword">in</span> item_props.items():
+                        lines.append(<span class="string">f"    - `elem->>'{sub_name}'` ({sub_def.get('type', 'string')})"</span>)
+
+        <span class="keyword">if</span> dt[<span class="string">'custom_fields'</span>]:
+            lines.append(<span class="string">"Custom fields (tenant-added):"</span>)
+            <span class="keyword">for</span> cf <span class="keyword">in</span> dt[<span class="string">'custom_fields'</span>]:
+                hint = cf[<span class="string">'hint'</span>] <span class="keyword">or</span> <span class="string">'no hint'</span>
+                lines.append(<span class="string">f"  - `data->>'{cf['name']}'` ({cf['type']}) — {hint}"</span>)
+
+        lines.append(<span class="string">""</span>)
+
+    <span class="keyword">return</span> <span class="string">"\n"</span>.join(lines)</code></pre>
+
+                <h3>SQL Generation with Gemini</h3>
+
+                <pre><code>SQL_GENERATION_PROMPT = <span class="string">"""You are a PostgreSQL expert. Generate a query to answer:
+
+CRITICAL RULES:
+1. ALWAYS include WHERE tenant_id = :tenant_id (multi-tenant system)
+2. For JSONB: use data->>'field_name' for text, (data->>'field_name')::numeric for numbers
+3. For JSONB arrays: use jsonb_array_elements(data->'array_field') AS elem
+4. NEVER use DELETE, UPDATE, INSERT, DROP, ALTER, or DDL/DML — only SELECT
+5. ALWAYS limit to 100 rows unless aggregating
+6. Use CTEs for readability
+7. Cast JSONB values to proper types
+8. For dates: (data->>'date_field')::date
+
+{schema_description}
+
+Question: {question}
+
+Return only the SQL query, no explanation."""</span>
+
+<span class="keyword">async def</span> <span class="function">generate_sql</span>(tenant_id: str, question: str, schema_desc: str) -> str:
+    response = <span class="keyword">await</span> client.aio.models.generate_content(
+        model=<span class="string">"gemini-3-flash"</span>,
+        contents=SQL_GENERATION_PROMPT.format(
+            schema_description=schema_desc,
+            question=question,
+        ),
+        config=types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(thinking_level=<span class="string">"medium"</span>),
+        ),
+    )
+
+    sql = response.text.strip()
+    <span class="keyword">if</span> sql.startswith(<span class="string">"```"</span>):
+        sql = sql.split(<span class="string">"\n"</span>, <span class="number">1</span>)[<span class="number">1</span>].rsplit(<span class="string">"```"</span>, <span class="number">1</span>)[<span class="number">0</span>].strip()
+
+    <span class="keyword">return</span> sql</code></pre>
+
+                <h3>SQL Validation & Sanitization</h3>
+                <p>
+                    Before any SQL executes, it is validated and sanitized using sqlglot. This prevents injection attacks and ensures only safe SELECT statements run.
+                </p>
+
+                <pre><code><span class="keyword">import</span> sqlglot
+
+<span class="keyword">class</span> <span class="type">SQLValidationError</span>(Exception):
+    <span class="keyword">pass</span>
+
+<span class="keyword">def</span> <span class="function">validate_sql</span>(sql: str, tenant_id: str) -> str:
+    <span class="string">"""Validate and sanitize generated SQL before execution."""</span>
+
+    <span class="comment"># 1. Parse with sqlglot to ensure valid SQL</span>
+    <span class="keyword">try</span>:
+        parsed = sqlglot.parse_one(sql, dialect=<span class="string">"postgres"</span>)
+    <span class="keyword">except</span> sqlglot.errors.ParseError <span class="keyword">as</span> e:
+        <span class="keyword">raise</span> SQLValidationError(<span class="string">f"Invalid SQL syntax: {e}"</span>)
+
+    <span class="comment"># 2. Reject any non-SELECT statements</span>
+    <span class="keyword">if</span> <span class="keyword">not</span> <span class="keyword">isinstance</span>(parsed, sqlglot.exp.Select):
+        <span class="keyword">raise</span> SQLValidationError(<span class="string">"Only SELECT statements are allowed"</span>)
+
+    <span class="comment"># 3. Check for dangerous operations</span>
+    dangerous_ops = (
+        sqlglot.exp.Delete, sqlglot.exp.Update, sqlglot.exp.Insert,
+        sqlglot.exp.Drop, sqlglot.exp.Alter, sqlglot.exp.Create,
+    )
+    <span class="keyword">for</span> node <span class="keyword">in</span> parsed.walk():
+        <span class="keyword">if</span> <span class="keyword">isinstance</span>(node, dangerous_ops):
+            <span class="keyword">raise</span> SQLValidationError(<span class="string">f"Forbidden operation: {type(node).__name__}"</span>)
+
+    <span class="comment"># 4. Ensure tenant_id filter exists</span>
+    sql_lower = sql.lower()
+    <span class="keyword">if</span> <span class="string">"tenant_id"</span> <span class="keyword">not</span> <span class="keyword">in</span> sql_lower:
+        <span class="keyword">raise</span> SQLValidationError(<span class="string">"Query must include tenant_id filter"</span>)
+
+    <span class="comment"># 5. Add LIMIT if not present</span>
+    <span class="keyword">if</span> <span class="keyword">not</span> parsed.find(sqlglot.exp.Limit):
+        sql = <span class="string">f"SELECT * FROM ({sql}) _limited LIMIT 100"</span>
+
+    <span class="keyword">return</span> sql</code></pre>
+
+                <h3>Example Queries by Vertical</h3>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Vertical</th>
+                            <th>Question</th>
+                            <th>Generated SQL Pattern</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td><strong>Food Manufacturing</strong></td>
+                            <td>"Total production output for March"</td>
+                            <td><code>SUM((data->>'quantity')::numeric)</code> WHERE <code>date >= '2024-03-01'</code></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Recruitment</strong></td>
+                            <td>"How many candidates applied for senior roles last quarter?"</td>
+                            <td><code>COUNT(*)</code> WHERE <code>data->>'seniority_level' = 'senior'</code></td>
+                        </tr>
+                        <tr>
+                            <td><strong>Retail</strong></td>
+                            <td>"Top 10 products by quantity ordered"</td>
+                            <td><code>jsonb_array_elements(data->'line_items')</code> grouped and summed</td>
+                        </tr>
+                        <tr>
+                            <td><strong>Real Estate</strong></td>
+                            <td>"Average listing price by neighborhood"</td>
+                            <td><code>AVG((data->>'price')::numeric)</code> grouped by <code>data->>'neighborhood'</code></td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <div class="card warning">
+                    <strong>Timeout & Cost Control:</strong> All SQL queries have a 5-second execution timeout and 100-row limit (unless aggregating). This prevents runaway queries from consuming resources or Gemini tokens. Expensive operations are logged for optimization.
+                </div>
+            </section>
+
+            <!-- SECTION 4 -->
+            <section id="section4">
+                <h2>4. RAG Query Path</h2>
+                <p class="section-intro">
+                    For RAG-only and hybrid queries, the router dispatches to Gemini File Search. The router rephrases the question optimally for document retrieval, and the result includes grounded citations.
+                </p>
+
+                <h3>Implementation</h3>
+
+                <pre><code><span class="keyword">async def</span> <span class="function">execute_rag_query</span>(tenant_id: str, question: str, categories: list[str] = None) -> dict:
+    <span class="string">"""Query tenant's File Search Stores for unstructured intelligence."""</span>
+    stores = <span class="keyword">await</span> get_tenant_stores(tenant_id)
+
+    <span class="comment"># Select relevant stores (router may suggest specific categories)</span>
+    store_names = [stores[c] <span class="keyword">for</span> c <span class="keyword">in</span> (categories <span class="keyword">or</span> stores.keys()) <span class="keyword">if</span> c <span class="keyword">in</span> stores]
+
+    response = <span class="keyword">await</span> client.aio.models.generate_content(
+        model=<span class="string">"gemini-3-flash"</span>,
+        contents=question,
+        config=types.GenerateContentConfig(
+            tools=[
+                types.Tool(file_search=types.FileSearch(
+                    file_search_store_names=store_names
+                ))
+            ],
+            system_instruction=<span class="string">"Answer based on tenant's documents. Always cite specific documents and quote relevant passages. If information isn't found, say so clearly."</span>,
+        ),
+    )
+
+    <span class="comment"># Extract grounding metadata for citations</span>
+    sources = []
+    <span class="keyword">if</span> response.candidates <span class="keyword">and</span> response.candidates[<span class="number">0</span>].grounding_metadata:
+        <span class="keyword">for</span> chunk <span class="keyword">in</span> response.candidates[<span class="number">0</span>].grounding_metadata.chunks:
+            sources.append({
+                <span class="string">"file_name"</span>: chunk.file_name,
+                <span class="string">"snippet"</span>: chunk.text,
+                <span class="string">"relevance_score"</span>: chunk.relevance_score,
+            })
+
+    <span class="keyword">return</span> {
+        <span class="string">"answer"</span>: response.text,
+        <span class="string">"sources"</span>: sources,
+    }</code></pre>
+
+                <div class="implementation-note">
+                    <strong>Grounding & Citations:</strong> Gemini's File Search automatically grounds responses in the indexed documents. The <code>grounding_metadata</code> provides exact file names, snippets, and relevance scores. This ensures users can verify claims and trace them to source documents.
+                </div>
+            </section>
+
+            <!-- SECTION 5 -->
+            <section id="section5">
+                <h2>5. Hybrid Execution & Result Synthesis</h2>
+                <p class="section-intro">
+                    For hybrid queries, both SQL and RAG paths execute in parallel. A Synthesizer then merges results into a coherent, actionable response that combines quantitative data with qualitative context.
+                </p>
+
+                <h3>Parallel Execution</h3>
+
+                <pre><code><span class="keyword">import</span> asyncio
+
+<span class="keyword">async def</span> <span class="function">execute_hybrid_query</span>(
+    tenant_id: str,
+    question: str,
+    router_decision: RouterDecision,
+    schema_desc: str,
+) -> dict:
+    <span class="string">"""Execute both SQL and RAG paths in parallel, then synthesize."""</span>
+
+    <span class="comment"># Run both paths concurrently</span>
+    sql_task = execute_sql_path(tenant_id, router_decision.sql_question, schema_desc)
+    rag_task = execute_rag_query(tenant_id, router_decision.rag_question)
+
+    sql_result, rag_result = <span class="keyword">await</span> asyncio.gather(sql_task, rag_task)
+
+    <span class="comment"># Synthesize results</span>
+    synthesis = <span class="keyword">await</span> synthesize_results(
+        question=question,
+        sql_result=sql_result,
+        rag_result=rag_result,
+    )
+
+    <span class="keyword">return</span> synthesis</code></pre>
+
+                <h3>Result Synthesis</h3>
+
+                <pre><code>SYNTHESIS_PROMPT = <span class="string">"""You are a BI assistant. The user asked a question requiring both structured data and document search.
+
+**User's question:** {question}
+
+**Structured data results (SQL):**
+{sql_results}
+
+**Document search results (RAG):**
+{rag_results}
+
+Combine these into a single, clear response:
+1. Lead with the quantitative answer from SQL
+2. Enrich with qualitative context from documents
+3. Cite specific documents for claims
+4. If results conflict, note the discrepancy
+5. Format with clear sections if complex"""</span>
+
+<span class="keyword">async def</span> <span class="function">synthesize_results</span>(question: str, sql_result: dict, rag_result: dict) -> dict:
+    response = <span class="keyword">await</span> client.aio.models.generate_content(
+        model=<span class="string">"gemini-3-flash"</span>,
+        contents=SYNTHESIS_PROMPT.format(
+            question=question,
+            sql_results=format_sql_results(sql_result),
+            rag_results=format_rag_results(rag_result),
+        ),
+        config=types.GenerateContentConfig(
+            thinking_config=types.ThinkingConfig(thinking_level=<span class="string">"high"</span>),
+        ),
+    )
+
+    <span class="keyword">return</span> {
+        <span class="string">"answer"</span>: response.text,
+        <span class="string">"sql_data"</span>: sql_result.get(<span class="string">"rows"</span>),
+        <span class="string">"sql_query"</span>: sql_result.get(<span class="string">"sql"</span>),
+        <span class="string">"rag_sources"</span>: rag_result.get(<span class="string">"sources"</span>),
+        <span class="string">"route"</span>: <span class="string">"hybrid"</span>,
+    }</code></pre>
+
+                <div class="card success">
+                    <strong>Transparency & Trust:</strong> The response includes the generated SQL query, so users can see what data was queried. This builds trust and allows users to verify the logic. For RAG results, source documents and relevance scores are always included.
+                </div>
+            </section>
+
+            <!-- SECTION 6 -->
+            <section id="section6">
+                <h2>6. DeepAgents Integration</h2>
+                <p class="section-intro">
+                    The Query Intelligence agent becomes a new specialist agent alongside Ingestion, Analysis, Report, and Knowledge agents in the orchestrator. It handles all natural language query operations.
+                </p>
+
+                <h3>Creating the Query Intelligence Agent</h3>
+
+                <pre><code><span class="keyword">from</span> langchain_deepagents <span class="keyword">import</span> create_deep_agent
+
+<span class="keyword">def</span> <span class="function">create_query_intelligence_agent</span>(tenant_id: str):
+    <span class="string">"""Create the hybrid query agent for a tenant."""</span>
+
+    schema_desc = get_tenant_schema_description_sync(tenant_id)
+
+    query_agent = create_deep_agent(
+        model=<span class="string">"gemini-3-flash"</span>,
+        name=<span class="string">f"query_intelligence_{tenant_id}"</span>,
+        tools=[
+            route_query_tool,
+            generate_and_run_sql,
+            search_documents,
+            synthesize_results,
+            render_chart,
+        ],
+        instructions=<span class="string">f"""You are a query intelligence agent for Biz2Bricks.
+
+You help business users answer questions about their documents and data using
+natural language. You have two data sources:
+
+1. STRUCTURED DATA (Cloud SQL) — extracted fields from processed documents
+   {schema_desc}
+
+2. DOCUMENT KNOWLEDGE (File Search) — full text of uploaded documents
+
+For every question:
+1. Determine the best route (sql_only, rag_only, or hybrid)
+2. Execute the appropriate path(s)
+3. Synthesize a clear, actionable answer
+4. Include citations and show SQL for transparency
+5. Offer to visualize data when relevant"""</span>,
+    )
+
+    <span class="keyword">return</span> query_agent</code></pre>
+
+                <h3>Updated Orchestrator Factory</h3>
+
+                <p>
+                    The platform's orchestrator now instantiates a Query Intelligence agent alongside the existing agents. This agent is invoked whenever users ask natural language questions in the chat interface.
+                </p>
+
+                <div class="mermaid">
+graph TB
+    Orchestrator[Platform Orchestrator]
+
+    subgraph AgentLayer[Agent Layer]
+        Ingestion[Ingestion Agent]
+        Analysis[Analysis Agent]
+        QueryIntel[Query Intelligence Agent]
+        Report[Report Agent]
+        Knowledge[Knowledge Agent]
+    end
+
+    Router[Query Router]
+    SQLEngine[Text-to-SQL Engine]
+    RAGEngine[RAG Query Engine]
+    Synthesizer[Result Synthesizer]
+
+    Orchestrator --> AgentLayer
+    QueryIntel --> Router
+    Router -->|sql_only| SQLEngine
+    Router -->|rag_only| RAGEngine
+    Router -->|hybrid| SQLEngine
+    Router -->|hybrid| RAGEngine
+    SQLEngine --> Synthesizer
+    RAGEngine --> Synthesizer
+                </div>
+
+                <div class="implementation-note">
+                    <strong>Agent Composition:</strong> The Query Intelligence agent is a first-class citizen in the orchestrator, with the same interface and lifecycle as other agents. This allows the system to intelligently dispatch user requests to the appropriate agent based on intent.
+                </div>
+            </section>
+
+            <!-- SECTION 7 -->
+            <section id="section7">
+                <h2>7. Next.js Chat UI for Hybrid Queries</h2>
+                <p class="section-intro">
+                    The existing chat interface is enhanced to display both SQL results and RAG citations in a tabbed, progressive format. Results stream via SSE as each path completes.
+                </p>
+
+                <h3>Query Result Component</h3>
+
+                <pre><code><span class="comment">// components/query-result.tsx</span>
+<span class="string">'use client'</span>
+<span class="keyword">import</span> { useState } <span class="keyword">from</span> <span class="string">'react'</span>
+<span class="keyword">import</span> { motion, AnimatePresence } <span class="keyword">from</span> <span class="string">'framer-motion'</span>
+
+<span class="keyword">type</span> <span class="type">Tab</span> = <span class="string">'answer'</span> | <span class="string">'sql'</span> | <span class="string">'sources'</span>
+
+<span class="keyword">interface</span> <span class="type">QueryResultProps</span> {
+    answer: string
+    sqlQuery?: string
+    sqlRows?: Record&lt;string, any&gt;[]
+    ragSources?: { file_name: string; snippet: string; relevance_score: number }[]
+    route: <span class="string">'sql_only'</span> | <span class="string">'rag_only'</span> | <span class="string">'hybrid'</span>
+}
+
+<span class="keyword">export function</span> <span class="function">QueryResult</span>({ answer, sqlQuery, sqlRows, ragSources, route }: QueryResultProps) {
+    <span class="keyword">const</span> [activeTab, setActiveTab] = useState&lt;Tab&gt;(<span class="string">'answer'</span>)
+
+    <span class="keyword">const</span> tabs: { id: Tab; label: string; available: boolean }[] = [
+        { id: <span class="string">'answer'</span>, label: <span class="string">'Answer'</span>, available: <span class="keyword">true</span> },
+        { id: <span class="string">'sql'</span>, label: <span class="string">&#96;SQL Results${sqlRows ? ` (${sqlRows.length})` : &#96;}&#96;</span>, available: !!sqlQuery },
+        { id: <span class="string">'sources'</span>, label: <span class="string">&#96;Sources${ragSources ? ` (${ragSources.length})` : &#96;}&#96;</span>, available: !!ragSources?.length },
+    ]
+
+    <span class="keyword">return</span> (
+        &lt;div className=<span class="string">"rounded-xl border bg-white shadow-sm"</span>&gt;
+            &lt;div className=<span class="string">"px-4 pt-3"</span>&gt;
+                &lt;span className={<span class="string">&#96;inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium
+                  ${route === 'hybrid' ? 'bg-purple-100 text-purple-800' :
+                    route === 'sql_only' ? 'bg-blue-100 text-blue-800' : 'bg-green-100 text-green-800'}&#96;</span>}&gt;
+                    {route === <span class="string">'hybrid'</span> ? <span class="string">'SQL + Documents'</span> : route === <span class="string">'sql_only'</span> ? <span class="string">'Structured Data'</span> : <span class="string">'Document Search'</span>}
+                &lt;/span&gt;
+            &lt;/div&gt;
+
+            &lt;div className=<span class="string">"flex gap-1 px-4 pt-3 border-b"</span>&gt;
+                {tabs.filter(t =&gt; t.available).map(tab =&gt; (
+                    &lt;button
+                        key={tab.id}
+                        onClick={() =&gt; setActiveTab(tab.id)}
+                        className={<span class="string">&#96;px-4 py-2 text-sm font-medium rounded-t-lg transition-colors
+                          ${activeTab === tab.id
+                            ? 'bg-gray-100 text-gray-900 border-b-2 border-blue-600'
+                            : 'text-gray-500 hover:text-gray-700'}&#96;</span>}
+                    &gt;
+                        {tab.label}
+                    &lt;/button&gt;
+                ))}
+            &lt;/div&gt;
+
+            &lt;AnimatePresence mode=<span class="string">"wait"</span>&gt;
+                &lt;motion.div
+                    key={activeTab}
+                    initial={{ opacity: <span class="number">0</span>, y: <span class="number">10</span> }}
+                    animate={{ opacity: <span class="number">1</span>, y: <span class="number">0</span> }}
+                    exit={{ opacity: <span class="number">0</span>, y: <span class="number">-10</span> }}
+                    className=<span class="string">"p-4"</span>
+                &gt;
+                    {activeTab === <span class="string">'answer'</span> &amp;&amp; (
+                        &lt;div className=<span class="string">"prose prose-sm max-w-none"</span> dangerouslySetInnerHTML={{ __html: answer }} /&gt;
+                    )}
+
+                    {activeTab === <span class="string">'sql'</span> &amp;&amp; sqlQuery &amp;&amp; (
+                        &lt;div className=<span class="string">"space-y-4"</span>&gt;
+                            &lt;div&gt;
+                                &lt;h4 className=<span class="string">"text-xs font-mono text-gray-500 mb-1"</span>&gt;Generated SQL&lt;/h4&gt;
+                                &lt;pre className=<span class="string">"bg-gray-900 text-green-400 p-3 rounded-lg text-sm overflow-x-auto"</span>&gt;
+                                    {sqlQuery}
+                                &lt;/pre&gt;
+                            &lt;/div&gt;
+                            {sqlRows &amp;&amp; (
+                                &lt;div className=<span class="string">"overflow-x-auto"</span>&gt;
+                                    &lt;table className=<span class="string">"min-w-full divide-y divide-gray-200 text-sm"</span>&gt;
+                                        &lt;thead className=<span class="string">"bg-gray-50"</span>&gt;
+                                            &lt;tr&gt;
+                                                {Object.keys(sqlRows[<span class="number">0</span>] || {}).map(col =&gt; (
+                                                    &lt;th key={col} className=<span class="string">"px-3 py-2 text-left font-medium text-gray-600"</span>&gt;{col}&lt;/th&gt;
+                                                ))}
+                                            &lt;/tr&gt;
+                                        &lt;/thead&gt;
+                                        &lt;tbody className=<span class="string">"divide-y divide-gray-100"</span>&gt;
+                                            {sqlRows.map((row, i) =&gt; (
+                                                &lt;tr key={i} className=<span class="string">"hover:bg-gray-50"</span>&gt;
+                                                    {Object.values(row).map((val, j) =&gt; (
+                                                        &lt;td key={j} className=<span class="string">"px-3 py-2 text-gray-800"</span>&gt;{String(val)}&lt;/td&gt;
+                                                    ))}
+                                                &lt;/tr&gt;
+                                            ))}
+                                        &lt;/tbody&gt;
+                                    &lt;/table&gt;
+                                &lt;/div&gt;
+                            )}
+                        &lt;/div&gt;
+                    )}
+
+                    {activeTab === <span class="string">'sources'</span> &amp;&amp; ragSources &amp;&amp; (
+                        &lt;div className=<span class="string">"space-y-3"</span>&gt;
+                            {ragSources.map((source, i) =&gt; (
+                                &lt;div key={i} className=<span class="string">"flex gap-3 p-3 bg-gray-50 rounded-lg"</span>&gt;
+                                    &lt;div className=<span class="string">"flex-shrink-0 w-8 h-8 bg-blue-100 rounded-full flex items-center justify-center text-blue-600 text-xs font-bold"</span>&gt;
+                                        {i + <span class="number">1</span>}
+                                    &lt;/div&gt;
+                                    &lt;div&gt;
+                                        &lt;p className=<span class="string">"text-sm font-medium text-gray-900"</span>&gt;{source.file_name}&lt;/p&gt;
+                                        &lt;p className=<span class="string">"text-sm text-gray-600 mt-1"</span>&gt;{source.snippet}&lt;/p&gt;
+                                        &lt;span className=<span class="string">"text-xs text-gray-400"</span>&gt;Relevance: {Math.round(source.relevance_score * <span class="number">100</span>)}%&lt;/span&gt;
+                                    &lt;/div&gt;
+                                &lt;/div&gt;
+                            ))}
+                        &lt;/div&gt;
+                    )}
+                &lt;/motion.div&gt;
+            &lt;/AnimatePresence&gt;
+        &lt;/div&gt;
+    )
+}</code></pre>
+
+                <h3>Chat API Route with SSE Streaming</h3>
+
+                <pre><code><span class="comment">// app/api/chat/route.ts</span>
+<span class="keyword">import</span> { NextRequest } <span class="keyword">from</span> <span class="string">'next/server'</span>
+
+<span class="keyword">export async function</span> <span class="function">POST</span>(req: NextRequest) {
+    <span class="keyword">const</span> { message } = <span class="keyword">await</span> req.json()
+    <span class="keyword">const</span> tenantId = req.headers.get(<span class="string">'x-tenant-id'</span>)!
+
+    <span class="keyword">const</span> encoder = <span class="keyword">new</span> <span class="type">TextEncoder</span>()
+
+    <span class="keyword">const</span> stream = <span class="keyword">new</span> <span class="type">ReadableStream</span>({
+        <span class="keyword">async</span> start(controller) {
+            <span class="comment">// 1. Route the query</span>
+            controller.enqueue(encoder.encode(<span class="string">&#96;data: ${JSON.stringify({ type: 'status', content: 'Analyzing your question...' })}\n\n&#96;</span>))
+
+            <span class="keyword">const</span> routeResponse = <span class="keyword">await</span> invokeAgent(tenantId, <span class="string">'query_intelligence'</span>, {
+                action: <span class="string">'route'</span>,
+                question: message,
+            })
+
+            <span class="keyword">const</span> route = routeResponse.route
+            controller.enqueue(encoder.encode(<span class="string">&#96;data: ${JSON.stringify({ type: 'route', content: route })}\n\n&#96;</span>))
+
+            <span class="comment">// 2. Execute query path(s)</span>
+            <span class="keyword">if</span> (route === <span class="string">'sql_only'</span> || route === <span class="string">'hybrid'</span>) {
+                controller.enqueue(encoder.encode(<span class="string">&#96;data: ${JSON.stringify({ type: 'status', content: 'Querying your data...' })}\n\n&#96;</span>))
+            }
+            <span class="keyword">if</span> (route === <span class="string">'rag_only'</span> || route === <span class="string">'hybrid'</span>) {
+                controller.enqueue(encoder.encode(<span class="string">&#96;data: ${JSON.stringify({ type: 'status', content: 'Searching your documents...' })}\n\n&#96;</span>))
+            }
+
+            <span class="comment">// 3. Get full result</span>
+            <span class="keyword">const</span> result = <span class="keyword">await</span> invokeAgent(tenantId, <span class="string">'query_intelligence'</span>, {
+                action: <span class="string">'execute'</span>,
+                question: message,
+                route: route,
+            })
+
+            <span class="comment">// 4. Stream the response</span>
+            controller.enqueue(encoder.encode(<span class="string">&#96;data: ${JSON.stringify({ type: 'answer', content: result.answer })}\n\n&#96;</span>))
+
+            <span class="keyword">if</span> (result.sql_query) {
+                controller.enqueue(encoder.encode(<span class="string">&#96;data: ${JSON.stringify({ type: 'sql', query: result.sql_query, rows: result.sql_data })}\n\n&#96;</span>))
+            }
+
+            <span class="keyword">if</span> (result.rag_sources) {
+                controller.enqueue(encoder.encode(<span class="string">&#96;data: ${JSON.stringify({ type: 'sources', sources: result.rag_sources })}\n\n&#96;</span>))
+            }
+
+            controller.enqueue(encoder.encode(<span class="string">'data: [DONE]\n\n'</span>))
+            controller.close()
+        },
+    })
+
+    <span class="keyword">return</span> <span class="keyword">new</span> <span class="type">Response</span>(stream, {
+        headers: {
+            <span class="string">'Content-Type'</span>: <span class="string">'text/event-stream'</span>,
+            <span class="string">'Cache-Control'</span>: <span class="string">'no-cache'</span>,
+            <span class="string">'Connection'</span>: <span class="string">'keep-alive'</span>,
+        },
+    })
+}</code></pre>
+
+                <div class="card info">
+                    <strong>Progressive Display:</strong> The SSE stream allows the UI to show status updates ("Analyzing...", "Querying...") before the final answer arrives. Results are displayed progressively as each path completes, improving perceived performance.
+                </div>
+            </section>
+
+            <!-- SECTION 8 -->
+            <section id="section8">
+                <h2>8. SQL Safety, Guardrails & Observability</h2>
+                <p class="section-intro">
+                    Safety is paramount. Every generated SQL is validated, executed with timeouts, and logged for analysis. A comprehensive observability pipeline tracks query health and identifies improvement opportunities.
+                </p>
+
+                <h3>Multi-Layer Safety</h3>
+
+                <div class="card warning">
+                    <strong>SQL Injection Prevention:</strong>
+                    <ul style="margin: 0.5rem 0 0 0;">
+                        <li>sqlglot parsing and validation (AST analysis)</li>
+                        <li>Parameterized tenant_id (never string interpolation)</li>
+                        <li>RLS (Row Level Security) as defense-in-depth</li>
+                        <li>Only SELECT statements allowed</li>
+                    </ul>
+                </div>
+
+                <h3>Query Guardrails</h3>
+
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Guardrail</th>
+                            <th>Value</th>
+                            <th>Rationale</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr>
+                            <td>Execution Timeout</td>
+                            <td>5 seconds</td>
+                            <td>Prevents runaway queries from consuming resources</td>
+                        </tr>
+                        <tr>
+                            <td>Result Row Limit</td>
+                            <td>100 (aggregate queries exempt)</td>
+                            <td>Prevents network transfer of massive datasets</td>
+                        </tr>
+                        <tr>
+                            <td>Tenant Filter</td>
+                            <td>Required</td>
+                            <td>Multi-tenant isolation, prevents data leakage</td>
+                        </tr>
+                        <tr>
+                            <td>Allowed Statements</td>
+                            <td>SELECT only</td>
+                            <td>No DDL/DML, read-only access</td>
+                        </tr>
+                    </tbody>
+                </table>
+
+                <h3>Safe Execution with Error Recovery</h3>
+
+                <pre><code><span class="keyword">async def</span> <span class="function">safe_execute_sql</span>(sql: str, tenant_id: str, timeout_ms: int = <span class="number">5000</span>) -> dict:
+    <span class="keyword">try</span>:
+        <span class="comment"># Validate SQL</span>
+        validated_sql = validate_sql(sql, tenant_id)
+
+        <span class="comment"># Execute with timeout</span>
+        <span class="keyword">async with</span> db.connection() <span class="keyword">as</span> conn:
+            <span class="keyword">await</span> conn.execute(<span class="string">"SET app.current_tenant = :tid"</span>, {<span class="string">"tid"</span>: tenant_id})
+            <span class="keyword">await</span> conn.execute(<span class="string">f"SET statement_timeout = {timeout_ms}"</span>)
+
+            start = time.monotonic()
+            rows = <span class="keyword">await</span> conn.fetch_all(validated_sql, {<span class="string">"tenant_id"</span>: tenant_id})
+            execution_time = time.monotonic() - start
+
+            <span class="comment"># Log for observability</span>
+            <span class="keyword">await</span> log_query_execution(
+                tenant_id=tenant_id,
+                sql=validated_sql,
+                execution_time_ms=execution_time * <span class="number">1000</span>,
+                row_count=len(rows),
+                status=<span class="string">"success"</span>,
+            )
+
+            <span class="keyword">return</span> {
+                <span class="string">"rows"</span>: [<span class="keyword">dict</span>(r) <span class="keyword">for</span> r <span class="keyword">in</span> rows],
+                <span class="string">"sql"</span>: validated_sql,
+                <span class="string">"execution_time_ms"</span>: execution_time * <span class="number">1000</span>
+            }
+
+    <span class="keyword">except</span> asyncio.TimeoutError:
+        <span class="keyword">await</span> log_query_execution(tenant_id=tenant_id, sql=sql, status=<span class="string">"timeout"</span>)
+        <span class="keyword">return</span> {<span class="string">"error"</span>: <span class="string">"Query took too long. Try a more specific question."</span>, <span class="string">"sql"</span>: sql}
+
+    <span class="keyword">except</span> SQLValidationError <span class="keyword">as</span> e:
+        <span class="keyword">await</span> log_query_execution(tenant_id=tenant_id, sql=sql, status=<span class="string">"validation_error"</span>, error=<span class="keyword">str</span>(e))
+        <span class="keyword">return</span> {<span class="string">"error"</span>: <span class="string">f"Query validation failed: {e}"</span>, <span class="string">"sql"</span>: sql}
+
+    <span class="keyword">except</span> Exception <span class="keyword">as</span> e:
+        <span class="keyword">await</span> log_query_execution(tenant_id=tenant_id, sql=sql, status=<span class="string">"error"</span>, error=<span class="keyword">str</span>(e))
+        <span class="keyword">return</span> {<span class="string">"error"</span>: <span class="string">"Query execution failed. Falling back to document search."</span>, <span class="string">"sql"</span>: sql}</code></pre>
+
+                <h3>Caching Layer</h3>
+
+                <pre><code><span class="keyword">import</span> hashlib
+
+<span class="keyword">async def</span> <span class="function">cached_sql_execute</span>(sql: str, tenant_id: str, cache_ttl: int = <span class="number">300</span>) -> dict:
+    <span class="string">"""Cache SQL results in Redis for 5 minutes."""</span>
+    cache_key = <span class="string">f"sql:{tenant_id}:{hashlib.sha256(sql.encode()).hexdigest()}"</span>
+
+    <span class="comment"># Check cache</span>
+    cached = <span class="keyword">await</span> redis.get(cache_key)
+    <span class="keyword">if</span> cached:
+        <span class="keyword">return</span> json.loads(cached)
+
+    <span class="comment"># Execute</span>
+    result = <span class="keyword">await</span> safe_execute_sql(sql, tenant_id)
+
+    <span class="comment"># Cache successful results</span>
+    <span class="keyword">if</span> <span class="string">"error"</span> <span class="keyword">not</span> <span class="keyword">in</span> result:
+        <span class="keyword">await</span> redis.setex(cache_key, cache_ttl, json.dumps(result, default=<span class="keyword">str</span>))
+
+    <span class="keyword">return</span> result</code></pre>
+
+                <h3>Observability & Feedback Loop</h3>
+
+                <p>
+                    Every query is logged with:
+                </p>
+
+                <ul>
+                    <li><strong>Question & Context:</strong> The original user question, tenant, timestamp</li>
+                    <li><strong>Routing Decision:</strong> Which route was chosen and why</li>
+                    <li><strong>SQL Generated:</strong> The full SQL statement (for SQL paths)</li>
+                    <li><strong>Execution Metrics:</strong> Time (ms), row count, success/failure</li>
+                    <li><strong>User Feedback:</strong> If user flags a result as incorrect</li>
+                </ul>
+
+                <p>
+                    This data flows to BigQuery and powers a Query Analytics Dashboard:
+                </p>
+
+                <ul>
+                    <li>Most-asked questions by vertical and tenant</li>
+                    <li>Route distribution (what % of queries are hybrid?)</li>
+                    <li>SQL generation failure rate and common patterns</li>
+                    <li>Average execution time by question type</li>
+                    <li>User feedback trends — where is the system wrong?</li>
+                </ul>
+
+                <div class="card success">
+                    <strong>Continuous Improvement:</strong> The observability pipeline creates a feedback loop. High-failure SQL patterns inform schema updates; frequent questions inform template suggestions; user feedback drives prompt improvements.
+                </div>
+            </section>
+
+            <!-- SECTION 9 -->
+            <section id="section9">
+                <h2>9. Progressive Enhancement — Suggested Questions & Auto-Charts</h2>
+                <p class="section-intro">
+                    Beyond answering user questions, the system proactively guides users toward useful queries and automatically visualizes results. This reduces friction and discovery.
+                </p>
+
+                <h3>Suggested Questions</h3>
+
+                <pre><code><span class="keyword">async def</span> <span class="function">generate_suggested_questions</span>(tenant_id: str) -> list[dict]:
+    <span class="string">"""Generate contextual suggestions based on tenant's data model."""</span>
+    schema_desc = <span class="keyword">await</span> get_tenant_schema_description(tenant_id)
+    doc_count = <span class="keyword">await</span> get_tenant_document_counts(tenant_id)
+
+    response = <span class="keyword">await</span> client.aio.models.generate_content(
+        model=<span class="string">"gemini-3-flash"</span>,
+        contents=<span class="string">f"""Based on this data and document counts, suggest 8 useful questions
+a business user might ask. Mix SQL-answerable and RAG-answerable questions.
+
+{schema_desc}
+
+Document counts: {json.dumps(doc_count)}
+
+Return as JSON array of objects with 'question', 'route' (sql/rag/hybrid), and 'category' fields."""</span>,
+        config=types.GenerateContentConfig(
+            response_mime_type=<span class="string">"application/json"</span>,
+        ),
+    )
+
+    <span class="keyword">return</span> json.loads(response.text)</code></pre>
+
+                <p>
+                    The chat interface displays suggested questions as clickable chips. When a user selects one, it submits the question and displays the answer. This reduces blank-page syndrome and helps users understand the system's capabilities.
+                </p>
+
+                <h3>Auto-Chart Detection</h3>
+
+                <pre><code><span class="keyword">def</span> <span class="function">suggest_visualization</span>(columns: list[str], rows: list[dict]) -> dict | None:
+    <span class="string">"""Analyze SQL results and suggest appropriate visualization."""</span>
+    <span class="keyword">if</span> <span class="keyword">not</span> rows <span class="keyword">or</span> len(rows) &lt; <span class="number">2</span>:
+        <span class="keyword">return</span> None
+
+    numeric_cols = [c <span class="keyword">for</span> c <span class="keyword">in</span> columns <span class="keyword">if</span> <span class="keyword">isinstance</span>(rows[<span class="number">0</span>].get(c), (int, float))]
+    text_cols = [c <span class="keyword">for</span> c <span class="keyword">in</span> columns <span class="keyword">if</span> <span class="keyword">isinstance</span>(rows[<span class="number">0</span>].get(c), str)]
+    date_cols = [c <span class="keyword">for</span> c <span class="keyword">in</span> columns <span class="keyword">if</span> <span class="string">'date'</span> <span class="keyword">in</span> c.lower() <span class="keyword">or</span> <span class="string">'month'</span> <span class="keyword">in</span> c.lower()]
+
+    <span class="comment"># Time series</span>
+    <span class="keyword">if</span> date_cols <span class="keyword">and</span> numeric_cols:
+        <span class="keyword">return</span> {
+            <span class="string">"type"</span>: <span class="string">"line"</span>,
+            <span class="string">"x"</span>: date_cols[<span class="number">0</span>],
+            <span class="string">"y"</span>: numeric_cols[<span class="number">0</span>],
+            <span class="string">"title"</span>: <span class="string">f"{numeric_cols[0]} over time"</span>
+        }
+
+    <span class="comment"># Category comparison</span>
+    <span class="keyword">if</span> text_cols <span class="keyword">and</span> numeric_cols <span class="keyword">and</span> len(rows) &lt;= <span class="number">20</span>:
+        <span class="keyword">return</span> {
+            <span class="string">"type"</span>: <span class="string">"bar"</span>,
+            <span class="string">"x"</span>: text_cols[<span class="number">0</span>],
+            <span class="string">"y"</span>: numeric_cols[<span class="number">0</span>],
+            <span class="string">"title"</span>: <span class="string">f"{numeric_cols[0]} by {text_cols[0]}"</span>
+        }
+
+    <span class="comment"># Distribution</span>
+    <span class="keyword">if</span> len(numeric_cols) >= <span class="number">1</span> <span class="keyword">and</span> <span class="keyword">not</span> text_cols:
+        <span class="keyword">return</span> {
+            <span class="string">"type"</span>: <span class="string">"histogram"</span>,
+            <span class="string">"x"</span>: numeric_cols[<span class="number">0</span>],
+            <span class="string">"title"</span>: <span class="string">f"Distribution of {numeric_cols[0]}"</span>
+        }
+
+    <span class="keyword">return</span> None</code></pre>
+
+                <p>
+                    When SQL results are displayed, the system analyzes the column types and row count to suggest an appropriate visualization. For time-series data, it offers a line chart; for category comparisons, a bar chart; for distributions, a histogram. Users can toggle between table and chart views.
+                </p>
+
+                <div class="card success">
+                    <strong>User Empowerment:</strong> Suggested questions and auto-charts remove friction. New users learn by example; power users can quickly visualize their data. The system feels helpful, not frustrating.
+                </div>
+            </section>
+
+            <!-- CONCLUSION -->
+            <section>
+                <h2>Deployment & Rollout</h2>
+                <p class="section-intro">
+                    The Hybrid Query Intelligence layer is deployed as a new DeepAgent that integrates seamlessly with the existing orchestrator. Rollout follows these phases:
+                </p>
+
+                <h3>Phase 1: Internal Testing (Week 1-2)</h3>
+                <ul>
+                    <li>Deploy Query Intelligence agent to staging</li>
+                    <li>Internal team tests across all verticals (food, recruitment, retail, real estate)</li>
+                    <li>Validate SQL generation, RAG retrieval, and synthesis</li>
+                    <li>Collect observability data on failure patterns</li>
+                </ul>
+
+                <h3>Phase 2: Early Adopter Tenants (Week 3-4)</h3>
+                <ul>
+                    <li>Enable feature flag for 3-5 pilot customers per vertical</li>
+                    <li>Monitor query success rates, execution times, and user feedback</li>
+                    <li>Gather telemetry on routing decisions and common questions</li>
+                    <li>Iterate on SQL generation prompts based on failures</li>
+                </ul>
+
+                <h3>Phase 3: General Availability (Week 5+)</h3>
+                <ul>
+                    <li>Enable for all tenants with feature flag defaults to ON</li>
+                    <li>Maintain observability dashboard and feedback loop</li>
+                    <li>Continuously improve based on query analytics</li>
+                </ul>
+
+                <div class="card info">
+                    <strong>Success Metrics:</strong> Query success rate > 90%, average latency < 3s, user satisfaction > 4.5/5, hybrid route usage > 20% of queries. These metrics guide iteration and inform prioritization of improvements.
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <footer>
+        <p>Biz2Bricks Hybrid Query Intelligence Architecture Addendum</p>
+        <p>Last updated: February 2025 | For VP Engineering & Technical Leadership</p>
+    </footer>
+</body>
+</html>
