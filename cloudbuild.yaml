@@ -7,9 +7,23 @@
 #   - develop branch → dev environment
 #   - master branch → prod environment
 #
-# Manual deployment:
+# Manual deployment (development):
 #   gcloud builds submit --config cloudbuild.yaml
+#
+# !! DO NOT USE THE PROD COMMAND BELOW AS WRITTEN !!
 #   gcloud builds submit --config cloudbuild.yaml --substitutions=_ENV=prod,_SECRET_SUFFIX=-prod
+#
+# It overrides only _ENV and _SECRET_SUFFIX. _SERVICE_NAME, _CLOUD_SQL_INSTANCE
+# and _GCS_BUCKET all still default to DEVELOPMENT values, so that command
+# reads -prod secrets while writing to the dev database and dev bucket, under a
+# service still named "...-ai-api-dev". A production deploy must override every
+# environment-specific substitution explicitly:
+#
+#   gcloud builds submit --config cloudbuild.yaml --substitutions=\
+#     _ENV=prod,_SECRET_SUFFIX=-prod,\
+#     _SERVICE_NAME=document-intelligence-ai-api,\
+#     _CLOUD_SQL_INSTANCE=<PROD_PROJECT>:<REGION>:<PROD_INSTANCE>,\
+#     _GCS_BUCKET=<PROD_BUCKET>,_LOG_LEVEL=INFO
 #
 # Timeline: ~5-7 minutes
 # =============================================================================
@@ -83,7 +97,7 @@ steps:
           --region=${_REGION} \
           --platform=managed \
           --allow-unauthenticated \
-          --service-account=${_RUNTIME_SA} \
+          --service-account=${_RUNTIME_SA_NAME}@$PROJECT_ID.iam.gserviceaccount.com \
           --memory=${_MEMORY} \
           --cpu=${_CPU} \
           --min-instances=${_MIN_INSTANCES} \
@@ -139,10 +153,14 @@ substitutions:
   _REGION: 'us-central1'
   _SERVICE_NAME: 'document-intelligence-ai-api-dev'
   _SECRET_SUFFIX: ''  # Empty for dev, '-prod' for production
-  # Runtime identity. Without this Cloud Run uses the default compute SA,
-  # which carries roles/run.admin and roles/storage.admin -- far broader
-  # than a running service needs.
-  _RUNTIME_SA: 'document-intelligence-api-sa@biz2bricks-dev-v1.iam.gserviceaccount.com'
+  # Runtime identity, NAME ONLY -- the deploy step appends @$PROJECT_ID so the
+  # account always resolves within the project the build is running in. Do not
+  # put a full email here: this config is also used for prod via
+  # --substitutions=_ENV=prod, and a hardcoded project would silently run the
+  # production service under another environment's service account.
+  # Without --service-account at all, Cloud Run falls back to the default
+  # compute SA, which carries roles/run.admin and roles/storage.admin.
+  _RUNTIME_SA_NAME: 'document-intelligence-api-sa'
 
   # Resource limits
   _MEMORY: '2Gi'
