@@ -1,0 +1,27 @@
+# Explicit upload exclusions for `gcloud builds submit`.
+#
+# Without this file gcloud falls back to .gitignore semantics, but only while
+# the directory is a git repo. This file makes the exclusion unconditional --
+# .env here holds live OpenAI, Google and LlamaCloud API keys, and source
+# uploaded to Cloud Build lands in a GCS bucket.
+
+.gcloudignore
+.git
+.gitignore
+
+# Secrets -- never upload.
+# Use .env* (no dot) so underscore variants are caught too: .env_dev holds live
+# API keys and is matched by neither `.env` nor `.env.*`.
+.env*
+*.key
+*-key.json
+service-account*.json
+
+# Local noise
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+.DS_Store
+docs/

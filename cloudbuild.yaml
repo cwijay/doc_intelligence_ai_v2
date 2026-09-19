@@ -15,8 +15,9 @@
 # =============================================================================
 
 options:
-  machineType: 'E2_HIGHCPU_8'
-  diskSizeGb: 100
+  # No machineType: naming one opts the build OUT of the 2,500 free
+  # build-minutes/month, which only apply to the default pool's default
+  # machine type. diskSizeGb likewise omitted to take the default.
   logging: CLOUD_LOGGING_ONLY
   substitutionOption: 'ALLOW_LOOSE'
 
@@ -56,8 +57,6 @@ steps:
       - '${_REGION}-docker.pkg.dev/$PROJECT_ID/document-intelligence/ai-api:$BUILD_ID'
       - '-t'
       - '${_REGION}-docker.pkg.dev/$PROJECT_ID/document-intelligence/ai-api:${_ENV}-latest'
-      - '-t'
-      - '${_REGION}-docker.pkg.dev/$PROJECT_ID/document-intelligence/ai-api:latest'
       - '.'
     waitFor: ['run-tests']
 
@@ -84,6 +83,7 @@ steps:
           --region=${_REGION} \
           --platform=managed \
           --allow-unauthenticated \
+          --service-account=${_RUNTIME_SA} \
           --memory=${_MEMORY} \
           --cpu=${_CPU} \
           --min-instances=${_MIN_INSTANCES} \
@@ -139,6 +139,10 @@ substitutions:
   _REGION: 'us-central1'
   _SERVICE_NAME: 'document-intelligence-ai-api-dev'
   _SECRET_SUFFIX: ''  # Empty for dev, '-prod' for production
+  # Runtime identity. Without this Cloud Run uses the default compute SA,
+  # which carries roles/run.admin and roles/storage.admin -- far broader
+  # than a running service needs.
+  _RUNTIME_SA: 'document-intelligence-api-sa@biz2bricks-dev-v1.iam.gserviceaccount.com'
 
   # Resource limits
   _MEMORY: '2Gi'
@@ -162,7 +166,6 @@ substitutions:
 images:
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/document-intelligence/ai-api:$BUILD_ID'
   - '${_REGION}-docker.pkg.dev/$PROJECT_ID/document-intelligence/ai-api:${_ENV}-latest'
-  - '${_REGION}-docker.pkg.dev/$PROJECT_ID/document-intelligence/ai-api:latest'
 
 # Tags for build organization
 tags:
